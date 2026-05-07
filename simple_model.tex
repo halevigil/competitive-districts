@@ -1,0 +1,208 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true, urlcolor=blue, linkcolor=black}
+
+\title{Competitive Districts (Simplified Applet): Technical Reference}
+\author{}
+\date{}
+
+\newcommand{\op}[1]{\operatorname{#1}}
+\newcommand{\eps}{\varepsilon}
+\newcommand{\R}{\mathbb{R}}
+
+\begin{document}
+\maketitle
+
+This document is the source of truth for the model implemented in
+\texttt{simple.html}. The applet exposes seven plain-English knobs to the
+user; each maps onto a subset of the underlying parameters described below.
+All ideology / partisanship quantities are in \emph{percentage points}.
+
+\section{Model setup}
+
+The chamber consists of $2m+1$ districts indexed by
+$i \in \{0, 1, \ldots, 2m\}$, ordered from most Democratic to most Republican
+by their relative partisanship $d_i \in [-100, 100]$.
+$d_i = 0$ corresponds to a tied (50--50) district.
+
+\subsection{District partisanship distribution}
+
+Districts are placed \emph{deterministically} at the quantiles of a Gaussian
+$\mathcal{N}(\mu_{\text{district}}, \sigma_{\text{district}}^2)$ truncated to
+$(0, 100]$, with the negative half being the mirror image. Concretely, for
+$i = 0, \ldots, m-1$:
+\[
+  q_i = \frac{i + \tfrac{1}{2}}{m},
+  \qquad
+  u_i = \Phi\!\left(\frac{-\mu_{\text{district}}}{\sigma_{\text{district}}}\right)
+        + q_i \left[
+          \Phi\!\left(\frac{100-\mu_{\text{district}}}{\sigma_{\text{district}}}\right)
+        - \Phi\!\left(\frac{-\mu_{\text{district}}}{\sigma_{\text{district}}}\right)
+        \right],
+\]
+\[
+  d_{m+1+i} \;=\; \mu_{\text{district}} + \sigma_{\text{district}} \, \Phi^{-1}(u_i),
+  \qquad
+  d_{m-1-i} \;=\; -d_{m+1+i},
+  \qquad d_m = 0.
+\]
+Here $\Phi$ is the standard normal CDF. The result is a smooth, symmetric,
+bimodal partisanship distribution, identical across simulation runs.
+
+\subsection{Candidate ideologies}
+
+For each district $i$ the two candidates' ideologies are sampled
+independently:
+\begin{align}
+  c^D_i &= \beta^D_{\text{swing}} \log\!\frac{100}{|d_i|}
+         + \beta^D_{\text{compet}} \log\!\frac{100}{|d_i + v|}
+         + \eps^D_i,
+         &\eps^D_i &\sim \mathcal{N}(\mu^D, \sigma_D^2),
+  \\
+  c^R_i &= -\beta^R_{\text{swing}} \log\!\frac{100}{|d_i|}
+         - \beta^R_{\text{compet}} \log\!\frac{100}{|d_i + v|}
+         + \eps^R_i,
+         &\eps^R_i &\sim \mathcal{N}(\mu^R, \sigma_R^2).
+\end{align}
+$|d_i|$ is floored at $0.1$ before the logarithm to avoid blow-up at the median
+($d_m = 0$) district. Note that $\log(100/|d|)$ is large ($\approx 6.9$) for
+very competitive districts and $\approx 0$ for very safe ones, so positive
+$\beta$ pulls each party's candidate \emph{toward zero} (more moderate) in
+swingier districts. $v$ is the popular vote shift in percentage points (R--D).
+
+\subsection{Election outcome}
+
+Each district's winner is a Bernoulli draw with
+\[
+  P(\text{R wins district } i)
+  \;=\; \sigma\!\left(
+    \frac{v + d_i - w_{\text{mod}}\,(c^D_i + c^R_i)}{\sigma_{\text{noise}}}
+  \right),
+  \qquad
+  \sigma(x) = \frac{1}{1 + e^{-x}}.
+\]
+The realized rep ideology is $r_i = c^R_i$ if R wins, $r_i = c^D_i$ otherwise.
+$w_{\text{mod}}$ controls how strongly voters punish the more-extreme
+\emph{average} of the two candidates relative to district lean.
+
+\subsection{Median representative}
+
+After every district is decided, sort the elected reps by ideology and take
+the rank-$m$ value:
+\[
+  \tilde{r} \;=\; \op{sort}_{\text{asc}}(r_0, \ldots, r_{2m})_{[m]},
+  \qquad
+  P(\tilde{r}) \in \{D, R\}.
+\]
+The applet runs $N_{\text{sim}}$ such simulations and visualizes the
+empirical distributions of $\tilde{r}$ and of the per-district outcomes.
+
+\section{Fixed constants}
+
+The following are hard-coded in the simplified applet (not user-adjustable):
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+$m$ & $217$ \quad (so $2m+1 = 435$ districts) \\
+$N_{\text{sim}}$ & $1000$ \\
+$\mu_{\text{district}}$ & $20$ \\
+$\sigma_{\text{noise}}$ & $10$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{User-facing slider $\to$ parameter map}
+
+Each slider's numeric value $s$ feeds into one or more underlying parameters.
+
+\subsection*{Popular vote \% (R--D)}
+Direct map: $v \leftarrow s$, with $s \in [-20, 20]$, default $0$.
+
+\subsection*{District competitiveness}
+$\sigma_{\text{district}} \leftarrow s$, with $s \in [1, 15]$, default $10$.
+Smaller values concentrate districts near the safe-D and safe-R modes; larger
+values spread mass into the swing range.
+
+\subsection*{Democratic candidate ambient moderation}
+A single slider drives both $\sigma_D$ and $\mu^D$ via a linear coupling
+chosen so that ``more extreme on average $\Leftrightarrow$ lower variance'':
+\[
+  \sigma_D \;\leftarrow\; s,
+  \qquad
+  \mu^D \;\leftarrow\; -120 + 2 s,
+  \qquad s \in [5, 15], \text{ default } 10.
+\]
+At $s=5$: $(\mu^D, \sigma_D) = (-110, 5)$ -- D's are extreme on average and
+tightly clustered. At $s=15$: $(-90, 15)$ -- D's are slightly more moderate
+on average but more dispersed.
+
+\subsection*{Republican candidate ambient moderation}
+Mirror-symmetric:
+\[
+  \sigma_R \;\leftarrow\; s,
+  \qquad
+  \mu^R \;\leftarrow\; +120 - 2 s,
+  \qquad s \in [5, 15], \text{ default } 10.
+\]
+
+\subsection*{Democratic candidate intentional moderation}
+Single slider drives both $\beta^D$ coefficients at a $1{:}1$ ratio:
+\[
+  \beta^D_{\text{swing}} = \beta^D_{\text{compet}} \;\leftarrow\; s,
+  \qquad s \in [-5, 5], \text{ default } 1.
+\]
+Positive values make Democratic candidates moderate (drift toward $0$) in
+competitive districts.
+
+\subsection*{Republican candidate intentional moderation}
+\[
+  \beta^R_{\text{swing}} = \beta^R_{\text{compet}} \;\leftarrow\; s,
+  \qquad s \in [-5, 5], \text{ default } 1.
+\]
+
+\subsection*{Candidate quality importance}
+Direct map: $w_{\text{mod}} \leftarrow s$, with $s \in [-1, 2]$, default
+$0.5$. Larger $w_{\text{mod}}$ means voters punish the more-extreme average
+candidate more heavily relative to district lean.
+
+\section{Symmetry}
+
+At $v = 0$ with $\mu^R = -\mu^D$, $\sigma_R = \sigma_D$, $\beta^R = \beta^D$,
+the model is exactly symmetric under the joint relabeling
+$(D \leftrightarrow R,\; d \to -d,\; r \to -r)$, so the empirical distribution
+of $\tilde{r}$ is symmetric around $0$ and $\Pr[P(\tilde{r}) = R] = \tfrac{1}{2}$.
+
+\section{Change log}
+
+\begin{itemize}
+  \item \textbf{Initial simplified model.} Seven user-facing knobs; numeric
+        readouts hidden for all sliders except popular vote; district
+        partisanships placed deterministically at truncated-Gaussian quantiles;
+        ambient-moderation sliders use the gentle linear coupling
+        $\mu^{D/R} = \mp(120 - 2 s)$ on $s \in [5, 15]$.
+  \item \textbf{Symbol-free chart and stats labels.} The applet UI no longer
+        references $\tilde r$ or $d$ directly: chart titles, axis labels,
+        hover templates, and stats card all use plain English (``ideology'',
+        ``district partisanship'', ``median representative''). The percent
+        sign is kept on district-partisanship axes (it is a meaningful unit:
+        Republican vote share minus Democratic vote share, in percentage
+        points), and is dropped from ideology axes (the ideology scale has no
+        natural percent interpretation to a non-modeler). Internally the
+        simulator continues to operate on the same dimensionless quantities
+        described in the body of this document.
+  \item \textbf{Chart layout polish.} Chart panels grew from 300 to 360 px
+        tall; bottom margins enlarged and legends pushed below the plot area
+        to prevent overlap with x-axis titles; the scatter chart's y-axis
+        title was shortened to ``Rep ideology'' (without a directional
+        suffix) since rotated text could not fit the long phrase at the
+        chart height.
+  \item \textbf{$N_{\text{sim}}$ raised from 400 to 1000.} Both the fixed
+        constant and every prose mention in the applet (subtitle, footnote)
+        were updated.
+\end{itemize}
+
+\end{document}

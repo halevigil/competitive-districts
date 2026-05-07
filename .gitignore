@@ -1,0 +1,10 @@
+.DS_Store
+.claude/
+*.aux
+*.log
+*.out
+*.synctex.gz
+*.toc
+*.fdb_latexmk
+*.fls
+node_modules/
