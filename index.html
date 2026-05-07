@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <title>Simplified Election Simulator</title>
 <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+<script src="config.js"></script>
 <style>
   :root {
     --bg: #fafafa;
@@ -145,6 +146,61 @@
   .pill.D { background: var(--d); }
   .charts { display: grid; grid-template-rows: 1fr 1fr 1fr; gap: 12px; }
   .footnote { font-size: 11px; color: var(--muted); margin-top: 8px; line-height: 1.4; }
+
+  /* "See more plots" collapsible section */
+  .morePlots { margin-top: 16px; }
+  .morePlots > summary {
+    cursor: pointer;
+    list-style: none;
+    padding: 12px 16px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--accent);
+  }
+  .morePlots > summary::-webkit-details-marker { display: none; }
+  .morePlots > summary::before {
+    content: "▸ ";
+    display: inline-block;
+    transition: transform 0.15s ease;
+    margin-right: 4px;
+    color: var(--muted);
+  }
+  .morePlots[open] > summary::before { transform: rotate(90deg); }
+  .morePlots[open] > summary { border-radius: 6px 6px 0 0; }
+  .morePlots .body {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 6px 6px;
+    padding: 16px;
+  }
+  .morePlots .toolbar {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 12px; font-size: 12px; color: var(--muted);
+  }
+  .morePlots button.refresh {
+    width: auto; margin: 0; padding: 4px 12px; font-size: 12px;
+  }
+  .chambersGrid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+  }
+  .chamberCell {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    width: 100%; height: 200px;
+  }
+  #morePlotsMismatchChart { width: 100%; height: 360px; margin-top: 16px; }
+  .morePlots h4 {
+    margin: 16px 0 6px 0; font-size: 13px; color: var(--accent);
+    text-transform: uppercase; letter-spacing: 0.04em;
+    border-bottom: 1px solid var(--border); padding-bottom: 4px;
+  }
 </style>
 </head>
 <body>
@@ -161,43 +217,43 @@
     <h3>Election Environment</h3>
     <div class="row">
       <label>Popular Vote: <span id="v_display" class="vote-display">Tied</span></label>
-      <input type="range" id="v" min="-15" max="15" step="0.5" value="0">
+      <input type="range" id="v">
       <span class="hint">Drag right for a Republican wave, left for a Democratic wave.</span>
     </div>
 
     <h3>District Map</h3>
     <div class="row">
       <label>District Competitiveness</label>
-      <input type="range" id="districtCompet" min="8" max="30" step="1" value="19">
+      <input type="range" id="districtCompet">
       <span class="hint">Lower → most districts strongly favor one party; higher → more swing districts in the middle.</span>
     </div>
 
     <h3>Candidates</h3>
     <div class="row">
       <label>Democratic Candidate Ambient Moderation</label>
-      <input type="range" id="dAmbMod" min="5" max="15" step="0.25" value="10">
+      <input type="range" id="dAmbMod">
       <span class="hint">Higher → Democratic candidates tend to be more moderate on average, and they vary more from district to district.</span>
     </div>
     <div class="row">
       <label>Republican Candidate Ambient Moderation</label>
-      <input type="range" id="rAmbMod" min="5" max="15" step="0.25" value="10">
+      <input type="range" id="rAmbMod">
       <span class="hint">Higher → Republican candidates tend to be more moderate on average, and they vary more from district to district.</span>
     </div>
     <div class="row">
       <label>Democratic Candidate Intentional Moderation</label>
-      <input type="range" id="dIntMod" min="0" max="4" step="0.05" value="2">
+      <input type="range" id="dIntMod">
       <span class="hint">Higher → Democrats deliberately run more moderate candidates in swing districts.</span>
     </div>
     <div class="row">
       <label>Republican Candidate Intentional Moderation</label>
-      <input type="range" id="rIntMod" min="0" max="4" step="0.05" value="2">
+      <input type="range" id="rIntMod">
       <span class="hint">Higher → Republicans deliberately run more moderate candidates in swing districts.</span>
     </div>
 
     <h3>Voters</h3>
     <div class="row">
       <label>Candidate Quality Importance</label>
-      <input type="range" id="qualImp" min="-0.2" max="1" step="0.01" value="0.4">
+      <input type="range" id="qualImp">
       <span class="hint">Higher → voters punish ideologically extreme candidates more heavily, relative to how partisan the district is.</span>
     </div>
 
@@ -217,19 +273,30 @@
       Middle: one example chamber — each district's partisanship vs the elected representative's ideology. The black star marks the median rep.<br>
       Bottom: histogram of district partisanship across the chamber.
     </div>
+
+    <details class="morePlots" id="morePlots">
+      <summary>See more plots</summary>
+      <div class="body">
+        <div class="toolbar">
+          <button class="refresh" id="morePlotsRefresh">Refresh</button>
+          <span>20 example chambers + mismatch distribution under the current sliders.</span>
+        </div>
+        <h4>20 Example Chambers</h4>
+        <div class="chambersGrid" id="chambersGrid"></div>
+        <h4>Mismatch Distribution by District Partisanship</h4>
+        <div id="morePlotsMismatchChart"></div>
+      </div>
+    </details>
   </div>
 </div>
 
 <script>
 // ============================================================================
 // FIXED CONSTANTS (not user-adjustable in the simplified applet)
+// Sourced from window.CONFIG (config.js) so the model can be retuned in
+// one place without editing this file.
 // ============================================================================
-const CONST = {
-  m: 217,            // → 435 districts
-  nsim: 1000,        // simulations per render
-  muDist: 30,        // mean of district partisanship distribution (right half)
-  sigmaN: 10,        // election noise σ
-};
+const CONST = window.CONFIG.constants;
 
 // ============================================================================
 // MATH HELPERS
@@ -317,13 +384,16 @@ function simulateOne(p, returnFull = false) {
   const rVals = new Float64Array(N);
   const partyVals = new Uint8Array(N);
 
+  let mismatches = 0;  // R in D-lean district, or D in R-lean district (di ≠ 0)
   for (let i = 0; i < N; i++) {
     const di = d[i];
     const absD = Math.abs(di);
     const absDV = Math.abs(di + p.v);
+    // Additive epsilon: log(100 / (|d| + ε)).  Smooth at d = 0 — no
+    // piecewise kink — and finite for any input.
     const EPS_PCT = 0.1;
-    const logInvD  = Math.log(100 / Math.max(absD,  EPS_PCT));
-    const logInvDV = Math.log(100 / Math.max(absDV, EPS_PCT));
+    const logInvD  = Math.log(100 / (absD  + EPS_PCT));
+    const logInvDV = Math.log(100 / (absDV + EPS_PCT));
     const cD =  p.bDs * logInvD + p.bDc * logInvDV + p.muD + p.sigmaD * randn();
     const cR = -p.bRs * logInvD - p.bRc * logInvDV + p.muR + p.sigmaR * randn();
     const z = (p.v + di - p.wMod * (cD + cR)) / p.sigmaN;
@@ -332,6 +402,7 @@ function simulateOne(p, returnFull = false) {
     const ri = isR ? cR : cD;
     rVals[i] = ri;
     partyVals[i] = isR;
+    if (di !== 0 && ((isR && di < 0) || (!isR && di > 0))) mismatches++;
     if (returnFull) { r[i] = ri; party[i] = isR ? 'R' : 'D'; }
   }
 
@@ -344,23 +415,25 @@ function simulateOne(p, returnFull = false) {
   let rSeats = 0;
   for (let i = 0; i < N; i++) if (partyVals[i]) rSeats++;
 
-  if (returnFull) return { d, r, party, medianIdeology, medianParty, medianIdx, rSeats };
-  return { medianIdeology, medianParty, rSeats };
+  if (returnFull) return { d, r, party, medianIdeology, medianParty, medianIdx, rSeats, mismatches };
+  return { medianIdeology, medianParty, rSeats, mismatches };
 }
 
 function runSimulations(p, n) {
   const meds = new Float64Array(n);
   const parties = new Uint8Array(n);
   const seats = new Int32Array(n);
+  const mismatches = new Int32Array(n);
   for (let s = 0; s < n; s++) {
     const out = simulateOne(p, false);
     meds[s] = out.medianIdeology;
     parties[s] = out.medianParty === 'R' ? 1 : 0;
     seats[s] = out.rSeats;
+    mismatches[s] = out.mismatches;
   }
   // Districts are deterministic, so a single realization suffices
   const districtPool = generateDistricts(p.m, p.muDist, p.sigmaDist);
-  return { meds, parties, seats, districtPool };
+  return { meds, parties, seats, mismatches, districtPool };
 }
 
 // ============================================================================
@@ -387,15 +460,16 @@ function readParams() {
     v: num('v'),
     muDist: CONST.muDist,
     sigmaDist: num('districtCompet'),
-    // Slider sweep s ∈ [5, 15] is used directly as σ; mean is coupled
-    // to σ with a +1 slope so higher variance pulls candidates a bit
-    // toward the centre.
-    //   s = 5  → μᴰ = -55, σᴰ = 5    (more extreme avg, lower variance)
-    //   s = 10 → μᴰ = -50, σᴰ = 10   (default)
-    //   s = 15 → μᴰ = -45, σᴰ = 15   (more moderate avg, higher variance)
-    muD: -60 + sD,
+    // The ambient-moderation slider value is used directly as σ; the
+    // candidate-ideology mean μ is anchored at `defaultMu` when σ is at
+    // its slider default, and moves with `slope` per unit of σ away
+    // from that default — so default-μ and default-σ can be edited
+    // independently in config.js.
+    muD: window.CONFIG.candidateMean.D.defaultMu
+       + window.CONFIG.candidateMean.D.slope * (sD - window.CONFIG.sliders.dAmbMod.value),
     sigmaD: sD,
-    muR:  60 - sR,
+    muR: window.CONFIG.candidateMean.R.defaultMu
+       + window.CONFIG.candidateMean.R.slope * (sR - window.CONFIG.sliders.rAmbMod.value),
     sigmaR: sR,
     bDs: bD, bDc: bD,     // 1:1 swing/compet ratio
     bRs: bR, bRc: bR,
@@ -416,14 +490,16 @@ function renderHistogram(meds, parties) {
   // outside that range — i.e. the 1st/99th percentile is past the bound.
   // This keeps the x-scale stable for typical sweeps but still shows the
   // full distribution when the user pushes the model into extreme regimes.
-  let lo = -50, hi = 50;
+  const histCfg = window.CONFIG.histograms.median;
+  let lo = histCfg.defaultRange[0], hi = histCfg.defaultRange[1];
+  const roundTo = histCfg.roundTo;
   const n = meds.length;
   if (n > 0) {
     const sorted = Array.from(meds).sort((a, b) => a - b);
     const loExt = sorted[Math.max(0, Math.floor(n * 0.01))];
     const hiExt = sorted[Math.min(n - 1, Math.ceil(n * 0.99) - 1)];
-    if (loExt < lo) lo = Math.floor(loExt / 10) * 10;       // round outward to nearest 10
-    if (hiExt > hi) hi = Math.ceil(hiExt / 10) * 10;
+    if (loExt < lo) lo = Math.floor(loExt / roundTo) * roundTo;
+    if (hiExt > hi) hi = Math.ceil(hiExt / roundTo) * roundTo;
   }
   const binSize = (hi - lo) / 40;
 
@@ -478,11 +554,30 @@ function renderScatter(sim) {
 }
 
 function renderDistrictHist(districtPool) {
+  // Bin manually so the hover can report the full bucket range (a Plotly
+  // histogram only exposes the bin centre to hovertemplate).
+  const binSize = window.CONFIG.histograms.district.binSize;
+  const lo = -100, hi = 100;
+  const nBins = Math.max(1, Math.round((hi - lo) / binSize));
+  const counts = new Array(nBins).fill(0);
+  for (const x of districtPool) {
+    const idx = Math.min(nBins - 1, Math.max(0, Math.floor((x - lo) / binSize)));
+    counts[idx]++;
+  }
+  const centres = new Array(nBins);
+  const ranges  = new Array(nBins);
+  for (let i = 0; i < nBins; i++) {
+    const a = lo + i * binSize;
+    const b = a + binSize;
+    centres[i] = (a + b) / 2;
+    ranges[i]  = [a, b];
+  }
   Plotly.react('districtHistChart', [{
-    x: districtPool, type: 'histogram', name: 'districts',
+    x: centres, y: counts, type: 'bar', name: 'districts',
     marker: { color: 'rgba(102, 102, 102, 0.75)', line: { width: 0 } },
-    nbinsx: 60,
-    hovertemplate: 'partisanship: %{x:.1f}%<br>count: %{y}<extra></extra>'
+    width: binSize,
+    customdata: ranges,
+    hovertemplate: 'partisanship: %{customdata[0]:.1f}% to %{customdata[1]:.1f}%<br>count: %{y}<extra></extra>'
   }], {
     title: { text: 'Distribution of District Partisanship Across the Chamber', font: { size: 14 } },
     xaxis: { title: { text: 'District Partisanship % &nbsp;&nbsp; (← Democratic · Republican →)', standoff: 6 }, ticksuffix: '%', zeroline: true, zerolinecolor: '#888' },
@@ -505,6 +600,8 @@ function renderStats(sims, p) {
   const N = 2 * p.m + 1;
   let totalSeats = 0; for (let i = 0; i < n; i++) totalSeats += sims.seats[i];
   const meanRShare = totalSeats / (n * N);
+  let totalMismatch = 0; for (let i = 0; i < n; i++) totalMismatch += sims.mismatches[i];
+  const meanMismatch = totalMismatch / n;
 
   const dPill = `<span class="pill D">D</span>`;
   const rPill = `<span class="pill R">R</span>`;
@@ -515,6 +612,8 @@ function renderStats(sims, p) {
       &nbsp;|&nbsp; when median is D: <span class="num">${cntD ? (sumD/cntD).toFixed(1) : '–'}</span>
       &nbsp;|&nbsp; when median is R: <span class="num">${cntR ? (sumR/cntR).toFixed(1) : '–'}</span></div>
     <div>Average Republican seat share: <span class="num">${(meanRShare*100).toFixed(1)}%</span></div>
+    <div>Average "mismatched" reps per chamber: <span class="num">${meanMismatch.toFixed(1)}</span>
+      <span style="color:var(--muted);font-size:11px">(R in D-lean districts or D in R-lean districts; ties at 0% excluded)</span></div>
   `;
 }
 
@@ -584,6 +683,17 @@ function updateVoteDisplay() {
 }
 
 function init() {
+  // Apply slider attributes (min/max/step/default) from CONFIG so the
+  // numbers in config.js are the single source of truth.
+  for (const [id, attrs] of Object.entries(window.CONFIG.sliders)) {
+    const r = document.getElementById(id);
+    if (!r) continue;
+    r.min = attrs.min;
+    r.max = attrs.max;
+    r.step = attrs.step;
+    r.value = attrs.value;
+    r.defaultValue = attrs.value;  // so resetDefaults() restores from CONFIG
+  }
   for (const id of sliderIds) {
     const range = document.getElementById(id);
     const span = document.getElementById(id + '_v'); // may be null
@@ -641,9 +751,130 @@ function init() {
   if (vRange) vRange.addEventListener('input', updateVoteDisplay);
   updateVoteDisplay();
   document.getElementById('reset').addEventListener('click', resetDefaults);
+
+  // "See more plots" — lazy-render on first open, refresh button regenerates
+  // under the current sliders.
+  const morePlots = document.getElementById('morePlots');
+  let morePlotsRendered = false;
+  morePlots.addEventListener('toggle', () => {
+    if (morePlots.open && !morePlotsRendered) {
+      morePlotsRendered = true;
+      renderMorePlots();
+    }
+  });
+  document.getElementById('morePlotsRefresh').addEventListener('click', renderMorePlots);
+
   run();
 }
 init();
+
+// ============================================================================
+// "SEE MORE PLOTS" — 20 example chambers + mismatch distribution
+// ============================================================================
+const N_PLOTS_MORE = 20;
+const N_SIM_FOR_MISMATCH = 500;
+
+function renderMorePlots() {
+  const params = readParams();
+  const grid = document.getElementById('chambersGrid');
+  grid.innerHTML = '';
+  for (let i = 0; i < N_PLOTS_MORE; i++) {
+    const cell = document.createElement('div');
+    cell.className = 'chamberCell';
+    cell.id = 'chamberCell_' + i;
+    grid.appendChild(cell);
+    renderExampleChamber(params, cell.id, i);
+  }
+  renderMismatchChart(params);
+}
+
+function renderExampleChamber(params, divId, idx) {
+  const result = simulateOne(params, true);
+  const xD = [], yD = [], xR = [], yR = [];
+  for (let j = 0; j < result.d.length; j++) {
+    if (result.party[j] === 'R') { xR.push(result.d[j]); yR.push(result.r[j]); }
+    else                         { xD.push(result.d[j]); yD.push(result.r[j]); }
+  }
+  Plotly.newPlot(divId, [
+    { x: xD, y: yD, mode: 'markers', name: 'D',
+      marker: { color: 'rgba(31,119,180,0.55)', size: 3 }, hoverinfo: 'skip' },
+    { x: xR, y: yR, mode: 'markers', name: 'R',
+      marker: { color: 'rgba(214,39,40,0.55)', size: 3 }, hoverinfo: 'skip' },
+    { x: [result.d[result.medianIdx]], y: [result.medianIdeology],
+      mode: 'markers',
+      marker: { color: '#000', size: 9, symbol: 'star',
+                line: { color: '#fff', width: 1 } },
+      hoverinfo: 'skip' }
+  ], {
+    margin: { l: 28, r: 6, t: 18, b: 22 },
+    showlegend: false,
+    title: { text: `#${idx + 1}`, font: { size: 11, color: '#666' }, x: 0.02, xanchor: 'left' },
+    xaxis: { range: [-100, 100], zeroline: true, zerolinecolor: '#aaa',
+             tickfont: { size: 8 }, ticksuffix: '%', tickvals: [-50, 0, 50] },
+    yaxis: { range: [-100, 100], zeroline: true, zerolinecolor: '#aaa',
+             tickfont: { size: 8 }, tickvals: [-50, 0, 50] },
+    plot_bgcolor: '#fff'
+  }, { displayModeBar: false, responsive: true });
+}
+
+function renderMismatchChart(params) {
+  const binSize = window.CONFIG.histograms.district.binSize;
+  const lo = -100, hi = 100;
+  const nBins = Math.max(1, Math.round((hi - lo) / binSize));
+  const rInD = new Array(nBins).fill(0);
+  const dInR = new Array(nBins).fill(0);
+
+  for (let s = 0; s < N_SIM_FOR_MISMATCH; s++) {
+    const sim = simulateOne(params, true);
+    for (let i = 0; i < sim.d.length; i++) {
+      const di = sim.d[i];
+      if (di === 0) continue;
+      const isR = sim.party[i] === 'R';
+      const mismatch = (isR && di < 0) || (!isR && di > 0);
+      if (!mismatch) continue;
+      const idx = Math.min(nBins - 1, Math.max(0, Math.floor((di - lo) / binSize)));
+      if (isR) rInD[idx]++;
+      else     dInR[idx]++;
+    }
+  }
+  const centres = new Array(nBins);
+  const ranges  = new Array(nBins);
+  for (let i = 0; i < nBins; i++) {
+    const a = lo + i * binSize;
+    const b = a + binSize;
+    centres[i] = (a + b) / 2;
+    ranges[i]  = [a, b];
+  }
+  const avgRInD = rInD.map(c => c / N_SIM_FOR_MISMATCH);
+  const avgDInR = dInR.map(c => c / N_SIM_FOR_MISMATCH);
+
+  Plotly.newPlot('morePlotsMismatchChart', [
+    { x: centres, y: avgRInD, type: 'bar', name: 'R wins D-lean district',
+      marker: { color: 'rgba(214,39,40,0.75)' },
+      width: binSize, customdata: ranges,
+      hovertemplate:
+        'partisanship: %{customdata[0]:.1f}% to %{customdata[1]:.1f}%<br>' +
+        'avg R wins: %{y:.3f}<extra></extra>' },
+    { x: centres, y: avgDInR, type: 'bar', name: 'D wins R-lean district',
+      marker: { color: 'rgba(31,119,180,0.75)' },
+      width: binSize, customdata: ranges,
+      hovertemplate:
+        'partisanship: %{customdata[0]:.1f}% to %{customdata[1]:.1f}%<br>' +
+        'avg D wins: %{y:.3f}<extra></extra>' },
+  ], {
+    title: { text:
+      `Avg Mismatches per Chamber by District Partisanship (${N_SIM_FOR_MISMATCH} sims)`,
+      font: { size: 13 } },
+    xaxis: {
+      title: { text: 'District Partisanship %  (← Democratic · Republican →)', standoff: 4 },
+      ticksuffix: '%', range: [-100, 100], zeroline: true, zerolinecolor: '#888'
+    },
+    yaxis: { title: 'Avg count per chamber' },
+    margin: { l: 60, r: 20, t: 50, b: 80 },
+    legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: -0.18, yanchor: 'top' },
+    bargap: 0.02
+  }, { displayModeBar: false, responsive: true });
+}
 </script>
 
 </body>
