@@ -49,22 +49,25 @@
     position: relative;
     flex: 1 1 auto;
     min-width: 0;
-    padding-bottom: 8px;
     display: flex;
     align-items: center;
   }
-  .slider-wrap input[type=range] { width: 100%; margin: 0; flex: 1 1 auto; }
+  .slider-wrap input[type=range] {
+    width: 100%; margin: 0; flex: 1 1 auto;
+    position: relative; z-index: 1;
+  }
   .slider-wrap::after {
     content: '';
     position: absolute;
     left: 50%;
-    bottom: 0;
-    transform: translateX(-50%);
-    width: 5px;
-    height: 5px;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 10px;
+    height: 10px;
     border-radius: 50%;
-    background: var(--accent);
+    background: #000;
     pointer-events: none;
+    z-index: 2;
   }
   .row .val {
     flex: 0 0 64px; font-family: "SF Mono", Menlo, monospace;
