@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Competitive Districts: Median Representative Simulator</title>
+<title>Competitive Districts (Simplified)</title>
 <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
 <style>
   :root {
@@ -22,8 +22,8 @@
   }
   h1 { margin: 0 0 4px 0; font-size: 20px; color: var(--accent); }
   .subtitle { color: var(--muted); font-size: 12px; margin-bottom: 12px; }
-  .container { display: grid; grid-template-columns: 360px minmax(0, 1fr); gap: 16px; }
-  @media (max-width: 880px) {
+  .container { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 16px; }
+  @media (max-width: 900px) {
     .container { grid-template-columns: 1fr; }
   }
   .panel {
@@ -42,9 +42,9 @@
     padding-bottom: 2px;
   }
   .controls h3:first-child { margin-top: 0; }
-  .row { display: flex; align-items: center; margin: 4px 0; gap: 6px; }
-  .row label { flex: 0 0 130px; font-size: 12px; font-family: "Times New Roman", serif; }
-  .row input[type=range] { flex: 1; min-width: 0; }
+  .row { display: flex; align-items: center; margin: 6px 0; gap: 8px; flex-wrap: wrap; }
+  .row label { flex: 1 1 100%; font-size: 12px; color: #333; }
+  .row input[type=range] { flex: 1 1 auto; min-width: 0; }
   .row .val {
     flex: 0 0 64px; font-family: "SF Mono", Menlo, monospace;
     font-size: 11px; text-align: right; color: #222;
@@ -55,6 +55,7 @@
   .row .val::-webkit-outer-spin-button,
   .row .val::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
   .row .val:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .row .hint { flex: 1 1 100%; font-size: 10px; color: var(--muted); margin-top: -2px; }
   button {
     background: var(--accent); color: white; border: 0;
     padding: 8px 16px; border-radius: 4px; cursor: pointer;
@@ -70,89 +71,102 @@
   .pill { display: inline-block; padding: 2px 8px; border-radius: 99px; color: white; font-size: 11px; font-weight: 600; }
   .pill.R { background: var(--r); }
   .pill.D { background: var(--d); }
-  .charts { display: grid; grid-template-rows: 1fr 1fr; gap: 12px; }
+  .charts { display: grid; grid-template-rows: 1fr 1fr 1fr; gap: 12px; }
   .footnote { font-size: 11px; color: var(--muted); margin-top: 8px; line-height: 1.4; }
-  details { font-size: 11px; color: var(--muted); margin-top: 6px; }
-  details summary { cursor: pointer; }
-  .formula { font-family: "Times New Roman", serif; font-size: 12px; padding: 4px 0; }
 </style>
 </head>
 <body>
 
-<h1>Competitive Districts: Median Representative Simulator</h1>
+<h1>Competitive Districts (Simplified)</h1>
 <div class="subtitle">
-  Monte Carlo simulation of <i>2m+1</i> districts with stochastic candidate ideology and election outcomes.
-  Adjust levers; the chamber distribution and median rep ideology re-render automatically.
+  A 435-seat chamber. Adjust the seven knobs and watch the median representative's ideology distribution change.
+  Values are in percentage points. Each simulation = 1000 election runs.
 </div>
 
 <div class="container">
   <!-- ============ CONTROLS ============ -->
   <div class="panel controls" id="controls">
-    <h3>Simulation</h3>
-    <div class="row"><label>m (districts = 2m+1)</label><input type="range" id="m" min="25" max="300" step="1" value="217"><span class="val" id="m_v"></span></div>
-    <div class="row"><label>N simulations</label><input type="range" id="nsim" min="50" max="2000" step="50" value="400"><span class="val" id="nsim_v"></span></div>
-    <div class="row"><label>v (popular vote, %)</label><input type="range" id="v" min="-20" max="20" step="0.5" value="0"><span class="val" id="v_v"></span></div>
+    <h3>Election environment</h3>
+    <div class="row">
+      <label>Popular vote % (R−D)</label>
+      <input type="range" id="v" min="-20" max="20" step="0.5" value="0">
+      <span class="val" id="v_v"></span>
+      <span class="hint">Negative = Democratic wave; positive = Republican wave.</span>
+    </div>
 
-    <h3>District distribution (%)</h3>
-    <div class="row"><label>μ<sub>district</sub></label><input type="range" id="muDist" min="0" max="60" step="1" value="15"><span class="val" id="muDist_v"></span></div>
-    <div class="row"><label>σ<sub>district</sub></label><input type="range" id="sigmaDist" min="1" max="15" step="0.5" value="10"><span class="val" id="sigmaDist_v"></span></div>
+    <h3>District map</h3>
+    <div class="row">
+      <label>District competitiveness</label>
+      <input type="range" id="districtCompet" min="1" max="15" step="0.5" value="10">
+      <span class="hint">Lower → most districts strongly favor one party; higher → more swing districts in the middle.</span>
+    </div>
 
-    <h3>Candidate noise (%)</h3>
-    <div class="row"><label>μ<sup>D</sup></label><input type="range" id="muD" min="-300" max="0" step="1" value="-100"><span class="val" id="muD_v"></span></div>
-    <div class="row"><label>σ<sup>D</sup></label><input type="range" id="sigmaD" min="1" max="100" step="1" value="10"><span class="val" id="sigmaD_v"></span></div>
-    <div class="row"><label>μ<sup>R</sup></label><input type="range" id="muR" min="0" max="300" step="1" value="100"><span class="val" id="muR_v"></span></div>
-    <div class="row"><label>σ<sup>R</sup></label><input type="range" id="sigmaR" min="1" max="100" step="1" value="10"><span class="val" id="sigmaR_v"></span></div>
+    <h3>Candidates</h3>
+    <div class="row">
+      <label>Democratic candidate ambient moderation</label>
+      <input type="range" id="dAmbMod" min="5" max="15" step="0.25" value="10">
+      <span class="hint">Higher → Democratic candidates tend to be slightly more moderate on average, but they vary more from district to district.</span>
+    </div>
+    <div class="row">
+      <label>Republican candidate ambient moderation</label>
+      <input type="range" id="rAmbMod" min="5" max="15" step="0.25" value="10">
+      <span class="hint">Higher → Republican candidates tend to be slightly more moderate on average, but they vary more from district to district.</span>
+    </div>
+    <div class="row">
+      <label>Democratic candidate intentional moderation</label>
+      <input type="range" id="dIntMod" min="-5" max="5" step="0.1" value="1">
+      <span class="hint">Higher → Democrats deliberately run more moderate candidates in swing districts.</span>
+    </div>
+    <div class="row">
+      <label>Republican candidate intentional moderation</label>
+      <input type="range" id="rIntMod" min="-5" max="5" step="0.1" value="1">
+      <span class="hint">Higher → Republicans deliberately run more moderate candidates in swing districts.</span>
+    </div>
 
-    <h3>Candidate β coefficients (%)</h3>
-    <div class="row"><label>β<sup>D</sup><sub>swing</sub></label><input type="range" id="bDs" min="-5" max="5" step="0.1" value="1"><span class="val" id="bDs_v"></span></div>
-    <div class="row"><label>β<sup>D</sup><sub>compet</sub></label><input type="range" id="bDc" min="-5" max="5" step="0.1" value="0"><span class="val" id="bDc_v"></span></div>
-    <div class="row"><label>β<sup>R</sup><sub>swing</sub></label><input type="range" id="bRs" min="-5" max="5" step="0.1" value="1"><span class="val" id="bRs_v"></span></div>
-    <div class="row"><label>β<sup>R</sup><sub>compet</sub></label><input type="range" id="bRc" min="-5" max="5" step="0.1" value="0"><span class="val" id="bRc_v"></span></div>
-
-    <h3>Election noise</h3>
-    <div class="row"><label>σ<sub>noise</sub> (%)</label><input type="range" id="sigmaN" min="1" max="99" step="1" value="10"><span class="val" id="sigmaN_v"></span></div>
-    <div class="row"><label>w<sub>mod</sub></label><input type="range" id="wMod" min="-1" max="2" step="0.01" value="0.50"><span class="val" id="wMod_v"></span></div>
+    <h3>Voters</h3>
+    <div class="row">
+      <label>Candidate quality importance</label>
+      <input type="range" id="qualImp" min="-1" max="2" step="0.01" value="0.50">
+      <span class="hint">Higher → voters punish ideologically extreme candidates more heavily, relative to how partisan the district is.</span>
+    </div>
 
     <button id="run">Re-run simulation</button>
     <div class="auto-row">
       <input type="checkbox" id="autoRun" checked>
-      <label for="autoRun">Auto-rerun on slider change</label>
+      <label for="autoRun">Auto-rerun on change</label>
     </div>
-
-    <details>
-      <summary>Model spec</summary>
-      <div class="formula">
-        <p>All partisanship / ideology quantities are in <b>percentage points</b>. Districts: m values drawn from N(μ<sub>district</sub>, σ<sub>district</sub>²) form the right half (clipped to [0, 100]); the left half is the negation, with d<sub>m</sub> = 0. Sum is exactly 0 by symmetry.</p>
-        <p>Candidates (log form, % units):<br>
-          c<sup>D</sup><sub>i</sub> = +β<sup>D</sup><sub>swing</sub> log(100/|d<sub>i</sub>|) + β<sup>D</sup><sub>compet</sub> log(100/|d<sub>i</sub>+v|) + ε,&nbsp; ε~N(μ<sup>D</sup>,σ<sup>D</sup>)<br>
-          c<sup>R</sup><sub>i</sub> = −β<sup>R</sup><sub>swing</sub> log(100/|d<sub>i</sub>|) − β<sup>R</sup><sub>compet</sub> log(100/|d<sub>i</sub>+v|) + ε,&nbsp; ε~N(μ<sup>R</sup>,σ<sup>R</sup>)
-        </p>
-        <p>log(100/|d|) is large (~6.9) when |d|→0 (very competitive district) and ≈0 when |d|→100 (very safe district). |d| is clipped to ≥0.1% for numerical stability. With β&gt;0 for both parties (the defaults), candidates <i>moderate</i> in competitive districts. The model is D↔R symmetric under d→−d, r→−r when μ<sup>R</sup> = −μ<sup>D</sup>, σ<sup>R</sup> = σ<sup>D</sup>, β<sup>R</sup> = β<sup>D</sup>, v = 0.</p>
-        <p style="font-size:11px;color:#999">Note: This is a pure unit change from the previous [-1,1] formulation — the simulation behavior is identical because both numerator and denominator inside the sigmoid scale by 100.</p>
-        <p>Winner: P(R) = σ((v + d<sub>i</sub> − w<sub>mod</sub>(c<sup>D</sup>+c<sup>R</sup>)) / σ<sub>noise</sub>)</p>
-        <p>Median rep r̃ = ideology of rep at sorted-by-ideology rank m.</p>
-      </div>
-    </details>
   </div>
 
   <!-- ============ CHARTS ============ -->
   <div>
     <div class="panel stats" id="stats">Running…</div>
     <div class="charts">
-      <div class="panel"><div id="histChart" style="width:100%;height:300px;"></div></div>
-      <div class="panel"><div id="scatterChart" style="width:100%;height:300px;"></div></div>
-      <div class="panel"><div id="districtHistChart" style="width:100%;height:300px;"></div></div>
+      <div class="panel"><div id="histChart" style="width:100%;height:360px;"></div></div>
+      <div class="panel"><div id="scatterChart" style="width:100%;height:360px;"></div></div>
+      <div class="panel"><div id="districtHistChart" style="width:100%;height:360px;"></div></div>
     </div>
     <div class="footnote">
-      Top: histogram of median rep ideology r̃ across simulations, colored by P(r̃) (blue = Democrat, red = Republican).<br>
-      Middle: a single example simulation showing each district's partisanship d<sub>i</sub> vs the elected rep's ideology r<sub>i</sub>, with the median highlighted.<br>
-      Bottom: histogram over <i>districts</i> (pooled across all simulations) of the realized district partisanship d<sub>i</sub>.
+      Top: histogram of the median representative's ideology across 1000 simulations, colored by party (blue = Democrat, red = Republican).<br>
+      Middle: one example chamber — each district's partisanship vs the elected representative's ideology. The black star marks the median rep.<br>
+      Bottom: histogram of district partisanship across the chamber.
     </div>
   </div>
 </div>
 
 <script>
-// ---------- math helpers ----------
+// ============================================================================
+// FIXED CONSTANTS (not user-adjustable in the simplified applet)
+// ============================================================================
+const CONST = {
+  m: 217,            // → 435 districts
+  nsim: 1000,        // simulations per render
+  muDist: 20,        // mean of district partisanship distribution (right half)
+  sigmaN: 10,        // election noise σ
+};
+
+// ============================================================================
+// MATH HELPERS
+// ============================================================================
 function randn() {
   let u = 0, v = 0;
   while (u === 0) u = Math.random();
@@ -164,11 +178,12 @@ function sigmoid(x) {
   const e = Math.exp(x); return e / (1 + e);
 }
 function clamp(x, lo, hi) { return Math.max(lo, Math.min(hi, x)); }
+function mean(a) { let s = 0; for (const x of a) s += x; return s / a.length; }
 
-// Standard normal CDF via erf approximation (Abramowitz & Stegun 7.1.26)
+// erf (Abramowitz & Stegun 7.1.26)
 function erf(x) {
-  const a1 =  0.254829592, a2 = -0.284496736, a3 =  1.421413741;
-  const a4 = -1.453152027, a5 =  1.061405429, pp =  0.3275911;
+  const a1=0.254829592, a2=-0.284496736, a3=1.421413741;
+  const a4=-1.453152027, a5=1.061405429, pp=0.3275911;
   const sign = x < 0 ? -1 : 1;
   const ax = Math.abs(x);
   const t = 1.0 / (1.0 + pp * ax);
@@ -177,7 +192,7 @@ function erf(x) {
 }
 function normCdf(z) { return 0.5 * (1 + erf(z / Math.SQRT2)); }
 
-// Inverse standard normal CDF (Acklam's algorithm)
+// Inverse standard normal CDF (Acklam)
 function probit(p) {
   if (p <= 0) return -Infinity;
   if (p >= 1) return Infinity;
@@ -201,68 +216,44 @@ function probit(p) {
     return -(((((c1*q+c2)*q+c3)*q+c4)*q+c5)*q+c6) / ((((d1*q+d2)*q+d3)*q+d4)*q+1);
   }
 }
-function mean(a) { let s = 0; for (const x of a) s += x; return s / a.length; }
-function quickselect(arr, k) {
-  // returns kth smallest in-place (0-indexed)
-  let lo = 0, hi = arr.length - 1;
-  while (lo < hi) {
-    let pivot = arr[(lo + hi) >> 1];
-    let i = lo, j = hi;
-    while (i <= j) {
-      while (arr[i] < pivot) i++;
-      while (arr[j] > pivot) j--;
-      if (i <= j) { [arr[i], arr[j]] = [arr[j], arr[i]]; i++; j--; }
-    }
-    if (k <= j) hi = j;
-    else if (k >= i) lo = i;
-    else break;
-  }
-  return arr[k];
-}
 
-// ---------- districts ----------
+// ============================================================================
+// DISTRICTS (deterministic, truncated-Gaussian quantile placement)
+// ============================================================================
 function generateDistricts(m, mu, sigma) {
-  // Deterministic placement at the quantiles of N(mu, sigma²) truncated to
-  // (0, 100]. The result is a smooth bimodal "bell curve" shape every run.
   const cdfLo = normCdf((0   - mu) / sigma);
   const cdfHi = normCdf((100 - mu) / sigma);
   const half = new Array(m);
   for (let i = 0; i < m; i++) {
-    const q = (i + 0.5) / m;                     // even quantile in (0, 1)
-    const u = cdfLo + q * (cdfHi - cdfLo);       // truncated-normal CDF level
+    const q = (i + 0.5) / m;
+    const u = cdfLo + q * (cdfHi - cdfLo);
     const z = probit(u);
-    half[i] = clamp(mu + sigma * z, 1e-6, 100);  // already in (0, 100] up to fp slop
+    half[i] = clamp(mu + sigma * z, 1e-6, 100);
   }
   half.sort((a, b) => a - b);
   const N = 2 * m + 1;
   const d = new Array(N);
-  for (let i = 0; i < m; i++) d[i] = -half[m - 1 - i]; // d[0] = most negative
+  for (let i = 0; i < m; i++) d[i] = -half[m - 1 - i];
   d[m] = 0;
   for (let i = 0; i < m; i++) d[m + 1 + i] = half[i];
   return d;
 }
 
-// ---------- one simulation ----------
+// ============================================================================
+// SIMULATION
+// ============================================================================
 function simulateOne(p, returnFull = false) {
   const d = generateDistricts(p.m, p.muDist, p.sigmaDist);
   const N = d.length;
   const r = returnFull ? new Float64Array(N) : null;
   const party = returnFull ? new Array(N) : null;
-  const cDArr = returnFull ? new Float64Array(N) : null;
-  const cRArr = returnFull ? new Float64Array(N) : null;
-
-  let medianIdeology = 0, medianParty = 'D';
-  // For median: collect all r values
   const rVals = new Float64Array(N);
-  const partyVals = new Uint8Array(N); // 1 = R, 0 = D
+  const partyVals = new Uint8Array(N);
 
   for (let i = 0; i < N; i++) {
     const di = d[i];
     const absD = Math.abs(di);
     const absDV = Math.abs(di + p.v);
-    // d, v are in percentage points (|d| ∈ [0, 100]); use log(100/|d|) so that
-    // log_term ∈ [0, ~6.9] just as in the original [-1,1] formulation.
-    // Floor |d| at 0.1 (= original 1e-3 × 100) for numerical stability at d ≈ 0.
     const EPS_PCT = 0.1;
     const logInvD  = Math.log(100 / Math.max(absD,  EPS_PCT));
     const logInvDV = Math.log(100 / Math.max(absDV, EPS_PCT));
@@ -274,183 +265,156 @@ function simulateOne(p, returnFull = false) {
     const ri = isR ? cR : cD;
     rVals[i] = ri;
     partyVals[i] = isR;
-    if (returnFull) {
-      r[i] = ri;
-      party[i] = isR ? 'R' : 'D';
-      cDArr[i] = cD;
-      cRArr[i] = cR;
-    }
+    if (returnFull) { r[i] = ri; party[i] = isR ? 'R' : 'D'; }
   }
 
-  // Find median by partial sort
-  // Build index array and sort by r
-  const idx = new Int32Array(N);
-  for (let i = 0; i < N; i++) idx[i] = i;
-  // Use Array sort because Int32Array sort doesn't take comparator with closure efficiently
-  const idxArr = Array.from(idx);
+  const idxArr = Array.from({ length: N }, (_, i) => i);
   idxArr.sort((a, b) => rVals[a] - rVals[b]);
-  const medianIdx = idxArr[(N - 1) >> 1]; // floor((N-1)/2) since N odd → N=2m+1, median rank m
-  medianIdeology = rVals[medianIdx];
-  medianParty = partyVals[medianIdx] ? 'R' : 'D';
+  const medianIdx = idxArr[(N - 1) >> 1];
+  const medianIdeology = rVals[medianIdx];
+  const medianParty = partyVals[medianIdx] ? 'R' : 'D';
 
-  // Count seats
   let rSeats = 0;
   for (let i = 0; i < N; i++) if (partyVals[i]) rSeats++;
 
-  if (returnFull) {
-    return { d, r, party, cD: cDArr, cR: cRArr, medianIdeology, medianParty, medianIdx, rSeats };
-  }
+  if (returnFull) return { d, r, party, medianIdeology, medianParty, medianIdx, rSeats };
   return { medianIdeology, medianParty, rSeats };
 }
 
-// ---------- run many sims ----------
 function runSimulations(p, n) {
   const meds = new Float64Array(n);
-  const parties = new Uint8Array(n); // 1=R
+  const parties = new Uint8Array(n);
   const seats = new Int32Array(n);
-  const N = 2 * p.m + 1;
-  // Pool all district partisanships across sims (subsample if huge)
-  const MAX_DISTRICTS = 200000;
-  const totalDistricts = n * N;
-  const keepProb = totalDistricts > MAX_DISTRICTS ? MAX_DISTRICTS / totalDistricts : 1;
-  const districtPool = [];
   for (let s = 0; s < n; s++) {
-    const out = simulateOne(p, true);
+    const out = simulateOne(p, false);
     meds[s] = out.medianIdeology;
     parties[s] = out.medianParty === 'R' ? 1 : 0;
     seats[s] = out.rSeats;
-    if (keepProb >= 1) {
-      for (let i = 0; i < N; i++) districtPool.push(out.d[i]);
-    } else {
-      for (let i = 0; i < N; i++) if (Math.random() < keepProb) districtPool.push(out.d[i]);
-    }
   }
+  // Districts are deterministic, so a single realization suffices
+  const districtPool = generateDistricts(p.m, p.muDist, p.sigmaDist);
   return { meds, parties, seats, districtPool };
 }
 
-// ---------- read params ----------
-const ids = ['m','nsim','v','muDist','sigmaDist','muD','sigmaD','muR','sigmaR',
-             'bDs','bDc','bRs','bRc','sigmaN','wMod'];
-// Number-input is the source of truth for each parameter; the range slider
-// mirrors it (clamped to the slider's min/max). Typing a value outside the
-// slider range is allowed — the slider just pegs to its endpoint.
+// ============================================================================
+// PARAM MAPPING — read user-facing knobs and expand into the full param set
+// ============================================================================
+const sliderIds = ['v', 'districtCompet', 'dAmbMod', 'rAmbMod', 'dIntMod', 'rIntMod', 'qualImp'];
+
 function readParams() {
-  const num = id => parseFloat(document.getElementById(id + '_v').value);
+  // For sliders with a visible numeric readout, the input#X_v is the source of
+  // truth (it can hold values outside the slider's clamp range). Otherwise read
+  // straight from the slider.
+  const num = id => {
+    const numInput = document.getElementById(id + '_v');
+    if (numInput) return parseFloat(numInput.value);
+    return parseFloat(document.getElementById(id).value);
+  };
+  const sigmaD = num('dAmbMod');
+  const sigmaR = num('rAmbMod');
+  const bD = num('dIntMod');
+  const bR = num('rIntMod');
   return {
-    m: Math.max(1, Math.round(num('m'))),
-    nsim: Math.max(1, Math.round(num('nsim'))),
+    m: CONST.m,
+    nsim: CONST.nsim,
     v: num('v'),
-    muDist: num('muDist'),
-    sigmaDist: num('sigmaDist'),
-    muD: num('muD'),
-    sigmaD: num('sigmaD'),
-    muR: num('muR'),
-    sigmaR: num('sigmaR'),
-    bDs: num('bDs'),
-    bDc: num('bDc'),
-    bRs: num('bRs'),
-    bRc: num('bRc'),
-    sigmaN: num('sigmaN'),
-    wMod: num('wMod'),
+    muDist: CONST.muDist,
+    sigmaDist: num('districtCompet'),
+    // Inverse coupling, narrow range: σ ∈ [5, 15] (3× dynamic range of variance),
+    // μ swings by only ±10 across the full slider sweep.
+    //   μᴰ = -120 + 2·σᴰ:  σᴰ = 5  → μᴰ = -110 (more extreme avg, lower variance)
+    //                       σᴰ = 10 → μᴰ = -100 (default)
+    //                       σᴰ = 15 → μᴰ =  -90 (more moderate avg, higher variance)
+    muD: -120 + 2 * sigmaD,
+    sigmaD: sigmaD,
+    muR:  120 - 2 * sigmaR,
+    sigmaR: sigmaR,
+    bDs: bD, bDc: bD,     // 1:1 swing/compet ratio
+    bRs: bR, bRc: bR,
+    sigmaN: CONST.sigmaN,
+    wMod: num('qualImp'),
   };
 }
 
-// ---------- rendering ----------
+// ============================================================================
+// RENDERING
+// ============================================================================
 function renderHistogram(meds, parties) {
   const dMeds = [], rMeds = [];
   for (let i = 0; i < meds.length; i++) {
     if (parties[i]) rMeds.push(meds[i]); else dMeds.push(meds[i]);
   }
-  // Choose common bins
   let lo = Infinity, hi = -Infinity;
   for (const x of meds) { if (x < lo) lo = x; if (x > hi) hi = x; }
   if (!isFinite(lo)) { lo = -1; hi = 1; }
   const pad = Math.max((hi - lo) * 0.05, 0.02);
   lo -= pad; hi += pad;
-  const nbins = 40;
-  const binSize = (hi - lo) / nbins;
+  const binSize = (hi - lo) / 40;
 
   const traces = [
-    {
-      x: dMeds, type: 'histogram', name: 'Median is D',
+    { x: dMeds, type: 'histogram', name: 'Median is D',
       marker: { color: 'rgba(31,119,180,0.75)', line: { width: 0 } },
       xbins: { start: lo, end: hi, size: binSize },
-      hovertemplate: 'r̃: %{x:.1f}%<br>count: %{y}<extra></extra>'
-    },
-    {
-      x: rMeds, type: 'histogram', name: 'Median is R',
+      hovertemplate: 'ideology: %{x:.1f}<br>count: %{y}<extra></extra>' },
+    { x: rMeds, type: 'histogram', name: 'Median is R',
       marker: { color: 'rgba(214,39,40,0.75)', line: { width: 0 } },
       xbins: { start: lo, end: hi, size: binSize },
-      hovertemplate: 'r̃: %{x:.1f}%<br>count: %{y}<extra></extra>'
-    }
+      hovertemplate: 'ideology: %{x:.1f}<br>count: %{y}<extra></extra>' },
   ];
-  const layout = {
-    title: { text: 'Distribution of median representative ideology r̃', font: { size: 14 } },
+  Plotly.react('histChart', traces, {
+    title: { text: 'Distribution of median representative ideology', font: { size: 14 } },
     barmode: 'stack',
-    xaxis: { title: 'r̃ (median rep ideology, %)', ticksuffix: '%', zeroline: true, zerolinecolor: '#888' },
+    xaxis: { title: { text: 'Median rep ideology &nbsp;&nbsp; (← liberal · conservative →)', standoff: 6 }, zeroline: true, zerolinecolor: '#888' },
     yaxis: { title: 'count' },
-    margin: { l: 50, r: 20, t: 40, b: 50 },
-    legend: { orientation: 'h', y: -0.2 },
+    margin: { l: 60, r: 20, t: 50, b: 110 },
+    legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: -0.35, yanchor: 'top' },
     bargap: 0.02
-  };
-  Plotly.react('histChart', traces, layout, { displayModeBar: false, responsive: true });
+  }, { displayModeBar: false, responsive: true });
 }
 
-function renderScatter(sim, p) {
-  const N = sim.d.length;
+function renderScatter(sim) {
   const xD = [], yD = [], xR = [], yR = [];
-  for (let i = 0; i < N; i++) {
+  for (let i = 0; i < sim.d.length; i++) {
     if (sim.party[i] === 'R') { xR.push(sim.d[i]); yR.push(sim.r[i]); }
     else { xD.push(sim.d[i]); yD.push(sim.r[i]); }
   }
   const traces = [
-    {
-      x: xD, y: yD, mode: 'markers', name: 'D winner',
+    { x: xD, y: yD, mode: 'markers', name: 'D winner',
       marker: { color: 'rgba(31,119,180,0.55)', size: 5 },
-      hovertemplate: 'd: %{x:.1f}%<br>r: %{y:.1f}%<extra>D</extra>'
-    },
-    {
-      x: xR, y: yR, mode: 'markers', name: 'R winner',
+      hovertemplate: 'partisanship: %{x:.1f}%<br>ideology: %{y:.1f}<extra>D</extra>' },
+    { x: xR, y: yR, mode: 'markers', name: 'R winner',
       marker: { color: 'rgba(214,39,40,0.55)', size: 5 },
-      hovertemplate: 'd: %{x:.1f}%<br>r: %{y:.1f}%<extra>R</extra>'
-    },
-    {
-      x: [sim.d[sim.medianIdx]], y: [sim.medianIdeology],
+      hovertemplate: 'partisanship: %{x:.1f}%<br>ideology: %{y:.1f}<extra>R</extra>' },
+    { x: [sim.d[sim.medianIdx]], y: [sim.medianIdeology],
       mode: 'markers', name: 'Median rep',
       marker: { color: '#000', size: 12, symbol: 'star', line: { color: '#fff', width: 1.5 } },
-      hovertemplate: 'd: %{x:.1f}%<br>r̃: %{y:.1f}%<extra>median</extra>'
-    },
-    {
-      x: [-100, 100], y: [0, 0], mode: 'lines', showlegend: false,
-      line: { color: '#aaa', width: 1, dash: 'dot' }, hoverinfo: 'skip'
-    }
+      hovertemplate: 'partisanship: %{x:.1f}%<br>ideology: %{y:.1f}<extra>median</extra>' },
+    { x: [-100, 100], y: [0, 0], mode: 'lines', showlegend: false,
+      line: { color: '#aaa', width: 1, dash: 'dot' }, hoverinfo: 'skip' }
   ];
-  const layout = {
-    title: { text: 'One example chamber: district partisanship d vs elected rep ideology r', font: { size: 14 } },
-    xaxis: { title: 'd (district partisanship, %)', ticksuffix: '%', zeroline: true, zerolinecolor: '#888' },
-    yaxis: { title: 'r (rep ideology, %)', ticksuffix: '%', zeroline: true, zerolinecolor: '#888' },
-    margin: { l: 50, r: 20, t: 40, b: 50 },
-    legend: { orientation: 'h', y: -0.2 }
-  };
-  Plotly.react('scatterChart', traces, layout, { displayModeBar: false, responsive: true });
+  Plotly.react('scatterChart', traces, {
+    title: { text: 'One example chamber: district partisanship vs elected rep ideology', font: { size: 14 } },
+    xaxis: { title: { text: 'District partisanship % &nbsp;&nbsp; (← Democratic · Republican →)', standoff: 6 }, ticksuffix: '%', zeroline: true, zerolinecolor: '#888' },
+    yaxis: { title: { text: 'Rep ideology', standoff: 6 }, zeroline: true, zerolinecolor: '#888' },
+    margin: { l: 70, r: 20, t: 50, b: 110 },
+    legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: -0.35, yanchor: 'top' }
+  }, { displayModeBar: false, responsive: true });
 }
 
 function renderDistrictHist(districtPool) {
-  const traces = [{
+  Plotly.react('districtHistChart', [{
     x: districtPool, type: 'histogram', name: 'districts',
     marker: { color: 'rgba(102, 102, 102, 0.75)', line: { width: 0 } },
     nbinsx: 60,
-    hovertemplate: 'd: %{x:.1f}%<br>count: %{y}<extra></extra>'
-  }];
-  const layout = {
-    title: { text: 'Distribution of district partisanship d (pooled over districts × sims)', font: { size: 14 } },
-    xaxis: { title: 'd (district partisanship, %)', ticksuffix: '%', zeroline: true, zerolinecolor: '#888' },
+    hovertemplate: 'partisanship: %{x:.1f}%<br>count: %{y}<extra></extra>'
+  }], {
+    title: { text: 'Distribution of district partisanship across the chamber', font: { size: 14 } },
+    xaxis: { title: { text: 'District partisanship % &nbsp;&nbsp; (← Democratic · Republican →)', standoff: 6 }, ticksuffix: '%', zeroline: true, zerolinecolor: '#888' },
     yaxis: { title: 'count' },
-    margin: { l: 50, r: 20, t: 40, b: 50 },
+    margin: { l: 60, r: 20, t: 50, b: 70 },
     showlegend: false,
     bargap: 0.02
-  };
-  Plotly.react('districtHistChart', traces, layout, { displayModeBar: false, responsive: true });
+  }, { displayModeBar: false, responsive: true });
 }
 
 function renderStats(sims, p) {
@@ -462,7 +426,6 @@ function renderStats(sims, p) {
   }
   pR /= n;
   const meanMed = mean(Array.from(sims.meds));
-  // mean R seat share
   const N = 2 * p.m + 1;
   let totalSeats = 0; for (let i = 0; i < n; i++) totalSeats += sims.seats[i];
   const meanRShare = totalSeats / (n * N);
@@ -471,15 +434,17 @@ function renderStats(sims, p) {
   const rPill = `<span class="pill R">R</span>`;
   document.getElementById('stats').innerHTML = `
     <div><b>${n} simulations · ${N} districts</b></div>
-    <div>P(median rep is R) = <span class="num">${(pR*100).toFixed(1)}%</span> ${pR>0.5?rPill:dPill}</div>
-    <div>Mean r̃ across sims: <span class="num">${meanMed.toFixed(1)}%</span>
-      &nbsp;|&nbsp; mean r̃|D: <span class="num">${cntD ? (sumD/cntD).toFixed(1)+'%' : '–'}</span>
-      &nbsp;|&nbsp; mean r̃|R: <span class="num">${cntR ? (sumR/cntR).toFixed(1)+'%' : '–'}</span></div>
-    <div>Mean R seat share: <span class="num">${(meanRShare*100).toFixed(1)}%</span></div>
+    <div>Chance the median representative is a Republican: <span class="num">${(pR*100).toFixed(1)}%</span> ${pR>0.5?rPill:dPill}</div>
+    <div>Average median ideology: <span class="num">${meanMed.toFixed(1)}</span>
+      &nbsp;|&nbsp; when median is D: <span class="num">${cntD ? (sumD/cntD).toFixed(1) : '–'}</span>
+      &nbsp;|&nbsp; when median is R: <span class="num">${cntR ? (sumR/cntR).toFixed(1) : '–'}</span></div>
+    <div>Average Republican seat share: <span class="num">${(meanRShare*100).toFixed(1)}%</span></div>
   `;
 }
 
-// ---------- main loop ----------
+// ============================================================================
+// MAIN
+// ============================================================================
 let pendingTimer = null;
 function run() {
   const p = readParams();
@@ -489,11 +454,9 @@ function run() {
   const t1 = performance.now();
   renderStats(sims, p);
   renderHistogram(sims.meds, sims.parties);
-  renderScatter(example, p);
+  renderScatter(example);
   renderDistrictHist(sims.districtPool);
-  // Append timing
-  const stats = document.getElementById('stats');
-  stats.innerHTML += `<div style="font-size:11px;color:#888;margin-top:4px">simulated in ${(t1-t0).toFixed(0)} ms</div>`;
+  document.getElementById('stats').innerHTML += `<div style="font-size:11px;color:#888;margin-top:4px">simulated in ${(t1-t0).toFixed(0)} ms</div>`;
 }
 function scheduleRun() {
   if (!document.getElementById('autoRun').checked) return;
@@ -501,10 +464,10 @@ function scheduleRun() {
   pendingTimer = setTimeout(() => { pendingTimer = null; run(); }, 120);
 }
 
-// ---------- bind ----------
+// ============================================================================
+// BIND — replace each readout span with an editable number input
+// ============================================================================
 function formatVal(id, f) {
-  if (id === 'm' || id === 'nsim') return String(Math.round(f));
-  // decimals from step: 1 → 0, 0.5 → 1, 0.05 → 2, 0.005 → 3
   const range = document.getElementById(id);
   const stepStr = (range && range.step) ? String(range.step) : '0.01';
   const dot = stepStr.indexOf('.');
@@ -512,41 +475,44 @@ function formatVal(id, f) {
   return f.toFixed(decimals);
 }
 
+// Sliders that get an editable numeric readout next to them.
+// Other sliders just have the slider; readParams reads from the slider directly.
+const VISIBLE_NUMERIC = new Set(['v']);
+
 function init() {
-  for (const id of ids) {
+  for (const id of sliderIds) {
     const range = document.getElementById(id);
-    const span = document.getElementById(id + '_v');
+    const span = document.getElementById(id + '_v'); // may be null
 
-    // Replace readout span with an editable number input
-    const num = document.createElement('input');
-    num.type = 'number';
-    num.id = id + '_v';
-    num.className = 'val';
-    num.step = range.step;
-    num.value = formatVal(id, parseFloat(range.value));
-    span.parentNode.replaceChild(num, span);
-
-    // slider -> number
-    range.addEventListener('input', () => {
+    if (VISIBLE_NUMERIC.has(id) && span) {
+      const num = document.createElement('input');
+      num.type = 'number';
+      num.id = id + '_v';
+      num.className = 'val';
+      num.step = range.step;
       num.value = formatVal(id, parseFloat(range.value));
-      scheduleRun();
-    });
+      span.parentNode.replaceChild(num, span);
 
-    // number -> slider (live; allow values outside slider range, slider pegs to bound)
-    num.addEventListener('input', () => {
-      const v = parseFloat(num.value);
-      if (!isFinite(v)) return;
-      const lo = parseFloat(range.min), hi = parseFloat(range.max);
-      range.value = Math.max(lo, Math.min(hi, v));
-      scheduleRun();
-    });
-
-    // Pretty-format on blur / Enter
-    num.addEventListener('change', () => {
-      const v = parseFloat(num.value);
-      if (!isFinite(v)) { num.value = formatVal(id, parseFloat(range.value)); return; }
-      num.value = formatVal(id, v);
-    });
+      range.addEventListener('input', () => {
+        num.value = formatVal(id, parseFloat(range.value));
+        scheduleRun();
+      });
+      num.addEventListener('input', () => {
+        const v = parseFloat(num.value);
+        if (!isFinite(v)) return;
+        const lo = parseFloat(range.min), hi = parseFloat(range.max);
+        range.value = Math.max(lo, Math.min(hi, v));
+        scheduleRun();
+      });
+      num.addEventListener('change', () => {
+        const v = parseFloat(num.value);
+        if (!isFinite(v)) { num.value = formatVal(id, parseFloat(range.value)); return; }
+        num.value = formatVal(id, v);
+      });
+    } else {
+      // No numeric readout for this slider — just react to drag.
+      range.addEventListener('input', scheduleRun);
+    }
   }
   document.getElementById('run').addEventListener('click', run);
   run();

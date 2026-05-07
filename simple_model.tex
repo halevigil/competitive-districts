@@ -17,8 +17,10 @@
 \maketitle
 
 This document is the source of truth for the model implemented in
-\texttt{simple.html}. The applet exposes seven plain-English knobs to the
-user; each maps onto a subset of the underlying parameters described below.
+\texttt{index.html} (the default, simplified applet; the fuller exploratory
+version with every raw parameter exposed lives in \texttt{full.html}).
+The applet exposes seven plain-English knobs to the user; each maps onto a
+subset of the underlying parameters described below.
 All ideology / partisanship quantities are in \emph{percentage points}.
 
 \section{Model setup}
@@ -203,6 +205,11 @@ of $\tilde{r}$ is symmetric around $0$ and $\Pr[P(\tilde{r}) = R] = \tfrac{1}{2}
   \item \textbf{$N_{\text{sim}}$ raised from 400 to 1000.} Both the fixed
         constant and every prose mention in the applet (subtitle, footnote)
         were updated.
+  \item \textbf{File rename for static hosting.} The simplified applet was
+        renamed \texttt{simple.html $\to$ index.html} so that Fly.io,
+        Netlify, GitHub Pages, etc.\ serve it as the default. The fuller
+        exploratory applet was renamed \texttt{index.html $\to$ full.html}.
+        No model behavior changed.
 \end{itemize}
 
 \end{document}

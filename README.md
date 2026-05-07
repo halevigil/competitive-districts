@@ -6,16 +6,19 @@ of the **median representative's** ideology and party.
 
 ## Files
 
-- **[`index.html`](index.html)** — full applet, every parameter exposed
+- **[`index.html`](index.html)** — accessible version with seven plain-English
+  knobs and most numeric readouts hidden. This is the default page served by
+  most static hosts (Netlify, Fly, GitHub Pages). Backing parameters are
+  derived from the slider values via the linear couplings documented in
+  `simple_model.tex`.
+- **[`full.html`](full.html)** — full applet, every parameter exposed
   (district distribution, candidate noise, β coefficients, election noise,
   popular vote shift). Three live charts: median-rep histogram, single-chamber
   scatter, and pooled district-partisanship histogram.
-- **[`simple.html`](simple.html)** — accessible version with seven plain-English
-  knobs and most numeric readouts hidden. Backing parameters are derived from
-  the slider values via the linear couplings documented in `simple_model.tex`.
 - **[`simple_model.tex`](simple_model.tex)** — technical reference for the
-  simplified applet: the full mathematical model, the fixed constants, and
-  the slider → parameter map. Updated whenever the model behavior changes.
+  default (simplified) applet: the full mathematical model, the fixed
+  constants, and the slider → parameter map. Updated whenever the model
+  behavior changes.
 
 ## Running
 
