@@ -45,6 +45,27 @@
   .row { display: flex; align-items: center; margin: 6px 0; gap: 8px; flex-wrap: wrap; }
   .row label { flex: 1 1 100%; font-size: 12px; color: #333; }
   .row input[type=range] { flex: 1 1 auto; min-width: 0; }
+  .slider-wrap {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+    padding-bottom: 8px;
+    display: flex;
+    align-items: center;
+  }
+  .slider-wrap input[type=range] { width: 100%; margin: 0; flex: 1 1 auto; }
+  .slider-wrap::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    bottom: 0;
+    transform: translateX(-50%);
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--accent);
+    pointer-events: none;
+  }
   .row .val {
     flex: 0 0 64px; font-family: "SF Mono", Menlo, monospace;
     font-size: 11px; text-align: right; color: #222;
@@ -103,7 +124,7 @@
     <h3>District map</h3>
     <div class="row">
       <label>District competitiveness</label>
-      <input type="range" id="districtCompet" min="1" max="15" step="0.5" value="10">
+      <input type="range" id="districtCompet" min="1" max="15" step="0.5" value="8">
       <span class="hint">Lower → most districts strongly favor one party; higher → more swing districts in the middle.</span>
     </div>
 
@@ -120,12 +141,12 @@
     </div>
     <div class="row">
       <label>Democratic candidate intentional moderation</label>
-      <input type="range" id="dIntMod" min="-5" max="5" step="0.1" value="1">
+      <input type="range" id="dIntMod" min="-5" max="5" step="0.1" value="0">
       <span class="hint">Higher → Democrats deliberately run more moderate candidates in swing districts.</span>
     </div>
     <div class="row">
       <label>Republican candidate intentional moderation</label>
-      <input type="range" id="rIntMod" min="-5" max="5" step="0.1" value="1">
+      <input type="range" id="rIntMod" min="-5" max="5" step="0.1" value="0">
       <span class="hint">Higher → Republicans deliberately run more moderate candidates in swing districts.</span>
     </div>
 
@@ -503,6 +524,15 @@ function init() {
   for (const id of sliderIds) {
     const range = document.getElementById(id);
     const span = document.getElementById(id + '_v'); // may be null
+
+    // Wrap the slider in a .slider-wrap so we can place a centered dot
+    // marker via the wrapper's ::after pseudo-element.
+    if (!range.parentElement.classList.contains('slider-wrap')) {
+      const wrap = document.createElement('div');
+      wrap.className = 'slider-wrap';
+      range.parentNode.insertBefore(wrap, range);
+      wrap.appendChild(range);
+    }
 
     if (VISIBLE_NUMERIC.has(id) && span) {
       const num = document.createElement('input');

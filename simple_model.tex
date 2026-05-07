@@ -125,7 +125,8 @@ Each slider's numeric value $s$ feeds into one or more underlying parameters.
 Direct map: $v \leftarrow s$, with $s \in [-20, 20]$, default $0$.
 
 \subsection*{District competitiveness}
-$\sigma_{\text{district}} \leftarrow s$, with $s \in [1, 15]$, default $10$.
+$\sigma_{\text{district}} \leftarrow s$, with $s \in [1, 15]$, default $8$
+(slider midpoint).
 Smaller values concentrate districts near the safe-D and safe-R modes; larger
 values spread mass into the swing range.
 
@@ -155,7 +156,7 @@ Mirror-symmetric:
 Single slider drives both $\beta^D$ coefficients at a $1{:}1$ ratio:
 \[
   \beta^D_{\text{swing}} = \beta^D_{\text{compet}} \;\leftarrow\; s,
-  \qquad s \in [-5, 5], \text{ default } 1.
+  \qquad s \in [-5, 5], \text{ default } 0.
 \]
 Positive values make Democratic candidates moderate (drift toward $0$) in
 competitive districts.
@@ -163,7 +164,7 @@ competitive districts.
 \subsection*{Republican candidate intentional moderation}
 \[
   \beta^R_{\text{swing}} = \beta^R_{\text{compet}} \;\leftarrow\; s,
-  \qquad s \in [-5, 5], \text{ default } 1.
+  \qquad s \in [-5, 5], \text{ default } 0.
 \]
 
 \subsection*{Candidate quality importance}
@@ -223,6 +224,14 @@ of $\tilde{r}$ is symmetric around $0$ and $\Pr[P(\tilde{r}) = R] = \tfrac{1}{2}
   \item \textbf{Hint copy: drop ``slightly''.} Both ambient-moderation hints
         now read ``tend to be more moderate on average'' rather than
         ``tend to be slightly more moderate on average.''
+  \item \textbf{Defaults at slider midpoints + visible center marker.}
+        All seven slider defaults now equal the geometric center of the
+        slider range, so the starting state is unambiguously ``neutral''.
+        Specifically: \texttt{districtCompet} default $10 \to 8$,
+        \texttt{dIntMod} default $1 \to 0$, \texttt{rIntMod} default
+        $1 \to 0$ (the other four were already at midpoint). A small dot
+        is rendered just below each slider track at \texttt{left: 50\%}
+        as a visual anchor for the midpoint position.
 \end{itemize}
 
 \end{document}
