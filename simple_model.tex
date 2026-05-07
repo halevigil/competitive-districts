@@ -230,12 +230,29 @@ of $\tilde{r}$ is symmetric around $0$ and $\Pr[P(\tilde{r}) = R] = \tfrac{1}{2}
         Specifically: \texttt{districtCompet} default $10 \to 8$,
         \texttt{dIntMod} default $1 \to 0$, \texttt{rIntMod} default
         $1 \to 0$ (the other four were already at midpoint). A thick
-        ($10$\,px) black dot is rendered \emph{on} each slider track at
-        \texttt{left: 50\%} (vertically centered) as an unmistakable
-        visual anchor for the midpoint position. The slider's thumb
-        renders below the dot in stacking order, so when a slider sits
-        at its default the dot covers the thumb -- which is itself an
-        intuitive indicator of ``you are at the center.''
+        ($16$\,px, sized to match the slider thumb) black dot is rendered
+        \emph{on} each slider track at \texttt{left: 50\%} (vertically
+        centered) as an unmistakable visual anchor for the midpoint
+        position. The slider's thumb renders below the dot in stacking
+        order, so when a slider sits at its default the dot covers the
+        thumb -- which is itself an intuitive indicator of ``you are at
+        the center.''
+  \item \textbf{Single ``Reset to defaults'' button.} The previous
+        ``Re-run simulation'' button and the ``Auto-rerun on change''
+        toggle were removed in favor of a single button labeled
+        ``Reset to defaults''. Clicking it restores every slider to its
+        HTML \texttt{defaultValue}, refreshes any custom display labels
+        (e.g.\ the popular-vote indicator), and forces an immediate
+        simulation run. Auto-rerun on change is now always on, since
+        without a manual run trigger the toggle had no purpose.
+  \item \textbf{Title casing pass.} The page title (\texttt{<title>} and
+        \texttt{<h1>}) was renamed to ``Simplified Election Simulator'',
+        and the section headers and chart titles were converted to
+        title case (capitalize the first letter of each major word;
+        articles, short prepositions, and short conjunctions stay
+        lowercase). For example: ``District map'' $\to$ ``District Map'';
+        ``Distribution of median representative ideology'' $\to$
+        ``Distribution of Median Representative Ideology''.
 \end{itemize}
 
 \end{document}

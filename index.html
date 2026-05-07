@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Simplified election simulator</title>
+<title>Simplified Election Simulator</title>
 <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
 <style>
   :root {
@@ -62,8 +62,8 @@
     left: 50%;
     top: 50%;
     transform: translate(-50%, -50%);
-    width: 10px;
-    height: 10px;
+    width: 16px;
+    height: 16px;
     border-radius: 50%;
     background: #000;
     pointer-events: none;
@@ -108,7 +108,7 @@
 </head>
 <body>
 
-<h1>Simplified election simulator</h1>
+<h1>Simplified Election Simulator</h1>
 <div class="subtitle">
   A 435-seat chamber. Adjust the seven knobs and watch the median representative's ideology distribution change.
   Values are in percentage points. Each simulation = 1000 election runs.
@@ -117,14 +117,14 @@
 <div class="container">
   <!-- ============ CONTROLS ============ -->
   <div class="panel controls" id="controls">
-    <h3>Election environment</h3>
+    <h3>Election Environment</h3>
     <div class="row">
       <label>Popular vote: <span id="v_display" class="vote-display">Tied</span></label>
       <input type="range" id="v" min="-15" max="15" step="0.5" value="0">
       <span class="hint">Drag right for a Republican wave, left for a Democratic wave.</span>
     </div>
 
-    <h3>District map</h3>
+    <h3>District Map</h3>
     <div class="row">
       <label>District competitiveness</label>
       <input type="range" id="districtCompet" min="1" max="15" step="0.5" value="8">
@@ -160,11 +160,7 @@
       <span class="hint">Higher → voters punish ideologically extreme candidates more heavily, relative to how partisan the district is.</span>
     </div>
 
-    <button id="run">Re-run simulation</button>
-    <div class="auto-row">
-      <input type="checkbox" id="autoRun" checked>
-      <label for="autoRun">Auto-rerun on change</label>
-    </div>
+    <button id="reset">Reset to defaults</button>
   </div>
 
   <!-- ============ CHARTS ============ -->
@@ -392,7 +388,7 @@ function renderHistogram(meds, parties) {
       hovertemplate: 'ideology: %{x:.1f}<br>count: %{y}<extra></extra>' },
   ];
   Plotly.react('histChart', traces, {
-    title: { text: 'Distribution of median representative ideology', font: { size: 14 } },
+    title: { text: 'Distribution of Median Representative Ideology', font: { size: 14 } },
     barmode: 'stack',
     xaxis: { title: { text: 'Median rep ideology &nbsp;&nbsp; (← liberal · conservative →)', standoff: 6 }, zeroline: true, zerolinecolor: '#888' },
     yaxis: { title: 'count' },
@@ -423,7 +419,7 @@ function renderScatter(sim) {
       line: { color: '#aaa', width: 1, dash: 'dot' }, hoverinfo: 'skip' }
   ];
   Plotly.react('scatterChart', traces, {
-    title: { text: 'One example chamber: district partisanship vs elected rep ideology', font: { size: 14 } },
+    title: { text: 'One Example Chamber: District Partisanship vs Elected Rep Ideology', font: { size: 14 } },
     xaxis: { title: { text: 'District partisanship % &nbsp;&nbsp; (← Democratic · Republican →)', standoff: 6 }, ticksuffix: '%', zeroline: true, zerolinecolor: '#888' },
     yaxis: { title: { text: 'Rep ideology', standoff: 6 }, zeroline: true, zerolinecolor: '#888' },
     margin: { l: 70, r: 20, t: 50, b: 110 },
@@ -438,7 +434,7 @@ function renderDistrictHist(districtPool) {
     nbinsx: 60,
     hovertemplate: 'partisanship: %{x:.1f}%<br>count: %{y}<extra></extra>'
   }], {
-    title: { text: 'Distribution of district partisanship across the chamber', font: { size: 14 } },
+    title: { text: 'Distribution of District Partisanship Across the Chamber', font: { size: 14 } },
     xaxis: { title: { text: 'District partisanship % &nbsp;&nbsp; (← Democratic · Republican →)', standoff: 6 }, ticksuffix: '%', zeroline: true, zerolinecolor: '#888' },
     yaxis: { title: 'count' },
     margin: { l: 60, r: 20, t: 50, b: 70 },
@@ -489,9 +485,22 @@ function run() {
   document.getElementById('stats').innerHTML += `<div style="font-size:11px;color:#888;margin-top:4px">simulated in ${(t1-t0).toFixed(0)} ms</div>`;
 }
 function scheduleRun() {
-  if (!document.getElementById('autoRun').checked) return;
   if (pendingTimer) clearTimeout(pendingTimer);
   pendingTimer = setTimeout(() => { pendingTimer = null; run(); }, 120);
+}
+
+function resetDefaults() {
+  for (const id of sliderIds) {
+    const range = document.getElementById(id);
+    range.value = range.defaultValue;
+    const numEl = document.getElementById(id + '_v');
+    if (numEl && numEl.tagName === 'INPUT') {
+      numEl.value = formatVal(id, parseFloat(range.value));
+    }
+  }
+  updateVoteDisplay();
+  if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null; }
+  run();
 }
 
 // ============================================================================
@@ -571,7 +580,7 @@ function init() {
   const vRange = document.getElementById('v');
   if (vRange) vRange.addEventListener('input', updateVoteDisplay);
   updateVoteDisplay();
-  document.getElementById('run').addEventListener('click', run);
+  document.getElementById('reset').addEventListener('click', resetDefaults);
   run();
 }
 init();
