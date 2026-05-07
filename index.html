@@ -185,19 +185,19 @@
     </div>
     <div class="row">
       <label>Democratic Candidate Intentional Moderation</label>
-      <input type="range" id="dIntMod" min="-5" max="5" step="0.1" value="0">
+      <input type="range" id="dIntMod" min="-2" max="2" step="0.05" value="0">
       <span class="hint">Higher → Democrats deliberately run more moderate candidates in swing districts.</span>
     </div>
     <div class="row">
       <label>Republican Candidate Intentional Moderation</label>
-      <input type="range" id="rIntMod" min="-5" max="5" step="0.1" value="0">
+      <input type="range" id="rIntMod" min="-2" max="2" step="0.05" value="0">
       <span class="hint">Higher → Republicans deliberately run more moderate candidates in swing districts.</span>
     </div>
 
     <h3>Voters</h3>
     <div class="row">
       <label>Candidate Quality Importance</label>
-      <input type="range" id="qualImp" min="-1" max="2" step="0.01" value="0.50">
+      <input type="range" id="qualImp" min="-0.5" max="1" step="0.01" value="0.25">
       <span class="hint">Higher → voters punish ideologically extreme candidates more heavily, relative to how partisan the district is.</span>
     </div>
 
@@ -377,8 +377,8 @@ function readParams() {
     if (numInput) return parseFloat(numInput.value);
     return parseFloat(document.getElementById(id).value);
   };
-  const sigmaD = num('dAmbMod');
-  const sigmaR = num('rAmbMod');
+  const sD = num('dAmbMod');
+  const sR = num('rAmbMod');
   const bD = num('dIntMod');
   const bR = num('rIntMod');
   return {
@@ -387,15 +387,16 @@ function readParams() {
     v: num('v'),
     muDist: CONST.muDist,
     sigmaDist: num('districtCompet'),
-    // Inverse coupling, narrow range: σ ∈ [5, 15] (3× dynamic range of variance),
-    // μ swings by only ±10 across the full slider sweep.
-    //   μᴰ = -120 + 2·σᴰ:  σᴰ = 5  → μᴰ = -110 (more extreme avg, lower variance)
-    //                       σᴰ = 10 → μᴰ = -100 (default)
-    //                       σᴰ = 15 → μᴰ =  -90 (more moderate avg, higher variance)
-    muD: -120 + 2 * sigmaD,
-    sigmaD: sigmaD,
-    muR:  120 - 2 * sigmaR,
-    sigmaR: sigmaR,
+    // Slider sweep s ∈ [5, 15] is used directly as σ; mean is coupled
+    // to σ with a +1 slope so higher variance pulls candidates a bit
+    // toward the centre.
+    //   s = 5  → μᴰ = -55, σᴰ = 5    (more extreme avg, lower variance)
+    //   s = 10 → μᴰ = -50, σᴰ = 10   (default)
+    //   s = 15 → μᴰ = -45, σᴰ = 15   (more moderate avg, higher variance)
+    muD: -60 + sD,
+    sigmaD: sD,
+    muR:  60 - sR,
+    sigmaR: sR,
     bDs: bD, bDc: bD,     // 1:1 swing/compet ratio
     bRs: bR, bRc: bR,
     sigmaN: CONST.sigmaN,
@@ -411,11 +412,19 @@ function renderHistogram(meds, parties) {
   for (let i = 0; i < meds.length; i++) {
     if (parties[i]) rMeds.push(meds[i]); else dMeds.push(meds[i]);
   }
-  let lo = Infinity, hi = -Infinity;
-  for (const x of meds) { if (x < lo) lo = x; if (x > hi) hi = x; }
-  if (!isFinite(lo)) { lo = -1; hi = 1; }
-  const pad = Math.max((hi - lo) * 0.05, 0.02);
-  lo -= pad; hi += pad;
+  // Default axis is [-50, 50]. Only extend if there's significant mass
+  // outside that range — i.e. the 1st/99th percentile is past the bound.
+  // This keeps the x-scale stable for typical sweeps but still shows the
+  // full distribution when the user pushes the model into extreme regimes.
+  let lo = -50, hi = 50;
+  const n = meds.length;
+  if (n > 0) {
+    const sorted = Array.from(meds).sort((a, b) => a - b);
+    const loExt = sorted[Math.max(0, Math.floor(n * 0.01))];
+    const hiExt = sorted[Math.min(n - 1, Math.ceil(n * 0.99) - 1)];
+    if (loExt < lo) lo = Math.floor(loExt / 10) * 10;       // round outward to nearest 10
+    if (hiExt > hi) hi = Math.ceil(hiExt / 10) * 10;
+  }
   const binSize = (hi - lo) / 40;
 
   const traces = [
@@ -431,7 +440,7 @@ function renderHistogram(meds, parties) {
   Plotly.react('histChart', traces, {
     title: { text: 'Distribution of Median Representative Ideology', font: { size: 14 } },
     barmode: 'stack',
-    xaxis: { title: { text: 'Median Rep Ideology &nbsp;&nbsp; (← Liberal · Conservative →)', standoff: 6 }, zeroline: true, zerolinecolor: '#888' },
+    xaxis: { title: { text: 'Median Rep Ideology &nbsp;&nbsp; (← Liberal · Conservative →)', standoff: 6 }, range: [lo, hi], zeroline: true, zerolinecolor: '#888' },
     yaxis: { title: 'Count' },
     margin: { l: 60, r: 20, t: 50, b: 110 },
     legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: -0.35, yanchor: 'top' },
