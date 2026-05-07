@@ -49,35 +49,66 @@
     position: relative;
     flex: 1 1 auto;
     min-width: 0;
-    padding-bottom: 14px;
     display: flex;
     align-items: center;
   }
-  .slider-wrap input[type=range] { width: 100%; margin: 0; flex: 1 1 auto; }
-  /* Center anchor: a thin vertical tick mark and a small "center" caption
-     directly below each slider's midpoint -- like a labeled axis tick. */
+  /* Render the slider's track ourselves so we can stack the center
+     indicator BETWEEN the track and the thumb. Native track is hidden
+     (transparent), thumb is styled explicitly, and the track + center
+     line are drawn as wrapper pseudo-elements. */
+  .slider-wrap input[type=range] {
+    width: 100%; margin: 0; flex: 1 1 auto;
+    position: relative; z-index: 3;
+    -webkit-appearance: none; appearance: none;
+    background: transparent;
+    height: 16px;
+  }
+  .slider-wrap input[type=range]::-webkit-slider-runnable-track {
+    background: transparent; height: 4px; border: none;
+  }
+  .slider-wrap input[type=range]::-moz-range-track {
+    background: transparent; height: 4px; border: none;
+  }
+  .slider-wrap input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: var(--accent);
+    margin-top: -5px; border: none; cursor: pointer;
+  }
+  .slider-wrap input[type=range]::-moz-range-thumb {
+    width: 14px; height: 14px; border-radius: 50%;
+    background: var(--accent); border: none; cursor: pointer;
+  }
+  /* Custom track (z-index 1): dark fill on the left of the thumb,
+     light gray on the right. --val (0-100%) is set per-slider in JS. */
   .slider-wrap::before {
     content: '';
     position: absolute;
-    left: 50%;
-    top: calc(50% + 6px);
-    transform: translateX(-50%);
-    width: 2px;
-    height: 10px;
-    background: var(--accent);
+    left: 0; right: 0; top: 50%;
+    height: 4px;
+    transform: translateY(-50%);
+    background: linear-gradient(
+      to right,
+      var(--accent) 0,
+      var(--accent) var(--val, 50%),
+      #d4d4d4 var(--val, 50%),
+      #d4d4d4 100%
+    );
+    border-radius: 2px;
     pointer-events: none;
-    border-radius: 1px;
+    z-index: 1;
   }
+  /* Center indicator (z-index 2): in front of the track, behind the thumb. */
   .slider-wrap::after {
-    content: 'center';
+    content: '';
     position: absolute;
-    left: 50%;
-    bottom: -2px;
-    transform: translateX(-50%);
-    font-size: 9px;
-    color: var(--muted);
-    letter-spacing: 0.04em;
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    width: 2px; height: 10px;
+    background: var(--accent);
+    border-radius: 1px;
     pointer-events: none;
+    z-index: 2;
   }
   .row .val {
     flex: 0 0 64px; font-family: "SF Mono", Menlo, monospace;
@@ -507,6 +538,7 @@ function resetDefaults() {
     if (numEl && numEl.tagName === 'INPUT') {
       numEl.value = formatVal(id, parseFloat(range.value));
     }
+    range.dispatchEvent(new Event('input'));
   }
   updateVoteDisplay();
   if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null; }
@@ -547,14 +579,23 @@ function init() {
     const range = document.getElementById(id);
     const span = document.getElementById(id + '_v'); // may be null
 
-    // Wrap the slider in a .slider-wrap so we can place a centered dot
-    // marker via the wrapper's ::after pseudo-element.
+    // Wrap the slider in a .slider-wrap so we can render a custom track
+    // and a center-indicator line as wrapper pseudo-elements.
     if (!range.parentElement.classList.contains('slider-wrap')) {
       const wrap = document.createElement('div');
       wrap.className = 'slider-wrap';
       range.parentNode.insertBefore(wrap, range);
       wrap.appendChild(range);
     }
+    // Drive the custom track's fill via a --val CSS variable (0-100%).
+    const wrapEl = range.parentElement;
+    const lo = parseFloat(range.min), hi = parseFloat(range.max);
+    const updateFill = () => {
+      const pct = ((parseFloat(range.value) - lo) / (hi - lo)) * 100;
+      wrapEl.style.setProperty('--val', pct + '%');
+    };
+    range.addEventListener('input', updateFill);
+    updateFill();
 
     if (VISIBLE_NUMERIC.has(id) && span) {
       const num = document.createElement('input');
