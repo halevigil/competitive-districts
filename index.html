@@ -49,25 +49,35 @@
     position: relative;
     flex: 1 1 auto;
     min-width: 0;
+    padding-bottom: 14px;
     display: flex;
     align-items: center;
   }
-  .slider-wrap input[type=range] {
-    width: 100%; margin: 0; flex: 1 1 auto;
-    position: relative; z-index: 1;
-  }
-  .slider-wrap::after {
+  .slider-wrap input[type=range] { width: 100%; margin: 0; flex: 1 1 auto; }
+  /* Center anchor: a thin vertical tick mark and a small "center" caption
+     directly below each slider's midpoint -- like a labeled axis tick. */
+  .slider-wrap::before {
     content: '';
     position: absolute;
     left: 50%;
-    top: 50%;
-    transform: translate(-50%, -50%);
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    background: #000;
+    top: calc(50% + 6px);
+    transform: translateX(-50%);
+    width: 2px;
+    height: 10px;
+    background: var(--accent);
     pointer-events: none;
-    z-index: 2;
+    border-radius: 1px;
+  }
+  .slider-wrap::after {
+    content: 'center';
+    position: absolute;
+    left: 50%;
+    bottom: -2px;
+    transform: translateX(-50%);
+    font-size: 9px;
+    color: var(--muted);
+    letter-spacing: 0.04em;
+    pointer-events: none;
   }
   .row .val {
     flex: 0 0 64px; font-family: "SF Mono", Menlo, monospace;
@@ -119,43 +129,43 @@
   <div class="panel controls" id="controls">
     <h3>Election Environment</h3>
     <div class="row">
-      <label>Popular vote: <span id="v_display" class="vote-display">Tied</span></label>
+      <label>Popular Vote: <span id="v_display" class="vote-display">Tied</span></label>
       <input type="range" id="v" min="-15" max="15" step="0.5" value="0">
       <span class="hint">Drag right for a Republican wave, left for a Democratic wave.</span>
     </div>
 
     <h3>District Map</h3>
     <div class="row">
-      <label>District competitiveness</label>
+      <label>District Competitiveness</label>
       <input type="range" id="districtCompet" min="1" max="15" step="0.5" value="8">
       <span class="hint">Lower → most districts strongly favor one party; higher → more swing districts in the middle.</span>
     </div>
 
     <h3>Candidates</h3>
     <div class="row">
-      <label>Democratic candidate ambient moderation</label>
+      <label>Democratic Candidate Ambient Moderation</label>
       <input type="range" id="dAmbMod" min="5" max="15" step="0.25" value="10">
       <span class="hint">Higher → Democratic candidates tend to be more moderate on average, and they vary more from district to district.</span>
     </div>
     <div class="row">
-      <label>Republican candidate ambient moderation</label>
+      <label>Republican Candidate Ambient Moderation</label>
       <input type="range" id="rAmbMod" min="5" max="15" step="0.25" value="10">
       <span class="hint">Higher → Republican candidates tend to be more moderate on average, and they vary more from district to district.</span>
     </div>
     <div class="row">
-      <label>Democratic candidate intentional moderation</label>
+      <label>Democratic Candidate Intentional Moderation</label>
       <input type="range" id="dIntMod" min="-5" max="5" step="0.1" value="0">
       <span class="hint">Higher → Democrats deliberately run more moderate candidates in swing districts.</span>
     </div>
     <div class="row">
-      <label>Republican candidate intentional moderation</label>
+      <label>Republican Candidate Intentional Moderation</label>
       <input type="range" id="rIntMod" min="-5" max="5" step="0.1" value="0">
       <span class="hint">Higher → Republicans deliberately run more moderate candidates in swing districts.</span>
     </div>
 
     <h3>Voters</h3>
     <div class="row">
-      <label>Candidate quality importance</label>
+      <label>Candidate Quality Importance</label>
       <input type="range" id="qualImp" min="-1" max="2" step="0.01" value="0.50">
       <span class="hint">Higher → voters punish ideologically extreme candidates more heavily, relative to how partisan the district is.</span>
     </div>
@@ -378,11 +388,11 @@ function renderHistogram(meds, parties) {
   const binSize = (hi - lo) / 40;
 
   const traces = [
-    { x: dMeds, type: 'histogram', name: 'Median is D',
+    { x: dMeds, type: 'histogram', name: 'Median Is D',
       marker: { color: 'rgba(31,119,180,0.75)', line: { width: 0 } },
       xbins: { start: lo, end: hi, size: binSize },
       hovertemplate: 'ideology: %{x:.1f}<br>count: %{y}<extra></extra>' },
-    { x: rMeds, type: 'histogram', name: 'Median is R',
+    { x: rMeds, type: 'histogram', name: 'Median Is R',
       marker: { color: 'rgba(214,39,40,0.75)', line: { width: 0 } },
       xbins: { start: lo, end: hi, size: binSize },
       hovertemplate: 'ideology: %{x:.1f}<br>count: %{y}<extra></extra>' },
@@ -390,8 +400,8 @@ function renderHistogram(meds, parties) {
   Plotly.react('histChart', traces, {
     title: { text: 'Distribution of Median Representative Ideology', font: { size: 14 } },
     barmode: 'stack',
-    xaxis: { title: { text: 'Median rep ideology &nbsp;&nbsp; (← liberal · conservative →)', standoff: 6 }, zeroline: true, zerolinecolor: '#888' },
-    yaxis: { title: 'count' },
+    xaxis: { title: { text: 'Median Rep Ideology &nbsp;&nbsp; (← Liberal · Conservative →)', standoff: 6 }, zeroline: true, zerolinecolor: '#888' },
+    yaxis: { title: 'Count' },
     margin: { l: 60, r: 20, t: 50, b: 110 },
     legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: -0.35, yanchor: 'top' },
     bargap: 0.02
@@ -405,14 +415,14 @@ function renderScatter(sim) {
     else { xD.push(sim.d[i]); yD.push(sim.r[i]); }
   }
   const traces = [
-    { x: xD, y: yD, mode: 'markers', name: 'D winner',
+    { x: xD, y: yD, mode: 'markers', name: 'D Winner',
       marker: { color: 'rgba(31,119,180,0.55)', size: 5 },
       hovertemplate: 'partisanship: %{x:.1f}%<br>ideology: %{y:.1f}<extra>D</extra>' },
-    { x: xR, y: yR, mode: 'markers', name: 'R winner',
+    { x: xR, y: yR, mode: 'markers', name: 'R Winner',
       marker: { color: 'rgba(214,39,40,0.55)', size: 5 },
       hovertemplate: 'partisanship: %{x:.1f}%<br>ideology: %{y:.1f}<extra>R</extra>' },
     { x: [sim.d[sim.medianIdx]], y: [sim.medianIdeology],
-      mode: 'markers', name: 'Median rep',
+      mode: 'markers', name: 'Median Rep',
       marker: { color: '#000', size: 12, symbol: 'star', line: { color: '#fff', width: 1.5 } },
       hovertemplate: 'partisanship: %{x:.1f}%<br>ideology: %{y:.1f}<extra>median</extra>' },
     { x: [-100, 100], y: [0, 0], mode: 'lines', showlegend: false,
@@ -420,8 +430,8 @@ function renderScatter(sim) {
   ];
   Plotly.react('scatterChart', traces, {
     title: { text: 'One Example Chamber: District Partisanship vs Elected Rep Ideology', font: { size: 14 } },
-    xaxis: { title: { text: 'District partisanship % &nbsp;&nbsp; (← Democratic · Republican →)', standoff: 6 }, ticksuffix: '%', zeroline: true, zerolinecolor: '#888' },
-    yaxis: { title: { text: 'Rep ideology', standoff: 6 }, zeroline: true, zerolinecolor: '#888' },
+    xaxis: { title: { text: 'District Partisanship % &nbsp;&nbsp; (← Democratic · Republican →)', standoff: 6 }, ticksuffix: '%', zeroline: true, zerolinecolor: '#888' },
+    yaxis: { title: { text: 'Rep Ideology', standoff: 6 }, zeroline: true, zerolinecolor: '#888' },
     margin: { l: 70, r: 20, t: 50, b: 110 },
     legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: -0.35, yanchor: 'top' }
   }, { displayModeBar: false, responsive: true });
@@ -435,8 +445,8 @@ function renderDistrictHist(districtPool) {
     hovertemplate: 'partisanship: %{x:.1f}%<br>count: %{y}<extra></extra>'
   }], {
     title: { text: 'Distribution of District Partisanship Across the Chamber', font: { size: 14 } },
-    xaxis: { title: { text: 'District partisanship % &nbsp;&nbsp; (← Democratic · Republican →)', standoff: 6 }, ticksuffix: '%', zeroline: true, zerolinecolor: '#888' },
-    yaxis: { title: 'count' },
+    xaxis: { title: { text: 'District Partisanship % &nbsp;&nbsp; (← Democratic · Republican →)', standoff: 6 }, ticksuffix: '%', zeroline: true, zerolinecolor: '#888' },
+    yaxis: { title: 'Count' },
     margin: { l: 60, r: 20, t: 50, b: 70 },
     showlegend: false,
     bargap: 0.02
