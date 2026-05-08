@@ -1,0 +1,26 @@
+# Fly.io deployment config for the Median Ideology Simulator.
+# Serves the static site (index.html, historical.html, plots.html, plus data/)
+# via the nginx Dockerfile in this directory.
+#
+# Deploy:   fly launch          # first time, creates the app
+#           fly deploy          # subsequent updates
+#
+# Pick a unique app name when you run `fly launch` — the value below is a
+# placeholder that you'll get prompted to change.
+
+app = "median-ideology-simulator"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

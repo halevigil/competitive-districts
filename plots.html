@@ -85,13 +85,13 @@ sim.addEventListener('load', () => {
   // Give index.html's init() a beat to wire up sliders and run its first sim.
   setTimeout(() => {
     const w = sim.contentWindow;
-    if (!w.simulateOne || !w.readParams) {
+    if (!w.simulateOne || !w.readParams || !w.runSimulations) {
       status.textContent = 'Could not reach simulator functions on iframe.';
       return;
     }
     const params = w.readParams();
     status.textContent =
-      `μ_dist=${params.muDist}, σ_dist=${params.sigmaDist}, ` +
+      `rGerry=${params.rGerry}, dGerry=${params.dGerry}, ` +
       `μ_D=${params.muD}, σ_D=${params.sigmaD}, ` +
       `μ_R=${params.muR}, σ_R=${params.sigmaR}, ` +
       `b_D=${params.bDs}, b_R=${params.bRs}, ` +
@@ -106,53 +106,17 @@ sim.addEventListener('load', () => {
       renderOne(w, params, cell.id, i);
     }
 
-    const stats = computeMismatchStats(w, params);
+    // Reuse runSimulations' mismatch-bin tracker — feeds the same data
+    // structure the index.html charts use, no separate sim pass needed.
+    const histCfg = w.CONFIG.histograms.district;
+    const sims = w.runSimulations(params, w.CONFIG.constants.nsim, {
+      binSize: histCfg.binSize, lo: -100, hi: 100,
+    });
+    const stats = sims.mismatchBins;
     renderMismatchChart('mismatchChart', stats, false);
     renderMismatchChart('mismatchRateChart', stats, true);
   }, 250);
 });
-
-function computeMismatchStats(w, params) {
-  const binSize = w.CONFIG.histograms.district.binSize;
-  const nSims = w.CONFIG.morePlots.nSimsForMismatch;
-  const lo = -100, hi = 100;
-  const nBins = Math.max(1, Math.round((hi - lo) / binSize));
-  const rInD = new Array(nBins).fill(0);
-  const dInR = new Array(nBins).fill(0);
-  for (let s = 0; s < nSims; s++) {
-    const sim = w.simulateOne(params, true);
-    for (let i = 0; i < sim.d.length; i++) {
-      const di = sim.d[i];
-      if (di === 0) continue;
-      const isR = sim.party[i] === 'R';
-      const mismatch = (isR && di < 0) || (!isR && di > 0);
-      if (!mismatch) continue;
-      const idx = Math.min(nBins - 1, Math.max(0, Math.floor((di - lo) / binSize)));
-      if (isR) rInD[idx]++;
-      else     dInR[idx]++;
-    }
-  }
-  const districts = w.generateDistricts(params.m, params.muDist, params.sigmaDist);
-  const distCounts = new Array(nBins).fill(0);
-  for (const di of districts) {
-    if (di === 0) continue;
-    const idx = Math.min(nBins - 1, Math.max(0, Math.floor((di - lo) / binSize)));
-    distCounts[idx]++;
-  }
-  const centres = new Array(nBins);
-  const ranges  = new Array(nBins);
-  for (let i = 0; i < nBins; i++) {
-    const a = lo + i * binSize;
-    const b = a + binSize;
-    centres[i] = (a + b) / 2;
-    ranges[i]  = [a, b];
-  }
-  return {
-    binSize, centres, ranges, distCounts, nSims,
-    avgRInD: rInD.map(c => c / nSims),
-    avgDInR: dInR.map(c => c / nSims),
-  };
-}
 
 function renderMismatchChart(divId, stats, perDistrict) {
   const { binSize, centres, ranges, avgRInD, avgDInR, distCounts, nSims } = stats;

@@ -12,6 +12,8 @@
     --border: #e2e2e2;
     --accent: #2c3e50;
     --muted: #777;
+    --d: rgba(31,119,180,0.85);
+    --r: rgba(214,39,40,0.85);
   }
   * { box-sizing: border-box; }
   body {
@@ -32,181 +34,274 @@
     border-radius: 6px;
     padding: 6px;
   }
-  .chart { width: 100%; height: 260px; }
+  .chart { width: 100%; height: 280px; }
   .full { grid-column: 1 / -1; }
   .footnote { font-size: 11px; color: var(--muted); margin-top: 12px; line-height: 1.4; }
   .footnote a { color: var(--accent); }
+  .loading { font-size: 14px; color: var(--muted); padding: 30px; text-align: center; }
 </style>
 </head>
 <body>
 
-<h1>Historical Distribution of US House District Presidential Margins, 2008–2024</h1>
+<h1>Historical House Seats by District Presidential Margin, 2008–2024</h1>
 <div class="subtitle">
-  For each cycle, the histogram of two-party presidential margin
-  (R% − D%, in percentage points) across the 435 House districts on the map
-  in effect that November.  Bin width is configurable in
-  <code>historical_config.js</code>.  Same visual style as the simulator's
-  district-partisanship histogram, so you can compare against the model's
-  output.
+  For each presidential cycle, the histogram of US House seats split by who
+  actually won each district's House race (blue = Democratic, red = Republican),
+  binned by the district's presidential margin (R% − D%).  Bin width is
+  configurable in <code>historical_config.js</code>.  Same visual style as
+  the simulator's "Democratic Seats by District Partisanship" and
+  "Republican Seats by District Partisanship" charts, so you can compare
+  against the model's output.
 </div>
 
-<div class="grid">
-  <div class="panel"><div id="c2008" class="chart"></div></div>
-  <div class="panel"><div id="c2012" class="chart"></div></div>
-  <div class="panel"><div id="c2016" class="chart"></div></div>
-  <div class="panel"><div id="c2020" class="chart"></div></div>
-  <div class="panel full"><div id="c2024" class="chart" style="height: 280px;"></div></div>
+<div id="charts" class="grid"><div class="loading full">Loading data…</div></div>
+
+<!-- Current simulator run, pulled live from localStorage (written by
+     index.html on every render).  Hidden when no run is cached yet.
+     Sits below the historical-year panels so it reads as the simulator's
+     comparison sketch against the empirical history above. -->
+<div id="simRunPanel" class="panel full" style="display: none; margin-top: 12px;">
+  <div id="simRunChart" class="chart" style="height: 300px;"></div>
 </div>
 
 <div class="footnote">
-  Sources: Daily Kos / Downballot "Presidential results by congressional district" CSVs.
-  Convention: bin centred on integer <code>c</code> covers margins in <code>[c−1, c+1)</code>.
-  Mean and median are unweighted across the 435 districts (not weighted by votes cast).
+  <p><b>Sources.</b>
+     House results: <a href="https://github.com/fivethirtyeight/election-results">FiveThirtyEight election-results</a> (per-district winner each cycle, in the contemporary district lines).
+     Presidential margin: <a href="https://www.the-downballot.com/p/data">The Downballot / Daily Kos Elections</a> per-CD calculations
+     (2024 in 2024-cycle districts; 2008/2012/2016/2020 in 2020-cycle districts).
+  </p>
+  <p>For 2008–2016 the join between House (contemporary districts) and presidential
+     margin (2020-cycle districts) is approximate — districts redrawn after the
+     2010 census don't match exactly, so a small fraction of seats per cycle are
+     dropped from the chart.  Match rates: 2008 ~316 / 326, 2012 ~402 / 408,
+     2016 ~429 / 435, 2020 ~429 / 435, 2024 ~429 / 435.</p>
 </div>
 
 <script>
-// 2pp-bin counts straight from the Daily Kos / Downballot CSVs, scaled to
-// the two-party R-D margin in percentage points.  Each bin centred at the
-// odd integer key covers [key−1, key+1).
-const DATA = {
-  '2008': {
-    stats: { mean: -8.87, median: -4.08, sd: 29.87, R: 189, D: 240, ties: 6 },
-    bins: {
-      "-89":1,"-87":1,"-81":2,"-79":3,"-77":1,"-75":5,"-73":4,"-71":5,"-69":2,
-      "-65":1,"-63":2,"-61":2,"-59":3,"-57":2,"-55":4,"-53":2,"-51":7,"-49":4,
-      "-47":6,"-45":3,"-43":6,"-41":3,"-39":8,"-37":1,"-35":4,"-33":9,"-31":9,
-      "-29":6,"-27":9,"-25":5,"-23":9,"-21":11,"-19":9,"-17":8,"-15":8,"-13":13,
-      "-11":11,"-9":13,"-7":8,"-5":11,"-3":12,"-1":7,"1":12,"3":20,"5":11,"7":11,
-      "9":14,"11":17,"13":11,"15":8,"17":7,"19":12,"21":5,"23":15,"25":9,"27":8,
-      "29":6,"31":5,"33":5,"35":2,"37":2,"39":5,"41":1,"45":1,"47":2,"49":1,
-      "51":1,"53":3,"55":1
-    }
-  },
-  '2012': {
-    stats: { mean: -4.67, median: 1.74, sd: 32.23, R: 226, D: 209, ties: 0 },
-    bins: {
-      "-93":1,"-91":1,"-81":3,"-79":2,"-77":2,"-75":2,"-73":2,"-71":3,"-69":2,
-      "-67":2,"-65":3,"-63":4,"-61":2,"-59":5,"-57":5,"-55":1,"-53":2,"-51":3,
-      "-49":4,"-47":3,"-45":6,"-43":5,"-41":6,"-39":5,"-37":7,"-35":5,"-33":9,
-      "-31":5,"-29":4,"-27":6,"-25":9,"-23":4,"-21":6,"-19":9,"-17":12,"-15":6,
-      "-13":10,"-11":9,"-9":5,"-7":6,"-5":9,"-3":4,"-1":10,"1":12,"3":12,"5":7,
-      "7":14,"9":14,"11":9,"13":11,"15":15,"17":14,"19":11,"21":10,"23":18,
-      "25":11,"27":11,"29":7,"31":6,"33":6,"35":9,"37":5,"39":3,"41":1,"43":3,
-      "45":2,"47":2,"49":4,"51":2,"53":1,"57":1,"59":2,"61":2,"63":1
-    }
-  },
-  '2016': {
-    stats: { mean: -3.31, median: 3.61, sd: 35.23, R: 230, D: 205, ties: 0 },
-    bins: {
-      "-91":1,"-89":1,"-85":2,"-81":2,"-79":2,"-77":1,"-75":5,"-73":5,"-71":1,
-      "-69":1,"-65":3,"-63":6,"-61":4,"-59":5,"-57":3,"-55":7,"-53":3,"-51":6,
-      "-49":5,"-47":3,"-45":3,"-43":3,"-41":8,"-39":2,"-37":4,"-35":6,"-33":7,
-      "-31":4,"-29":3,"-27":6,"-25":9,"-23":11,"-21":6,"-19":6,"-17":11,"-15":5,
-      "-13":8,"-11":4,"-9":5,"-7":7,"-5":6,"-3":8,"-1":7,"1":11,"3":4,"5":6,
-      "7":10,"9":10,"11":16,"13":10,"15":13,"17":14,"19":12,"21":8,"23":8,
-      "25":10,"27":11,"29":9,"31":8,"33":10,"35":5,"37":11,"39":6,"41":4,"43":7,
-      "45":3,"47":1,"49":5,"51":6,"53":1,"55":3,"57":2,"59":1,"61":2,"63":1,
-      "65":2
-    }
-  },
-  '2020': {
-    stats: { mean: -5.25, median: -2.45, sd: 32.64, R: 210, D: 224, ties: 1 },
-    bins: {
-      "-83":1,"-81":1,"-77":1,"-75":4,"-73":2,"-71":2,"-69":1,"-67":2,"-65":4,
-      "-63":2,"-61":5,"-59":5,"-57":5,"-55":3,"-53":5,"-51":7,"-49":6,"-47":4,
-      "-45":4,"-43":5,"-41":6,"-39":1,"-37":8,"-35":6,"-33":3,"-31":11,"-29":8,
-      "-27":9,"-25":12,"-23":7,"-21":7,"-19":8,"-17":4,"-15":6,"-13":9,"-11":13,
-      "-9":6,"-7":7,"-5":12,"-3":6,"-1":6,"1":10,"3":11,"5":14,"7":6,"9":11,
-      "11":12,"13":9,"15":13,"17":14,"19":4,"21":10,"23":7,"25":9,"27":7,"29":6,
-      "31":9,"33":5,"35":9,"37":9,"39":7,"41":1,"43":5,"45":5,"47":4,"49":3,
-      "51":1,"53":1,"55":4,"57":1,"61":2,"63":1,"65":1
-    }
-  },
-  '2024': {
-    stats: { mean: 0.16, median: 3.03, sd: 30.59, R: 230, D: 205, ties: 0 },
-    bins: {
-      "-77":3,"-75":1,"-71":2,"-65":3,"-63":2,"-61":2,"-59":2,"-57":2,"-55":1,
-      "-53":3,"-51":4,"-49":4,"-47":6,"-45":5,"-43":6,"-41":7,"-39":4,"-37":6,
-      "-35":9,"-33":7,"-31":5,"-29":6,"-27":2,"-25":6,"-23":16,"-21":7,"-19":10,
-      "-17":5,"-15":8,"-13":3,"-11":6,"-9":9,"-7":14,"-5":11,"-3":9,"-1":9,
-      "1":6,"3":10,"5":8,"7":7,"9":6,"11":10,"13":8,"15":13,"17":15,"19":9,
-      "21":17,"23":17,"25":9,"27":8,"29":10,"31":11,"33":7,"35":8,"37":12,
-      "39":5,"41":5,"43":6,"45":5,"47":8,"51":2,"53":2,"55":2,"57":2,"65":1,
-      "67":1
-    }
-  },
+// District-cycle to use for each presidential year, matching the data we have.
+// 2024 election was held in 2024-cycle districts; everything earlier is in
+// the 2020-cycle (post-2010 redistricting) sheet from Daily Kos.
+const DISTRICT_CYCLE_FOR = {
+  2008: '2020', 2012: '2020', 2016: '2020', 2020: '2020', 2024: '2024',
 };
+const YEARS = [2008, 2012, 2016, 2020, 2024];
 
-// Read the configured bin width.  Underlying source data is 2-pp; we never
-// drop below that.  For larger bin widths we re-aggregate by summing the
-// 2-pp counts whose centres fall in each new bin.
-const binSize = Math.max(2, (window.HISTORICAL_CONFIG && window.HISTORICAL_CONFIG.binSize) || 2);
+const binSize = Math.max(2,
+  (window.HISTORICAL_CONFIG && window.HISTORICAL_CONFIG.binSize) || 2);
 
-// Pre-rebin every year so we know the global y-max for shared scaling.
-const REBIN = {};
-for (const year of Object.keys(DATA)) {
-  const src = DATA[year].bins;
-  // Build new bins covering [-100, 100], left-edge aligned at -100.
-  // Bin i covers [-100 + i*binSize, -100 + (i+1)*binSize).
-  const nBins = Math.ceil(200 / binSize);
-  const counts = new Array(nBins).fill(0);
-  const ranges = new Array(nBins);
+// ---------------------------------------------------------------------------
+// Tiny CSV parser — handles double-quoted fields with embedded commas.  Good
+// enough for the well-behaved data files we ship; not a general parser.
+function parseCsv(text) {
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
+      else if (c === '"') inQuotes = false;
+      else field += c;
+    } else {
+      if (c === '"') inQuotes = true;
+      else if (c === ',') { row.push(field); field = ''; }
+      else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+      else if (c === '\r') { /* skip */ }
+      else field += c;
+    }
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  // Header → array of objects.
+  if (!rows.length) return [];
+  const header = rows[0];
+  return rows.slice(1).filter(r => r.length === header.length).map(r => {
+    const o = {};
+    for (let i = 0; i < header.length; i++) o[header[i]] = r[i];
+    return o;
+  });
+}
+
+async function loadAll() {
+  const [houseText, presText] = await Promise.all([
+    fetch('data/house-winners.csv').then(r => r.text()),
+    fetch('data/pres-by-cd.csv').then(r => r.text()),
+  ]);
+  return { house: parseCsv(houseText), pres: parseCsv(presText) };
+}
+
+// Index: (cycle, state, district) → winner_party
+function indexHouse(rows) {
+  const m = new Map();
+  for (const r of rows) {
+    m.set(r.cycle + '|' + r.state + '|' + r.district, r.winner_party);
+  }
+  return m;
+}
+
+// For one year, pair each district's presidential margin (in the configured
+// district cycle) with the House winner that same year, then bin by margin
+// and split into D-won / R-won counts.
+function buildYear(year, presRows, houseIdx) {
+  const wantedCycle = DISTRICT_CYCLE_FOR[year];
+  const lo = -100, hi = 100;
+  const nBins = Math.ceil((hi - lo) / binSize);
+  const dCounts = new Array(nBins).fill(0);
+  const rCounts = new Array(nBins).fill(0);
+  let nMatched = 0, nUnmatched = 0;
+  let nR = 0, nD = 0;
+  for (const p of presRows) {
+    if (+p.cycle !== year || p.district_cycle !== wantedCycle) continue;
+    const winner = houseIdx.get(year + '|' + p.state + '|' + p.district);
+    if (!winner || (winner !== 'D' && winner !== 'R')) { nUnmatched++; continue; }
+    const m = parseFloat(p.margin);
+    let idx = Math.floor((m - lo) / binSize);
+    if (idx < 0) idx = 0; else if (idx >= nBins) idx = nBins - 1;
+    if (winner === 'D') { dCounts[idx]++; nD++; }
+    else { rCounts[idx]++; nR++; }
+    nMatched++;
+  }
   const centres = new Array(nBins);
+  const ranges  = new Array(nBins);
   for (let i = 0; i < nBins; i++) {
-    const a = -100 + i * binSize;
+    const a = lo + i * binSize;
     const b = a + binSize;
-    ranges[i] = [a, b];
     centres[i] = (a + b) / 2;
+    ranges[i]  = [a, b];
   }
-  // Map each 2-pp source bin (centred at integer c) into the new bin
-  // containing its centre.
-  for (const k of Object.keys(src)) {
-    const c = +k;
-    let idx = Math.floor((c + 100) / binSize);
-    if (idx < 0) idx = 0;
-    if (idx >= nBins) idx = nBins - 1;
-    counts[idx] += src[k];
-  }
-  REBIN[year] = { counts, ranges, centres };
+  return { centres, ranges, dCounts, rCounts, nMatched, nUnmatched, nD, nR };
 }
-let yMax = 0;
-for (const year of Object.keys(REBIN)) {
-  for (const c of REBIN[year].counts) if (c > yMax) yMax = c;
-}
-// Headroom that scales with the bin size.
-yMax = Math.ceil(yMax / 5) * 5 + Math.max(2, Math.round(binSize / 2));
 
-function renderYear(divId, year) {
-  const { stats } = DATA[year];
-  const { counts, ranges, centres } = REBIN[year];
+function renderYearChart(divId, year, stats, yMax) {
+  const { centres, ranges, dCounts, rCounts, nD, nR, nMatched } = stats;
   const titleParts = [
     `<b>${year}</b>`,
-    `R-won ${stats.R}, D-won ${stats.D}` + (stats.ties ? `, tied ${stats.ties}` : ''),
-    `mean ${stats.mean > 0 ? '+' : ''}${stats.mean.toFixed(1)}, σ ${stats.sd.toFixed(1)}`,
+    `D-won ${nD}, R-won ${nR}`,
   ];
-  Plotly.newPlot(divId, [{
-    x: centres, y: counts, type: 'bar', name: year,
-    marker: { color: 'rgba(102, 102, 102, 0.85)', line: { width: 0 } },
-    width: binSize,
-    customdata: ranges,
-    hovertemplate:
-      'partisanship: %{customdata[0]:.0f}% to %{customdata[1]:.0f}%<br>' +
-      'count: %{y}<extra></extra>',
-  }], {
+  Plotly.newPlot(divId, [
+    {
+      x: centres, y: dCounts, type: 'bar', name: 'D-won',
+      marker: { color: 'rgba(31,119,180,0.85)', line: { width: 0 } },
+      width: binSize, customdata: ranges,
+      hovertemplate:
+        'pres margin: %{customdata[0]:.0f}% to %{customdata[1]:.0f}%<br>' +
+        'D-won seats: %{y}<extra></extra>',
+    },
+    {
+      x: centres, y: rCounts, type: 'bar', name: 'R-won',
+      marker: { color: 'rgba(214,39,40,0.85)', line: { width: 0 } },
+      width: binSize, customdata: ranges,
+      hovertemplate:
+        'pres margin: %{customdata[0]:.0f}% to %{customdata[1]:.0f}%<br>' +
+        'R-won seats: %{y}<extra></extra>',
+    },
+  ], {
     title: { text: titleParts.join(' &nbsp;·&nbsp; '), font: { size: 13 }, x: 0.04, xanchor: 'left' },
     xaxis: {
-      title: { text: 'District Partisanship %  (← Democratic · Republican →)', standoff: 4, font: { size: 11 } },
+      title: { text: 'Presidential margin %  (← Democratic · Republican →)', standoff: 4, font: { size: 11 } },
       ticksuffix: '%', range: [-100, 100], zeroline: true, zerolinecolor: '#333', zerolinewidth: 1,
     },
-    yaxis: { title: { text: 'Districts', font: { size: 11 } }, range: [0, yMax] },
+    yaxis: { title: { text: 'Seats', font: { size: 11 } }, range: [0, yMax] },
     margin: { l: 50, r: 14, t: 38, b: 50 },
     showlegend: false,
     bargap: 0.05,
+    barmode: 'stack',
     plot_bgcolor: '#fff',
   }, { displayModeBar: false, responsive: true });
 }
 
-for (const y of ['2008','2012','2016','2020','2024']) renderYear('c' + y, y);
+// Render the live simulator-run chart from data the main page wrote to
+// localStorage on its last render.  Stays hidden if no run is cached.
+// Reuses the year-chart visual style + the shared yMax so the simulator
+// chart sits visually next to the historical ones at the same scale.
+function renderSimulatorRun(yMax) {
+  let saved;
+  try { saved = JSON.parse(localStorage.getItem('simulator_current_run') || 'null'); }
+  catch (_) { saved = null; }
+  const panel = document.getElementById('simRunPanel');
+  if (!saved || !saved.centres || !saved.avgDWins) {
+    panel.style.display = 'none';
+    return;
+  }
+  panel.style.display = '';
+  const { binSize, centres, ranges, avgDWins, avgRWins, rGerry, dGerry, v } = saved;
+  const totalD = avgDWins.reduce((a,b) => a + b, 0);
+  const totalR = avgRWins.reduce((a,b) => a + b, 0);
+  const titleParts = [
+    `<b>Simulator (current run)</b>`,
+    `D-won ${totalD.toFixed(0)}, R-won ${totalR.toFixed(0)}`,
+    `rGerry ${rGerry?.toFixed?.(2) ?? '—'}, dGerry ${dGerry?.toFixed?.(2) ?? '—'}, v ${v ?? 0}`,
+  ];
+  Plotly.newPlot('simRunChart', [
+    {
+      x: centres, y: avgDWins, type: 'bar', name: 'D-won',
+      marker: { color: 'rgba(31,119,180,0.85)', line: { width: 0 } },
+      width: binSize, customdata: ranges,
+      hovertemplate:
+        'partisanship: %{customdata[0]:.0f}% to %{customdata[1]:.0f}%<br>' +
+        'avg D-won seats: %{y:.2f}<extra></extra>',
+    },
+    {
+      x: centres, y: avgRWins, type: 'bar', name: 'R-won',
+      marker: { color: 'rgba(214,39,40,0.85)', line: { width: 0 } },
+      width: binSize, customdata: ranges,
+      hovertemplate:
+        'partisanship: %{customdata[0]:.0f}% to %{customdata[1]:.0f}%<br>' +
+        'avg R-won seats: %{y:.2f}<extra></extra>',
+    },
+  ], {
+    title: { text: titleParts.join(' &nbsp;·&nbsp; '), font: { size: 13 }, x: 0.04, xanchor: 'left' },
+    xaxis: {
+      title: { text: 'District partisanship %  (← Democratic · Republican →)', standoff: 4, font: { size: 11 } },
+      ticksuffix: '%', range: [-100, 100], zeroline: true, zerolinecolor: '#333', zerolinewidth: 1,
+    },
+    yaxis: { title: { text: 'Seats', font: { size: 11 } }, range: [0, yMax] },
+    margin: { l: 50, r: 14, t: 38, b: 50 },
+    showlegend: false,
+    bargap: 0.05,
+    barmode: 'stack',
+    plot_bgcolor: '#fff',
+  }, { displayModeBar: false, responsive: true });
+}
+
+(async function main() {
+  const container = document.getElementById('charts');
+  let data;
+  try {
+    data = await loadAll();
+  } catch (err) {
+    container.innerHTML = `<div class="loading full">Failed to load data: ${err.message}</div>`;
+    return;
+  }
+  const houseIdx = indexHouse(data.house);
+  const yearStats = {};
+  let yMax = 0;
+  for (const y of YEARS) {
+    yearStats[y] = buildYear(y, data.pres, houseIdx);
+    for (const v of yearStats[y].dCounts) if (v > yMax) yMax = v;
+    for (const v of yearStats[y].rCounts) if (v > yMax) yMax = v;
+  }
+  // Headroom that scales with bin size.
+  yMax = Math.ceil(yMax / 5) * 5 + Math.max(2, Math.round(binSize / 2));
+  // Build the panels.
+  container.innerHTML = '';
+  for (let i = 0; i < YEARS.length; i++) {
+    const y = YEARS[i];
+    const panel = document.createElement('div');
+    panel.className = 'panel' + (i === YEARS.length - 1 ? ' full' : '');
+    const div = document.createElement('div');
+    div.id = 'c' + y;
+    div.className = 'chart';
+    if (i === YEARS.length - 1) div.style.height = '300px';
+    panel.appendChild(div);
+    container.appendChild(panel);
+    renderYearChart(div.id, y, yearStats[y], yMax);
+  }
+  // Render the simulator's latest run (if any) at the top, on the same scale.
+  renderSimulatorRun(yMax);
+  // Live-update if the user re-runs the simulator in another tab.
+  window.addEventListener('storage', (e) => {
+    if (e.key === 'simulator_current_run') renderSimulatorRun(yMax);
+  });
+})();
 </script>
 
 </body>

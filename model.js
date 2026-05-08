@@ -152,136 +152,251 @@ function probit(p) {
 }
 
 // ---------------------------------------------------------------------------
-// DISTRICTS — single-realisation pool drawn from an α-mixture of an
-// arbitrary list of Gaussian components.  The pool is one chamber's worth
-// of districts, reused across all `nsim` simulations within a render.
+// DISTRICTS — one chamber's worth of districts, reused across all `nsim`
+// simulations within a render.  The pool's underlying distribution is the
+// linear mixture
+//
+//   density(x) = (1 − rGerry − dGerry) · base(x)
+//              +  rGerry              · gerry-R(x)
+//              +  dGerry              · gerry-D(x)
+//
+// where `rGerry` and `dGerry` are absolute weights in [0, 0.5] (the UI caps
+// each at 0.5 so they can't add to more than 1).  Both gerry components have
+// a shared `removeRange` zeroed out — the band of competitive seats vanishes
+// from the gerry portion.
 //
 // `base` shape (from CONFIG.districtBase):
 //   {
 //     enforceSymmetry: true | false,
 //     components: [ { mean, sigma, weight }, ... ],
 //   }
+//   enforceSymmetry: true  – the base density is symmetrised about 0
+//     (replaced with 0.5·b(x) + 0.5·b(−x)) before mixing, so the base
+//     contribution to the pool is exactly symmetric.
+//   enforceSymmetry: false – base is used as-is.
 //
-//   enforceSymmetry: true   – sample m points from the right-half mixture
-//     (reject anything < 0 or > 100), sort, mirror to the left half.  The
-//     full pool is exactly symmetric and the median is forced to 0.
+// `gerry` shape:
+//   {
+//     removeRange: [lo, hi],
+//     componentsR: [ { mean, sigma, weight }, ... ],   // R-favoured packing
+//     componentsD: [ { mean, sigma, weight }, ... ],   // D-favoured packing
+//   }
+//   The gerry density is always asymmetric (no enforceSymmetry).
 //
-//   enforceSymmetry: false  – sample 2m+1 points from the full mixture
-//     (reject anything outside [-100, 100]).  No mirroring: components with
-//     non-zero means produce a skewed pool.
-//
-// `gerry` shape (unchanged):
-//   { removeRange: [lo, hi], bumpCenter, bumpSigma, bumpWeight }
-//   Removes samples in `removeRange` from the base, replaces them with
-//   draws from a Gaussian bump.  Mirroring rules follow `enforceSymmetry`.
-//
-// Cached by (N, α, base, gerry-fingerprint).
+// Cached by (N, rGerry, dGerry, base, gerry-fingerprint).
 // ---------------------------------------------------------------------------
 let _poolCache = { key: null, pool: null };
 
-function _districtPoolKey(N, alpha, base, gerry) {
-  const components = base.components || [];
-  const enforceSym = !!base.enforceSymmetry;
-  const compsKey = components.map(c => `${c.mean ?? 0},${c.sigma},${c.weight}`).join(';');
-  return N + '|' + alpha + '|' + (enforceSym ? 'S' : 'A') + '|' + compsKey + '|' +
-         gerry.removeRange[0] + '|' + gerry.removeRange[1] + '|' +
-         gerry.bumpCenter + '|' + gerry.bumpSigma + '|' + gerry.bumpWeight;
+function _componentsKey(components) {
+  return (components || [])
+    .map(c => `${c.mean ?? 0},${c.sigma},${c.weight}`)
+    .join(';');
 }
 
-// Uncached: actually draws a fresh pool every call.  Used by runSimulations
-// to regenerate the district pool periodically (so each render samples many
-// realisations of the chamber, not just one).
-function sampleDistrictPool(N, alpha, base, gerry) {
-  const components = base.components || [];
-  const enforceSym = !!base.enforceSymmetry;
-  // Pre-compute cumulative component weights for fast weighted picking.
+function _districtPoolKey(N, rGerry, dGerry, base, gerry) {
+  const sym = base.enforceSymmetry ? 'S' : 'A';
+  return N + '|' + rGerry + '|' + dGerry + '|' + sym + '|' +
+         _componentsKey(base.components) + '|' +
+         gerry.removeRange[0] + '|' + gerry.removeRange[1] + '|' +
+         _componentsKey(gerry.componentsR) + '|' +
+         _componentsKey(gerry.componentsD);
+}
+
+// Build a weighted-picker closure for a list of `{ mean, sigma, weight }`
+// components.  The returned function draws one rejection-sampled value
+// inside [loBound, hiBound] from the mixture.
+function _buildMixtureSampler(components) {
+  const comps = components || [];
   let totalW = 0;
-  for (const c of components) totalW += c.weight;
-  const cumW = new Float64Array(components.length);
+  for (const c of comps) totalW += c.weight;
+  const cumW = new Float64Array(comps.length);
   let acc = 0;
-  for (let i = 0; i < components.length; i++) {
-    acc += components[i].weight;
+  for (let i = 0; i < comps.length; i++) {
+    acc += comps[i].weight;
     cumW[i] = acc;
   }
-  function pickComponent() {
+  function pick() {
     const r = Math.random() * totalW;
-    for (let i = 0; i < cumW.length; i++) if (r < cumW[i]) return components[i];
-    return components[components.length - 1];
+    for (let i = 0; i < cumW.length; i++) if (r < cumW[i]) return comps[i];
+    return comps[comps.length - 1];
   }
-
-  const removeLo = gerry.removeRange[0];
-  const removeHi = gerry.removeRange[1];
-  // Lower / upper bound of the support depends on whether we're sampling the
-  // right half or the full range.
-  function sampleBase(loBound, hiBound) {
-    const c = pickComponent();
+  return function sample(loBound, hiBound) {
+    const c = pick();
     const mean = c.mean ?? 0;
     let x;
     do { x = mean + c.sigma * randn(); } while (x < loBound || x > hiBound);
     return x;
-  }
-  // Pure rejection sampling on [loBound, hiBound].  No folding — samples
-  // that fall outside support (e.g. the bump's left tail going negative
-  // when sampling the right half) are simply redrawn.
-  function sampleBump(loBound, hiBound) {
-    let x;
-    do {
-      x = gerry.bumpCenter + gerry.bumpSigma * randn();
-    } while (x < loBound || x > hiBound);
-    return x;
-  }
-  // Gerry distribution = (base with removeRange cut out) ∪ bump, with the
-  // bump *also* rejected inside removeRange so the conceptual model holds:
-  // the gerry component has ZERO density in removeRange, and instead packs
-  // the safe-R bump.  Without this, the bump's left tail leaks back into
-  // the "vanished" competitive band.
-  function sampleOne(loBound, hiBound) {
-    if (Math.random() >= alpha) {
-      return sampleBase(loBound, hiBound);
+  };
+}
+
+// Monte-Carlo sampler — draws a fresh pool every call by independent samples
+// from base / gerry-R / gerry-D in proportion to (1 − rGerry − dGerry),
+// rGerry, dGerry.  Kept around mostly for diagnostic / debugging use; the
+// main path goes through `analyticDistrictPool` below for noise-free output.
+function sampleDistrictPool(N, rGerry, dGerry, base, gerry) {
+  const enforceSym = !!base.enforceSymmetry;
+  const sampleBaseMix    = _buildMixtureSampler(base.components);
+  const sampleGerryRMix  = _buildMixtureSampler(gerry.componentsR);
+  const sampleGerryDMix  = _buildMixtureSampler(gerry.componentsD);
+  const removeLo = gerry.removeRange[0];
+  const removeHi = gerry.removeRange[1];
+
+  // Clamp so weights are valid even if the caller doesn't enforce the cap.
+  const wR = Math.max(0, rGerry);
+  const wD = Math.max(0, dGerry);
+  const wB = Math.max(0, 1 - wR - wD);
+
+  // Deterministic split into nBase / nR / nD.  Match the mixture weights in
+  // expectation; per-render granularity is 1/N ≈ 0.23%.
+  const nBase = Math.round(N * wB / (wB + wR + wD || 1));
+  const nR    = Math.round(N * wR / (wB + wR + wD || 1));
+  const nD    = N - nBase - nR;
+
+  const pool = new Array(N);
+  let idx = 0;
+
+  // ---- BASE portion (symmetric draw if enforceSym) ----
+  if (enforceSym && nBase > 0) {
+    const halfCount = nBase >> 1;
+    const isOdd = (nBase & 1) === 1;
+    const drawCount = halfCount + (isOdd ? 1 : 0);
+    const half = new Array(drawCount);
+    for (let i = 0; i < drawCount; i++) half[i] = sampleBaseMix(0, 100);
+    half.sort((a, b) => a - b);
+    if (isOdd) {
+      pool[idx++] = half[0];
+      for (let i = 1; i <= halfCount; i++) {
+        pool[idx++] =  half[i];
+        pool[idx++] = -half[i];
+      }
+    } else {
+      for (let i = 0; i < halfCount; i++) {
+        pool[idx++] =  half[i];
+        pool[idx++] = -half[i];
+      }
     }
-    let x;
-    if (Math.random() < gerry.bumpWeight) {
-      do { x = sampleBump(loBound, hiBound); }
-      while (x >= removeLo && x <= removeHi);
-      return x;
-    }
-    do { x = sampleBase(loBound, hiBound); }
-    while (x >= removeLo && x <= removeHi);
-    return x;
+  } else {
+    for (let i = 0; i < nBase; i++) pool[idx++] = sampleBaseMix(-100, 100);
   }
 
-  let pool;
-  if (enforceSym) {
-    const m = (N - 1) >> 1;
-    // Sample m+1 right-half points so the median can come from the
-    // distribution naturally instead of being hard-pinned to 0.  The
-    // smallest right-half sample (`half[0]`) sits at the median slot —
-    // for components centred away from 0 this avoids an artificial
-    // spike at the centre of the histogram.  The remaining m points
-    // are mirrored to the left half so the pool is still symmetric
-    // about the median.
-    const half = new Array(m + 1);
-    for (let i = 0; i <= m; i++) half[i] = sampleOne(0, 100);
-    half.sort((a, b) => a - b);
-    pool = new Array(N);
-    for (let i = 0; i < m; i++) pool[i] = -half[m - i];
-    pool[m] = half[0];
-    for (let i = 0; i < m; i++) pool[m + 1 + i] = half[i + 1];
-  } else {
-    pool = new Array(N);
-    for (let i = 0; i < N; i++) pool[i] = sampleOne(-100, 100);
-    pool.sort((a, b) => a - b);
+  // ---- GERRY R portion ----
+  for (let i = 0; i < nR; i++) {
+    let x;
+    do { x = sampleGerryRMix(-100, 100); }
+    while (x >= removeLo && x <= removeHi);
+    pool[idx++] = x;
   }
+  // ---- GERRY D portion ----
+  for (let i = 0; i < nD; i++) {
+    let x;
+    do { x = sampleGerryDMix(-100, 100); }
+    while (x >= removeLo && x <= removeHi);
+    pool[idx++] = x;
+  }
+
+  pool.sort((a, b) => a - b);
   return pool;
 }
 
-// Cached wrapper: returns the same pool while (N, alpha, base, gerry) are
-// unchanged.  Used by callers that want a deterministic single realisation
-// (e.g. simulateOne when called directly without a passed-in pool).
-function buildDistrictPool(N, alpha, base, gerry) {
-  const key = _districtPoolKey(N, alpha, base, gerry);
+// ---------------------------------------------------------------------------
+// ANALYTIC POOL
+// Instead of Monte-Carlo-sampling the chamber and averaging batches together
+// to smooth out noise, compute the pool's i-th order statistic exactly from
+// the underlying mixture's CDF.  Build a fine-grid discretisation of the
+// pool's density, accumulate to a CDF, then linearly invert it at the N
+// evenly-spaced quantiles q_i = (i + 0.5) / N.  Result: zero sampling noise,
+// fully deterministic, and faster than one random pool.
+// ---------------------------------------------------------------------------
+
+const ANALYTIC_NCELLS = 4000;          // midpoint cells across [-100, 100]
+const ANALYTIC_LO     = -100;
+const ANALYTIC_HI     = 100;
+
+function _gaussianPdf(x, mean, sigma) {
+  const z = (x - mean) / sigma;
+  return Math.exp(-0.5 * z * z) / (sigma * 2.5066282746310002 /* √(2π) */);
+}
+
+// Mixture density at x for a list of `{ mean, sigma, weight }` components.
+// Renormalised so the weights need only be relative.
+function _mixturePdf(x, components) {
+  if (!components || components.length === 0) return 0;
+  let d = 0, w = 0;
+  for (const c of components) {
+    d += c.weight * _gaussianPdf(x, c.mean ?? 0, c.sigma);
+    w += c.weight;
+  }
+  return w > 0 ? d / w : 0;
+}
+
+function analyticDistrictPool(N, rGerry, dGerry, base, gerry) {
+  const enforceSym = !!base.enforceSymmetry;
+  const baseComps  = base.components || [];
+  const gR = gerry.componentsR || [];
+  const gD = gerry.componentsD || [];
+  // Clamp into the valid simplex {wB, wR, wD ≥ 0, wB+wR+wD = 1}.
+  const wR = Math.max(0, rGerry);
+  const wD = Math.max(0, dGerry);
+  const wB = Math.max(0, 1 - wR - wD);
+  const removeLo = gerry.removeRange[0];
+  const removeHi = gerry.removeRange[1];
+
+  function baseDens(x) {
+    const d = _mixturePdf(x, baseComps);
+    return enforceSym ? 0.5 * (d + _mixturePdf(-x, baseComps)) : d;
+  }
+  function gerryRDens(x) {
+    if (x >= removeLo && x <= removeHi) return 0;
+    return _mixturePdf(x, gR);
+  }
+  function gerryDDens(x) {
+    if (x >= removeLo && x <= removeHi) return 0;
+    return _mixturePdf(x, gD);
+  }
+
+  // Build the pool's CDF using midpoint-cell integration so the integration
+  // is exactly symmetric around 0 for symmetric densities (no boundary
+  // double-count of x = 0 vs x = -100/+100).  Each cell has width `step`
+  // and is sampled at its midpoint x_i = lo + (i + 0.5)·step.  cdf[i]
+  // represents P(X ≤ rightEdge of cell i) = P(X < lo + (i + 1)·step).
+  const step = (ANALYTIC_HI - ANALYTIC_LO) / ANALYTIC_NCELLS;
+  const cdf  = new Float64Array(ANALYTIC_NCELLS);
+  let acc = 0;
+  for (let i = 0; i < ANALYTIC_NCELLS; i++) {
+    const x = ANALYTIC_LO + (i + 0.5) * step;
+    acc += wB * baseDens(x) + wR * gerryRDens(x) + wD * gerryDDens(x);
+    cdf[i] = acc;
+  }
+  const total = cdf[ANALYTIC_NCELLS - 1];
+  if (!isFinite(total) || total <= 0) {
+    // Degenerate config (zero density everywhere) — return a flat pool at 0.
+    return new Array(N).fill(0);
+  }
+  for (let i = 0; i < ANALYTIC_NCELLS; i++) cdf[i] /= total;
+
+  // Sweep the cells forward in lockstep with increasing target quantiles —
+  // O(N + grid) total.  Linear-interpolate between the bracketing cell
+  // right-edges for sub-cell precision.
+  const out = new Array(N);
+  let gi = 0;
+  for (let i = 0; i < N; i++) {
+    const q = (i + 0.5) / N;
+    while (gi < ANALYTIC_NCELLS - 1 && cdf[gi] < q) gi++;
+    const cHi = cdf[gi];
+    const cLo = gi > 0 ? cdf[gi - 1] : 0;
+    const xHi = ANALYTIC_LO + (gi + 1) * step;  // right edge of cell gi
+    out[i] = (cHi === cLo) ? xHi : xHi - step * (cHi - q) / (cHi - cLo);
+  }
+  return out;
+}
+
+// Cached wrapper: returns the same pool while (N, rGerry, dGerry, base,
+// gerry) are unchanged.  The analytic pool is deterministic so caching is a
+// pure speed-up — it's already the same output every call for a given key.
+function buildDistrictPool(N, rGerry, dGerry, base, gerry) {
+  const key = _districtPoolKey(N, rGerry, dGerry, base, gerry);
   if (_poolCache.key === key) return _poolCache.pool;
-  const pool = sampleDistrictPool(N, alpha, base, gerry);
+  const pool = analyticDistrictPool(N, rGerry, dGerry, base, gerry);
   _poolCache = { key, pool };
   return pool;
 }
@@ -305,19 +420,22 @@ function anchoredLinear(currentValue, defaultValue, defaultMu, slope) {
 // `simulateOne` consumes.  `breadth` is the Gaussian half-decay distance
 // (in % points) and is always passed through — it shapes the bell whether
 // or not the offsets are zero.
-//   mode === 'centered': mean / variance offsets = 0; varAmp = 0.
+//   mode === 'centered': mean / variance offsets = 0; the caller should
+//                        also force the per-party amplitudes to 0.
 //   mode === 'offsetK':  D mean peaks at +K, R at −K;
-//                        D variance peaks at +L, R at −L; both with `varAmp`.
-function intentionalModOffsets(mode, K, L, meanAmp, varAmp, meanBreadth, varBreadth, varModRatio) {
+//                        D variance peaks at +L, R at −L.
+// (Per-party amplitudes are computed in readParams via anchoredLinear and
+// passed to simulateOne as meanAmpD / meanAmpR / varAmpD / varAmpR — see
+// the candidateMean coupling for the same anchored-default pattern.
+// `varAmp*` is added directly to σ (one standard deviation), not to σ².
+function intentionalModOffsets(mode, K, L, meanBreadth, varBreadth) {
   const useOffset = mode === 'offsetK';
   return {
+    mode,
     modOffsetD:  useOffset ? +K : 0,
     modOffsetR:  useOffset ? -K : 0,
     varOffsetD:  useOffset ? +L : 0,
     varOffsetR:  useOffset ? -L : 0,
-    meanAmp,
-    varAmp:      useOffset ? varAmp : 0,
-    varModRatio,
     meanBreadth,
     varBreadth,
   };
@@ -328,11 +446,20 @@ function intentionalModOffsets(mode, K, L, meanAmp, varAmp, meanBreadth, varBrea
 // `simulateOne(p, returnFull)` runs one full chamber under params `p`.  When
 // `returnFull` is true, also returns per-district arrays for plotting.
 // ---------------------------------------------------------------------------
-function simulateOne(p, returnFull = false, districtPool = null) {
+// `mismatchTracker`, when provided, is `{ binIdxByDistrict, rInD, dInR }` —
+// pre-computed bin indices and accumulators that get bumped per mismatched
+// district.  Lets runSimulations build the per-bin mismatch chart data as a
+// byproduct of the main run, eliminating the separate "see more plots" pass.
+//
+// `electedTracker`, when provided, is `{ lo, binSize, nBins, dCounts, rCounts }` —
+// bins the ELECTED rep's ideology per district, separated by which party won
+// the seat.  Lets the see-more-plots section render per-party distributions
+// of the actual representatives that get sent to the chamber.
+function simulateOne(p, returnFull = false, districtPool = null, mismatchTracker = null, electedTracker = null) {
   // Districts are deterministic given (m, muDist, sigmaDist).  When
   // simulateOne is called from runSimulations, the caller passes the
   // pre-computed pool to avoid regenerating it per simulation.
-  const d = districtPool || buildDistrictPool(2 * p.m + 1, p.alpha, p.base, p.gerry);
+  const d = districtPool || buildDistrictPool(2 * p.m + 1, p.rGerry, p.dGerry, p.base, p.gerry);
   const N = d.length;
   const r = returnFull ? new Float64Array(N) : null;
   const party = returnFull ? new Array(N) : null;
@@ -343,10 +470,12 @@ function simulateOne(p, returnFull = false, districtPool = null) {
   // in registers / locals instead of re-walking the params object N times.
   const v = p.v;
   const muD = p.muD, muR = p.muR, sigmaD = p.sigmaD, sigmaR = p.sigmaR;
-  const bDs = p.bDs, bDc = p.bDc, bRs = p.bRs, bRc = p.bRc;
   const wMod = p.wMod, sigmaN = p.sigmaN;
-  const meanAmp = p.meanAmp;
-  const varScale = p.varAmp * p.varModRatio;
+  // Per-party intentional-moderation amplitudes — already anchored at the
+  // slider default by `readParams`, so the inner loop doesn't multiply them
+  // by the slider value or any extra ratio factor.
+  const meanAmpD = p.meanAmpD, meanAmpR = p.meanAmpR;
+  const varAmpD  = p.varAmpD,  varAmpR  = p.varAmpR;
   const modOffsetD = p.modOffsetD, modOffsetR = p.modOffsetR;
   const varOffsetD = p.varOffsetD, varOffsetR = p.varOffsetR;
   const meanBreadthSq = p.meanBreadth * p.meanBreadth;
@@ -354,13 +483,30 @@ function simulateOne(p, returnFull = false, districtPool = null) {
   const noiseType = p.noiseType;
   const batesW = p.batesW, batesN = p.batesN;
   const tukeyW = p.tukeyW, tukeyLambda = p.tukeyLambda;
-  // Combine bDs+bDc and bRs+bRc into the v=0 fast path: when v == 0 the +v
-  // bells equal the base bells, so meanAmp · (bDs + bDc) · bell collapses to
-  // a single multiplied bell.  We pick the right scalar once outside the loop.
+  // When v == 0 the +v bell equals the base bell, so the two-bell sum
+  // (swing + competitive) collapses to twice the base bell — we fold the
+  // factor of 2 into the scale once outside the loop.
   const vIsZero = v === 0;
-  const meanScaleD = vIsZero ? meanAmp * (bDs + bDc) : meanAmp;
-  const meanScaleR = vIsZero ? meanAmp * (bRs + bRc) : meanAmp;
+  const meanScaleD = vIsZero ? meanAmpD * 2 : meanAmpD;
+  const meanScaleR = vIsZero ? meanAmpR * 2 : meanAmpR;
 
+  // Hoist mismatch-tracker fields to locals so the per-district bumps are
+  // tight pointer-array writes (no property lookup in the hot loop).  In
+  // addition to the mismatched-only counts (rInD, dInR), we also tally
+  // total wins per bin per party (rWins, dWins) so the renderer can show
+  // the full who-won-where distribution, not just the mismatched subset.
+  const mtBins  = mismatchTracker ? mismatchTracker.binIdxByDistrict : null;
+  const mtRInD  = mismatchTracker ? mismatchTracker.rInD : null;
+  const mtDInR  = mismatchTracker ? mismatchTracker.dInR : null;
+  const mtRWins = mismatchTracker ? mismatchTracker.rWins : null;
+  const mtDWins = mismatchTracker ? mismatchTracker.dWins : null;
+  // Elected-rep ideology tracker: per district, only the winner's ideology
+  // gets binned, separated by their party.  Hoist locals for the hot loop.
+  const atDCounts = electedTracker ? electedTracker.dCounts : null;
+  const atRCounts = electedTracker ? electedTracker.rCounts : null;
+  const atLo      = electedTracker ? electedTracker.lo : 0;
+  const atStep    = electedTracker ? electedTracker.binSize : 1;
+  const atNBins   = electedTracker ? electedTracker.nBins : 0;
   let mismatches = 0;  // R in D-lean district, or D in R-lean district (di ≠ 0)
   if (vIsZero) {
     // Fast path — only 2 mean bells per district instead of 4.
@@ -374,8 +520,8 @@ function simulateOne(p, returnFull = false, districtPool = null) {
       const aVR = di - varOffsetR;
       const bellVar_D = Math.exp(-(aVD * aVD) / varBreadthSq);
       const bellVar_R = Math.exp(-(aVR * aVR) / varBreadthSq);
-      const sigmaD_eff = sigmaD + varScale * bDs * bellVar_D;
-      const sigmaR_eff = sigmaR + varScale * bRs * bellVar_R;
+      const sigmaD_eff = sigmaD + varAmpD * bellVar_D;
+      const sigmaR_eff = sigmaR + varAmpR * bellVar_R;
       const cD =  meanScaleD * bellD_D + muD + sigmaD_eff * randn();
       const cR = -meanScaleR * bellD_R + muR + sigmaR_eff * randn();
       let extraNoise = 0;
@@ -385,11 +531,29 @@ function simulateOne(p, returnFull = false, districtPool = null) {
         if (batesW) extraNoise = batesW * batesSample(batesN);
       }
       const z = (di - wMod * (cD + cR)) / sigmaN + extraNoise;
-      const isR = z > 0 ? 1 : 0;
+      // Hard cutoff at z = 0; randomise on exact ties so a perfectly
+      // symmetric setup (e.g. rGerry === dGerry, v = 0) has no
+      // deterministic bias in who wins the marginal seat.
+      const isR = z > 0 || (z === 0 && Math.random() < 0.5) ? 1 : 0;
       const ri = isR ? cR : cD;
       rVals[i] = ri;
       partyVals[i] = isR;
-      if (di !== 0 && ((isR && di < 0) || (!isR && di > 0))) mismatches++;
+      if (mtBins) {
+        const bi = mtBins[i];
+        if (isR) mtRWins[bi]++; else mtDWins[bi]++;
+      }
+      if (atDCounts) {
+        let bi = ((ri - atLo) / atStep) | 0;
+        if (bi < 0) bi = 0; else if (bi >= atNBins) bi = atNBins - 1;
+        if (isR) atRCounts[bi]++; else atDCounts[bi]++;
+      }
+      if (di !== 0 && ((isR && di < 0) || (!isR && di > 0))) {
+        mismatches++;
+        if (mtBins) {
+          const bi = mtBins[i];
+          if (isR) mtRInD[bi]++; else mtDInR[bi]++;
+        }
+      }
       if (returnFull) { r[i] = ri; party[i] = isR ? 'R' : 'D'; }
     }
   } else for (let i = 0; i < N; i++) {
@@ -407,10 +571,10 @@ function simulateOne(p, returnFull = false, districtPool = null) {
     const aVR = di - varOffsetR;
     const bellVar_D = Math.exp(-(aVD * aVD) / varBreadthSq);
     const bellVar_R = Math.exp(-(aVR * aVR) / varBreadthSq);
-    const sigmaD_eff = sigmaD + varScale * bDs * bellVar_D;
-    const sigmaR_eff = sigmaR + varScale * bRs * bellVar_R;
-    const cD =  meanAmp * (bDs * bellD_D + bDc * bellDV_D) + muD + sigmaD_eff * randn();
-    const cR = -meanAmp * (bRs * bellD_R + bRc * bellDV_R) + muR + sigmaR_eff * randn();
+    const sigmaD_eff = sigmaD + varAmpD * bellVar_D;
+    const sigmaR_eff = sigmaR + varAmpR * bellVar_R;
+    const cD =  meanAmpD * (bellD_D + bellDV_D) + muD + sigmaD_eff * randn();
+    const cR = -meanAmpR * (bellD_R + bellDV_R) + muR + sigmaR_eff * randn();
     // Election uncertainty.  Replaces the old sigmoid → Math.random; we now
     // hard-cut on z.
     let extraNoise = 0;
@@ -424,7 +588,22 @@ function simulateOne(p, returnFull = false, districtPool = null) {
     const ri = isR ? cR : cD;
     rVals[i] = ri;
     partyVals[i] = isR;
-    if (di !== 0 && ((isR && di < 0) || (!isR && di > 0))) mismatches++;
+    if (mtBins) {
+      const bi = mtBins[i];
+      if (isR) mtRWins[bi]++; else mtDWins[bi]++;
+    }
+    if (atDCounts) {
+      let bi = ((ri - atLo) / atStep) | 0;
+      if (bi < 0) bi = 0; else if (bi >= atNBins) bi = atNBins - 1;
+      if (isR) atRCounts[bi]++; else atDCounts[bi]++;
+    }
+    if (di !== 0 && ((isR && di < 0) || (!isR && di > 0))) {
+      mismatches++;
+      if (mtBins) {
+        const bi = mtBins[i];
+        if (isR) mtRInD[bi]++; else mtDInR[bi]++;
+      }
+    }
     if (returnFull) { r[i] = ri; party[i] = isR ? 'R' : 'D'; }
   }
 
@@ -441,32 +620,133 @@ function simulateOne(p, returnFull = false, districtPool = null) {
   return { medianIdeology, medianParty, rSeats, mismatches };
 }
 
-// Number of consecutive simulations that share a single district-pool
-// realisation before a new one is sampled.  At 1, every sim gets a fresh
-// pool (slowest, most variance).  At nsim, all sims share one pool (fastest,
-// least variance — original behaviour).  50 covers ~nsim/POOL_REUSE distinct
-// chambers per render — enough variance to break the lock to a single
-// realisation without dominating the per-sim cost.
-const POOL_REUSE = 50;
-
-function runSimulations(p, n) {
+// `mismatchBinSpec`, when provided, is `{ binSize, lo, hi }` — the bins the
+// caller wants per-bin mismatch counts (R-in-D-lean, D-in-R-lean) accumulated
+// into across all `n` simulations.  Result is returned as
+// `{ rInD, dInR, distCounts, centres, ranges, binSize }`.  This is what the
+// "see more plots" mismatch chart reads, so it can reuse the main 1000-sim
+// run instead of doing its own pass.
+//
+// `electedBinSpec`, when provided, is `{ binSize, lo, hi }` for the elected
+// rep ideology histogram, split by party (only the winner of each district
+// gets counted, into the bin matching their party).  Returned in the result
+// object as `electedBins` with `dCounts`, `rCounts`, `centres`, `ranges`,
+// plus per-chamber averages `avgD` / `avgR`.
+function runSimulations(p, n, mismatchBinSpec = null, electedBinSpec = null) {
   const meds = new Float64Array(n);
   const parties = new Uint8Array(n);
   const seats = new Int32Array(n);
   const mismatches = new Int32Array(n);
   const N = 2 * p.m + 1;
-  // Resample the district pool every POOL_REUSE simulations so a render
-  // averages over many chambers rather than locking to one realisation.
-  let districtPool = sampleDistrictPool(N, p.alpha, p.base, p.gerry);
-  for (let s = 0; s < n; s++) {
-    if (s > 0 && s % POOL_REUSE === 0) {
-      districtPool = sampleDistrictPool(N, p.alpha, p.base, p.gerry);
+  const m = (N - 1) >> 1;
+  // Analytic pool: i-th district = quantile (i + 0.5) / N of the underlying
+  // mixture's CDF.  No Monte-Carlo noise, deterministic, reused for all `n`
+  // simulations.  Reads as the "expected chamber" given the current sliders.
+  const districtPool = analyticDistrictPool(N, p.rGerry, p.dGerry, p.base, p.gerry);
+  // The median-district partisanship is now the same for every sim — single
+  // value repeated across the array (kept array-shaped so renderStats can
+  // use the same code path).
+  const medianDistParts = new Float64Array(n).fill(districtPool[m]);
+
+  // Build the optional mismatch-bin tracker.  Pre-compute each district's
+  // bin index once so the inner loop just does one array bump per mismatch.
+  let mismatchTracker = null;
+  let mismatchBins   = null;
+  if (mismatchBinSpec) {
+    const { binSize, lo, hi } = mismatchBinSpec;
+    const nBins = Math.max(1, Math.round((hi - lo) / binSize));
+    const binIdxByDistrict = new Int32Array(N);
+    for (let i = 0; i < N; i++) {
+      const di = districtPool[i];
+      let idx = Math.floor((di - lo) / binSize);
+      if (idx < 0) idx = 0;
+      else if (idx >= nBins) idx = nBins - 1;
+      binIdxByDistrict[i] = idx;
     }
-    const out = simulateOne(p, false, districtPool);
+    const rInD  = new Float64Array(nBins);
+    const dInR  = new Float64Array(nBins);
+    const rWins = new Float64Array(nBins);
+    const dWins = new Float64Array(nBins);
+    mismatchTracker = { binIdxByDistrict, rInD, dInR, rWins, dWins };
+    // District counts per bin (excluding di === 0 to mirror the mismatch
+    // convention) and bin geometry for the renderer.
+    const distCounts = new Int32Array(nBins);
+    for (let i = 0; i < N; i++) {
+      if (districtPool[i] === 0) continue;
+      distCounts[binIdxByDistrict[i]]++;
+    }
+    const centres = new Array(nBins);
+    const ranges  = new Array(nBins);
+    for (let i = 0; i < nBins; i++) {
+      const a = lo + i * binSize;
+      const b = a + binSize;
+      centres[i] = (a + b) / 2;
+      ranges[i]  = [a, b];
+    }
+    mismatchBins = { rInD, dInR, rWins, dWins, distCounts, centres, ranges, binSize, nBins };
+  }
+
+  // Optional elected-rep ideology tracker (per-party).
+  let electedTracker = null;
+  let electedBins    = null;
+  if (electedBinSpec) {
+    const { binSize, lo, hi } = electedBinSpec;
+    const nBins = Math.max(1, Math.round((hi - lo) / binSize));
+    const dCounts = new Float64Array(nBins);
+    const rCounts = new Float64Array(nBins);
+    electedTracker = { dCounts, rCounts, lo, binSize, nBins };
+    const centres = new Array(nBins);
+    const ranges  = new Array(nBins);
+    for (let i = 0; i < nBins; i++) {
+      const a = lo + i * binSize;
+      const b = a + binSize;
+      centres[i] = (a + b) / 2;
+      ranges[i]  = [a, b];
+    }
+    electedBins = { dCounts, rCounts, centres, ranges, binSize, nBins };
+  }
+
+  for (let s = 0; s < n; s++) {
+    const out = simulateOne(p, false, districtPool, mismatchTracker, electedTracker);
     meds[s] = out.medianIdeology;
     parties[s] = out.medianParty === 'R' ? 1 : 0;
     seats[s] = out.rSeats;
     mismatches[s] = out.mismatches;
   }
-  return { meds, parties, seats, mismatches, districtPool };
+
+  // After the loop, normalise per-bin counts to per-chamber averages.
+  if (mismatchBins) {
+    const nB = mismatchBins.nBins;
+    const avgRInD  = new Array(nB);
+    const avgDInR  = new Array(nB);
+    const avgRWins = new Array(nB);
+    const avgDWins = new Array(nB);
+    for (let i = 0; i < nB; i++) {
+      avgRInD[i]  = mismatchBins.rInD[i]  / n;
+      avgDInR[i]  = mismatchBins.dInR[i]  / n;
+      avgRWins[i] = mismatchBins.rWins[i] / n;
+      avgDWins[i] = mismatchBins.dWins[i] / n;
+    }
+    mismatchBins.avgRInD  = avgRInD;
+    mismatchBins.avgDInR  = avgDInR;
+    mismatchBins.avgRWins = avgRWins;
+    mismatchBins.avgDWins = avgDWins;
+    mismatchBins.nSims    = n;
+  }
+
+  // Normalise elected-rep counts to per-chamber averages.
+  if (electedBins) {
+    const nB = electedBins.nBins;
+    const avgD = new Array(nB);
+    const avgR = new Array(nB);
+    for (let i = 0; i < nB; i++) {
+      avgD[i] = electedBins.dCounts[i] / n;
+      avgR[i] = electedBins.rCounts[i] / n;
+    }
+    electedBins.avgD  = avgD;
+    electedBins.avgR  = avgR;
+    electedBins.nSims = n;
+  }
+
+  return { meds, parties, seats, mismatches, districtPool, medianDistParts, mismatchBins, electedBins };
 }
