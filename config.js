@@ -16,23 +16,26 @@ window.CONFIG = {
 		// Popular Vote (Republican wave +, Democratic wave -)
 		v: { min: -15, max: 15, step: 0.5, value: 0 },
 
-		// District map: σ of the district-partisanship distribution.
-		// Higher → more swing districts, fewer safe ones.
-		districtCompet: { min: 13, max: 33, step: 1, value: 23 },
+		// Proportion of gerrymandered seats (α ∈ [0, 1]).  At α = 0 the chamber
+		// is drawn from a single broad Gaussian centred on 0 (≈ historical
+		// shape).  At α = 1 every district comes from the gerrymandered
+		// distribution (see `districtGerry` below).  The pool is the
+		// α-weighted mixture: (1 − α) · base + α · gerry.
+		districtCompet: { min: 0, max: 1, step: 0.05, value: 0.5 },
 
 		// Ambient candidate moderation: σ of the candidate-ideology distribution.
 		// Used directly as σ in the simulator; also drives μ through `candidateMean`.
-		dAmbMod: { min: 1, max: 4, step: 0.25, value: 2 },
-		rAmbMod: { min: 1, max: 4, step: 0.25, value: 2 },
+		dAmbMod: { min: 0, max: 4, step: 0.1, value: 2 },
+		rAmbMod: { min: 0, max: 4, step: 0.1, value: 2 },
 
 		// Intentional moderation: how strongly candidates moderate toward the
 		// district median.  Asymmetric range — only nonneg values modelled.
-		dIntMod: { min: 2, max: 10, step: 0.05, value: 4 },
-		rIntMod: { min: 2, max: 10, step: 0.05, value: 4 },
+		dIntMod: { min: 0, max: 12, step: 0.1, value: 6 },
+		rIntMod: { min: 0, max: 12, step: 0.1, value: 6 },
 
 		// How heavily voters punish ideologically extreme candidates relative
 		// to district partisanship.
-		qualImp: { min: 0, max: 1.5, step: 0.01, value: 1 },
+		qualImp: { min: 0, max: 1.4, step: 0.01, value: 0.7 },
 	},
 
 	// ---------------- SIMULATION CONSTANTS -------------------------------------
@@ -45,19 +48,31 @@ window.CONFIG = {
 		//   logInvD = log(100 / (|d| + epsPct))
 		epsPct: 1,
 		// Election-uncertainty noise added to z (the hard-cutoff input).
-		// Continuous-N Bates draw — sum of N Uniform(−1, +1) samples,
-		// normalised to unit variance, with fractional N achieved by adding
-		// one extra uniform with probability frac(N).  Bounded, bell-shaped,
-		// and very fast (N+1 calls to Math.random()).
+		// `noiseType` picks which distribution to draw from: 'bates' or 'tukey'.
+		// Both blocks live alongside each other so you can flip between them
+		// without losing your tuned parameters.
+		noiseType: "tukey",
+		// Bates: continuous-N average of Uniform(−1, +1) draws, normalised to
+		// unit variance.  Bounded, bell-shaped, fast.
 		//   N = 1  → Uniform(−√3, +√3)               (flattest)
 		//   N = 2  → triangular
 		//   N = 3  → ≈ Gaussian-on-bounded-support
 		//   N → ∞  → Gaussian
-		// `weight` is an outer multiplier on the unit-variance draw, so it is
-		// the noise σ directly.  Set weight = 0 to disable.
+		// `weight` is the noise σ directly.  Set weight = 0 to disable.
 		bates: {
 			weight: 3,
 			N: 2.5,
+		},
+		// Tukey lambda: single shape parameter controls the whole family.
+		//   λ = 0     → logistic (heavier than Gaussian)
+		//   λ ≈ 0.14  → ≈ Gaussian
+		//   λ = 0.5   → bounded, sub-Gaussian
+		//   λ = 1     → Uniform(−1, +1)
+		// NOT normalised to unit variance — `weight` is an outer multiplier
+		// on the raw draw, tune to taste.
+		tukey: {
+			weight: 1,
+			lambda: 0.14,
 		},
 	},
 
@@ -70,20 +85,43 @@ window.CONFIG = {
 	// This lets you change the slider's default σ and the default μ
 	// independently — at slider=default, μ = defaultMu regardless of σ_default.
 	candidateMean: {
-		D: { defaultMu: -30, slope: 1 },
-		R: { defaultMu: 30, slope: -1 },
+		D: { defaultMu: -30, slope: 2 },
+		R: { defaultMu: 30, slope: -2 },
 	},
 
-	// ---------------- DISTRICT-PARTISANSHIP MEAN COUPLING ----------------------
-	// Same idea for the district-partisanship distribution: as the
-	// districtCompet slider's σ moves away from its default, the mean
-	// partisanship of the right-half distribution shifts with `slope` per
-	// unit of σ.  Negative slope = "more competitive map → mean partisanship
-	// pulls toward 0".
-	//     muDist = defaultMu + slope * (σ - σ_default)
-	districtMean: {
-		defaultMu: 30,
-		slope: -1,
+	// ---------------- DISTRICT DISTRIBUTION ------------------------------------
+	// The 435 district partisanships are drawn from an α-mixture:
+	//     (1 − α) · base  +  α · gerry
+	// where α is the `districtCompet` slider's value ("proportion of
+	// gerrymandered seats").  The model samples K=50,000 points from this
+	// mixture and takes 435 evenly-spaced quantiles to give a deterministic
+	// pool (re-cached per (α, base, gerry) tuple).
+	//
+	// `base` is an arbitrary mixture of Gaussian components.  Each component
+	// has a `mean`, `sigma`, and `weight` (weights are renormalised, so they
+	// don't have to sum to 1).
+	//
+	// `enforceSymmetry: true` samples m points from the right half (rejects
+	// any negatives and >100), sorts them, and mirrors to the left so the
+	// full distribution is exactly symmetric (mean = 0 by construction).
+	// `enforceSymmetry: false` samples 2m+1 points directly from the mixture
+	// across [−100, 100], rejecting only out-of-range samples — the pool
+	// can be skewed if the components are.
+	districtBase: {
+		enforceSymmetry: true,
+		components: [{ mean: 5, sigma: 30, weight: 1 }],
+	},
+	// `gerry` is the same base modified two ways:
+	//   1. Samples in `removeRange` are rejected (so a band of competitive
+	//      seats vanishes).
+	//   2. A new Gaussian (`bumpCenter`, `bumpSigma`) is added — the packed
+	//      "safe-R" districts created by gerrymandering.  Its weight relative
+	//      to the truncated-base part within `gerry` is `bumpWeight`.
+	districtGerry: {
+		removeRange: [0, 10],
+		bumpCenter: 20,
+		bumpSigma: 7,
+		bumpWeight: 0.5,
 	},
 
 	// ---------------- INTENTIONAL-MODERATION SHAPE -----------------------------
@@ -118,9 +156,9 @@ window.CONFIG = {
 	intentionalMod: {
 		mode: "offsetK",
 		K: 3,
-		L: 15,
-		meanAmp: 0.3, // overall scale on the mean-moderation pull
-		varAmp: 1.2, // overall scale on the variance bump
+		L: 12,
+		meanAmp: 0.5, // overall scale on the mean-moderation pull
+		varAmp: 1, // overall scale on the variance bump
 		meanBreadth: 10, // mean-bell half-decay distance in % points
 		varBreadth: 10, // variance-bell half-decay distance in % points
 		// Relative sensitivity of the variance bump to the dIntMod / rIntMod
@@ -147,7 +185,7 @@ window.CONFIG = {
 		// District-partisanship histogram (bottom chart): bin width in
 		// percentage points across the fixed [-100%, 100%] range.
 		district: {
-			binSize: 5,
+			binSize: 4,
 		},
 	},
 

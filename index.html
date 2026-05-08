@@ -100,11 +100,13 @@
     pointer-events: none;
     z-index: 1;
   }
-  /* Center indicator (z-index 2): in front of the track, behind the thumb. */
+  /* Default-value indicator (z-index 2): in front of the track, behind the
+     thumb.  Positioned at --default-pct (set per-slider in init() based on
+     the slider's default value), falling back to 50% if not set. */
   .slider-wrap::after {
     content: '';
     position: absolute;
-    left: 50%; top: 50%;
+    left: var(--default-pct, 50%); top: 50%;
     transform: translate(-50%, -50%);
     width: 2px; height: 10px;
     background: var(--accent);
@@ -197,7 +199,7 @@
     width: 100%; height: 200px;
   }
   #morePlotsMismatchChart,
-  #morePlotsMismatchRateChart { width: 100%; height: 360px; margin-top: 16px; }
+  #morePlotsRSeatsChart { width: 100%; height: 360px; margin-top: 16px; }
   .morePlots h4 {
     margin: 16px 0 6px 0; font-size: 13px; color: var(--accent);
     text-transform: uppercase; letter-spacing: 0.04em;
@@ -225,9 +227,9 @@
 
     <h3>District Map</h3>
     <div class="row">
-      <label>District Competitiveness</label>
+      <label>Seat Competitiveness</label>
       <input type="range" id="districtCompet">
-      <span class="hint">Lower → most districts strongly favor one party; higher → more swing districts in the middle.</span>
+      <span class="hint">0 → broad single-Gaussian district map (≈ historical shape).  1 → every seat from the gerrymandered distribution: competitive seats removed, replaced with packed safe seats (mirrored both sides).</span>
     </div>
 
     <h3>Candidates</h3>
@@ -283,12 +285,12 @@
           <button class="refresh" id="morePlotsRefresh">Refresh</button>
           <span>20 example chambers + mismatch distribution under the current sliders.</span>
         </div>
-        <h4>20 Example Chambers</h4>
-        <div class="chambersGrid" id="chambersGrid"></div>
+        <h4>Distribution of Final Republican Seats</h4>
+        <div id="morePlotsRSeatsChart"></div>
         <h4>Mismatch Distribution by District Partisanship</h4>
         <div id="morePlotsMismatchChart"></div>
-        <h4>Mismatches per District (rate)</h4>
-        <div id="morePlotsMismatchRateChart"></div>
+        <h4>20 Example Chambers</h4>
+        <div class="chambersGrid" id="chambersGrid"></div>
       </div>
     </details>
   </div>
@@ -323,8 +325,7 @@ function readParams() {
   const sR = num('rAmbMod');
   const bD = num('dIntMod');
   const bR = num('rIntMod');
-  const sigmaDist = num('districtCompet');
-  const dm = cfg.districtMean, cmD = cfg.candidateMean.D, cmR = cfg.candidateMean.R;
+  const cmD = cfg.candidateMean.D, cmR = cfg.candidateMean.R;
   const im = cfg.intentionalMod;
   return {
     m: CONST.m,
@@ -332,10 +333,18 @@ function readParams() {
     v: num('v'),
     epsPct: CONST.epsPct,
     sigmaN: CONST.sigmaN,
-    batesW: CONST.bates?.weight ?? 0,
-    batesN: CONST.bates?.N      ?? 3,
-    muDist: anchoredLinear(sigmaDist, cfg.sliders.districtCompet.value, dm.defaultMu, dm.slope),
-    sigmaDist: sigmaDist,
+    noiseType:   CONST.noiseType    ?? 'bates',
+    batesW:      CONST.bates?.weight ?? 0,
+    batesN:      CONST.bates?.N      ?? 3,
+    tukeyW:      CONST.tukey?.weight ?? 0,
+    tukeyLambda: CONST.tukey?.lambda ?? 0.14,
+    // District distribution: α-mixture of (base = Gaussian + Uniform) and
+    // gerrymandered bump, sampled and quantile-binned in model.js → buildDistrictPool.
+    // Slider is "Seat Competitiveness": higher = more competitive, so we
+    // invert into α ("proportion gerrymandered") = 1 − slider.
+    alpha: 1 - num('districtCompet'),
+    base:  cfg.districtBase,
+    gerry: cfg.districtGerry,
     muD: anchoredLinear(sD, cfg.sliders.dAmbMod.value, cmD.defaultMu, cmD.slope),
     sigmaD: sD,
     muR: anchoredLinear(sR, cfg.sliders.rAmbMod.value, cmR.defaultMu, cmR.slope),
@@ -451,7 +460,11 @@ function renderDistrictHist(districtPool) {
   }], {
     title: { text: 'Distribution of District Partisanship Across the Chamber', font: { size: 14 } },
     xaxis: { title: { text: 'District Partisanship % &nbsp;&nbsp; (← Democratic · Republican →)', standoff: 6 }, ticksuffix: '%', zeroline: true, zerolinecolor: '#888' },
-    yaxis: { title: 'Count' },
+    // Y-axis floor pinned at 20 so the chart stays visually comparable to
+    // the historical-data histograms in historical.html (which top out
+    // around 20 districts per 2-pp bin).  When a sampled chamber has a
+    // taller spike (e.g. a packed gerry bump), the axis grows to fit.
+    yaxis: { title: 'Count', range: [0, Math.max(20, ...counts)] },
     margin: { l: 60, r: 20, t: 50, b: 70 },
     showlegend: false,
     bargap: 0.02
@@ -472,6 +485,14 @@ function renderStats(sims, p) {
   const meanRShare = totalSeats / (n * N);
   let totalMismatch = 0; for (let i = 0; i < n; i++) totalMismatch += sims.mismatches[i];
   const meanMismatch = totalMismatch / n;
+  // Majority size = (winning party's seats) − (m − 1).  With N = 2m+1 the
+  // majority threshold is m+1, so a bare majority gives a "size" of 2.
+  let totalMajority = 0;
+  for (let i = 0; i < n; i++) {
+    const r = sims.seats[i];
+    totalMajority += Math.max(r, N - r) - (p.m - 1);
+  }
+  const meanMajority = totalMajority / n;
 
   const dPill = `<span class="pill D">D</span>`;
   const rPill = `<span class="pill R">R</span>`;
@@ -481,7 +502,8 @@ function renderStats(sims, p) {
     <div>Average median ideology: <span class="num">${meanMed.toFixed(1)}</span>
       &nbsp;|&nbsp; when median is D: <span class="num">${cntD ? (sumD/cntD).toFixed(1) : '–'}</span>
       &nbsp;|&nbsp; when median is R: <span class="num">${cntR ? (sumR/cntR).toFixed(1) : '–'}</span></div>
-    <div>Average Republican seat share: <span class="num">${(meanRShare*100).toFixed(1)}%</span></div>
+    <div>Average Republican seat share: <span class="num">${(meanRShare*100).toFixed(1)}%</span>
+      &nbsp;|&nbsp; average majority seat margin: <span class="num">${meanMajority.toFixed(1)}</span></div>
     <div>Average "mismatched" reps per chamber: <span class="num">${meanMismatch.toFixed(1)}</span>
       <span style="color:var(--muted);font-size:11px">(R in D-lean districts or D in R-lean districts; ties at 0% excluded)</span></div>
   `;
@@ -576,9 +598,13 @@ function init() {
       range.parentNode.insertBefore(wrap, range);
       wrap.appendChild(range);
     }
-    // Drive the custom track's fill via a --val CSS variable (0-100%).
+    // Drive the custom track's fill via a --val CSS variable (0-100%), and
+    // pin the default-value indicator at --default-pct (proportional position
+    // of this slider's default value within [min, max]).
     const wrapEl = range.parentElement;
     const lo = parseFloat(range.min), hi = parseFloat(range.max);
+    const defaultPct = ((parseFloat(range.defaultValue) - lo) / (hi - lo)) * 100;
+    wrapEl.style.setProperty('--default-pct', defaultPct + '%');
     const updateFill = () => {
       const pct = ((parseFloat(range.value) - lo) / (hi - lo)) * 100;
       wrapEl.style.setProperty('--val', pct + '%');
@@ -655,8 +681,8 @@ function renderMorePlots() {
     renderExampleChamber(params, cell.id, i);
   }
   const stats = computeMismatchStats(params);
+  renderRSeatsChart('morePlotsRSeatsChart', stats);
   renderMismatchChart('morePlotsMismatchChart', stats, false);
-  renderMismatchChart('morePlotsMismatchRateChart', stats, true);
 }
 
 function renderExampleChamber(params, divId, idx) {
@@ -698,9 +724,14 @@ function computeMismatchStats(params) {
   const nBins = Math.max(1, Math.round((hi - lo) / binSize));
   const rInD = new Array(nBins).fill(0);
   const dInR = new Array(nBins).fill(0);
+  const rSeatsBySim = new Int32Array(nSims);
+
+  // Cache the deterministic district pool for the simulation loop.
+  const districts = buildDistrictPool(2 * params.m + 1, params.alpha, params.base, params.gerry);
 
   for (let s = 0; s < nSims; s++) {
-    const sim = simulateOne(params, true);
+    const sim = simulateOne(params, true, districts);
+    rSeatsBySim[s] = sim.rSeats;
     for (let i = 0; i < sim.d.length; i++) {
       const di = sim.d[i];
       if (di === 0) continue;
@@ -712,8 +743,6 @@ function computeMismatchStats(params) {
       else     dInR[idx]++;
     }
   }
-  // Districts are deterministic so a single realization gives the bin counts.
-  const districts = generateDistricts(params.m, params.muDist, params.sigmaDist);
   const distCounts = new Array(nBins).fill(0);
   for (const di of districts) {
     if (di === 0) continue;  // mirror the mismatch convention
@@ -730,7 +759,8 @@ function computeMismatchStats(params) {
   }
   const avgRInD = rInD.map(c => c / nSims);
   const avgDInR = dInR.map(c => c / nSims);
-  return { binSize, centres, ranges, avgRInD, avgDInR, distCounts, nSims };
+  return { binSize, centres, ranges, avgRInD, avgDInR, distCounts, nSims,
+           rSeatsBySim, totalSeats: 2 * params.m + 1 };
 }
 
 // Render the two-sided mismatch distribution.  When `perDistrict` is true the
@@ -774,6 +804,53 @@ function renderMismatchChart(divId, stats, perDistrict) {
     margin: { l: 60, r: 20, t: 50, b: 80 },
     legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: -0.18, yanchor: 'top' },
     bargap: 0.02
+  }, { displayModeBar: false, responsive: true });
+}
+
+// Histogram of total Republican seats across the simulations.  Bins are 1
+// seat wide; bars are red when R majority and blue when D majority, split
+// at the chamber's majority threshold (m + 1 = totalSeats/2 + 0.5).
+function renderRSeatsChart(divId, stats) {
+  const { rSeatsBySim, totalSeats, nSims } = stats;
+  let mn = Infinity, mx = -Infinity;
+  for (const s of rSeatsBySim) {
+    if (s < mn) mn = s;
+    if (s > mx) mx = s;
+  }
+  // Pad a few seats on each side so the distribution doesn't hit the edge.
+  mn = Math.max(0, mn - 2);
+  mx = Math.min(totalSeats, mx + 2);
+  const nBins = mx - mn + 1;
+  const counts = new Array(nBins).fill(0);
+  for (const s of rSeatsBySim) counts[s - mn]++;
+  const half = totalSeats / 2;  // 217.5 for totalSeats=435
+  const xR = [], yR = [], xD = [], yD = [];
+  for (let i = 0; i < nBins; i++) {
+    const x = mn + i;
+    if (x > half) { xR.push(x); yR.push(counts[i]); }
+    else          { xD.push(x); yD.push(counts[i]); }
+  }
+  Plotly.newPlot(divId, [
+    { x: xD, y: yD, type: 'bar', name: 'D majority',
+      marker: { color: 'rgba(31,119,180,0.75)' },
+      hovertemplate: 'R seats: %{x}<br>count: %{y}<extra></extra>' },
+    { x: xR, y: yR, type: 'bar', name: 'R majority',
+      marker: { color: 'rgba(214,39,40,0.75)' },
+      hovertemplate: 'R seats: %{x}<br>count: %{y}<extra></extra>' },
+  ], {
+    title: { text: `Distribution of Republican Seats (${nSims} sims)`, font: { size: 13 } },
+    xaxis: {
+      title: { text: `Republican seats (out of ${totalSeats})`, standoff: 4 },
+      zeroline: false,
+    },
+    yaxis: { title: 'Sim count' },
+    margin: { l: 60, r: 20, t: 50, b: 60 },
+    legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: -0.22, yanchor: 'top' },
+    bargap: 0.05,
+    shapes: [{
+      type: 'line', x0: half, x1: half, y0: 0, y1: 1, yref: 'paper',
+      line: { color: '#888', width: 1, dash: 'dot' }
+    }]
   }, { displayModeBar: false, responsive: true });
 }
 </script>
