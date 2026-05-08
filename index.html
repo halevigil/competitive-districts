@@ -5,6 +5,7 @@
 <title>Simplified Election Simulator</title>
 <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
 <script src="config.js"></script>
+<script src="model.js"></script>
 <style>
   :root {
     --bg: #fafafa;
@@ -195,7 +196,8 @@
     border-radius: 6px;
     width: 100%; height: 200px;
   }
-  #morePlotsMismatchChart { width: 100%; height: 360px; margin-top: 16px; }
+  #morePlotsMismatchChart,
+  #morePlotsMismatchRateChart { width: 100%; height: 360px; margin-top: 16px; }
   .morePlots h4 {
     margin: 16px 0 6px 0; font-size: 13px; color: var(--accent);
     text-transform: uppercase; letter-spacing: 0.04em;
@@ -285,6 +287,8 @@
         <div class="chambersGrid" id="chambersGrid"></div>
         <h4>Mismatch Distribution by District Partisanship</h4>
         <div id="morePlotsMismatchChart"></div>
+        <h4>Mismatches per District (rate)</h4>
+        <div id="morePlotsMismatchRateChart"></div>
       </div>
     </details>
   </div>
@@ -299,145 +303,9 @@
 const CONST = window.CONFIG.constants;
 
 // ============================================================================
-// MATH HELPERS
-// ============================================================================
-function randn() {
-  let u = 0, v = 0;
-  while (u === 0) u = Math.random();
-  while (v === 0) v = Math.random();
-  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
-}
-function sigmoid(x) {
-  if (x >= 0) { const e = Math.exp(-x); return 1 / (1 + e); }
-  const e = Math.exp(x); return e / (1 + e);
-}
-function clamp(x, lo, hi) { return Math.max(lo, Math.min(hi, x)); }
-function mean(a) { let s = 0; for (const x of a) s += x; return s / a.length; }
-
-// erf (Abramowitz & Stegun 7.1.26)
-function erf(x) {
-  const a1=0.254829592, a2=-0.284496736, a3=1.421413741;
-  const a4=-1.453152027, a5=1.061405429, pp=0.3275911;
-  const sign = x < 0 ? -1 : 1;
-  const ax = Math.abs(x);
-  const t = 1.0 / (1.0 + pp * ax);
-  const y = 1.0 - (((((a5*t + a4)*t) + a3)*t + a2)*t + a1)*t * Math.exp(-ax*ax);
-  return sign * y;
-}
-function normCdf(z) { return 0.5 * (1 + erf(z / Math.SQRT2)); }
-
-// Inverse standard normal CDF (Acklam)
-function probit(p) {
-  if (p <= 0) return -Infinity;
-  if (p >= 1) return Infinity;
-  const a1=-3.969683028665376e+01, a2=2.209460984245205e+02, a3=-2.759285104469687e+02,
-        a4=1.383577518672690e+02, a5=-3.066479806614716e+01, a6=2.506628277459239e+00;
-  const b1=-5.447609879822406e+01, b2=1.615858368580409e+02, b3=-1.556989798598866e+02,
-        b4=6.680131188771972e+01, b5=-1.328068155288572e+01;
-  const c1=-7.784894002430293e-03, c2=-3.223964580411365e-01, c3=-2.400758277161838e+00,
-        c4=-2.549732539343734e+00, c5=4.374664141464968e+00, c6=2.938163982698783e+00;
-  const d1=7.784695709041462e-03, d2=3.224671290700398e-01, d3=2.445134137142996e+00, d4=3.754408661907416e+00;
-  const pLow = 0.02425, pHigh = 1 - pLow;
-  let q, r;
-  if (p < pLow) {
-    q = Math.sqrt(-2 * Math.log(p));
-    return (((((c1*q+c2)*q+c3)*q+c4)*q+c5)*q+c6) / ((((d1*q+d2)*q+d3)*q+d4)*q+1);
-  } else if (p <= pHigh) {
-    q = p - 0.5; r = q*q;
-    return (((((a1*r+a2)*r+a3)*r+a4)*r+a5)*r+a6)*q / (((((b1*r+b2)*r+b3)*r+b4)*r+b5)*r+1);
-  } else {
-    q = Math.sqrt(-2 * Math.log(1 - p));
-    return -(((((c1*q+c2)*q+c3)*q+c4)*q+c5)*q+c6) / ((((d1*q+d2)*q+d3)*q+d4)*q+1);
-  }
-}
-
-// ============================================================================
-// DISTRICTS (deterministic, truncated-Gaussian quantile placement)
-// ============================================================================
-function generateDistricts(m, mu, sigma) {
-  const cdfLo = normCdf((0   - mu) / sigma);
-  const cdfHi = normCdf((100 - mu) / sigma);
-  const half = new Array(m);
-  for (let i = 0; i < m; i++) {
-    const q = (i + 0.5) / m;
-    const u = cdfLo + q * (cdfHi - cdfLo);
-    const z = probit(u);
-    half[i] = clamp(mu + sigma * z, 1e-6, 100);
-  }
-  half.sort((a, b) => a - b);
-  const N = 2 * m + 1;
-  const d = new Array(N);
-  for (let i = 0; i < m; i++) d[i] = -half[m - 1 - i];
-  d[m] = 0;
-  for (let i = 0; i < m; i++) d[m + 1 + i] = half[i];
-  return d;
-}
-
-// ============================================================================
-// SIMULATION
-// ============================================================================
-function simulateOne(p, returnFull = false) {
-  const d = generateDistricts(p.m, p.muDist, p.sigmaDist);
-  const N = d.length;
-  const r = returnFull ? new Float64Array(N) : null;
-  const party = returnFull ? new Array(N) : null;
-  const rVals = new Float64Array(N);
-  const partyVals = new Uint8Array(N);
-
-  let mismatches = 0;  // R in D-lean district, or D in R-lean district (di ≠ 0)
-  for (let i = 0; i < N; i++) {
-    const di = d[i];
-    const absD = Math.abs(di);
-    const absDV = Math.abs(di + p.v);
-    // Additive epsilon: log(100 / (|d| + ε)).  Smooth at d = 0 — no
-    // piecewise kink — and finite for any input.
-    const EPS_PCT = 0.1;
-    const logInvD  = Math.log(100 / (absD  + EPS_PCT));
-    const logInvDV = Math.log(100 / (absDV + EPS_PCT));
-    const cD =  p.bDs * logInvD + p.bDc * logInvDV + p.muD + p.sigmaD * randn();
-    const cR = -p.bRs * logInvD - p.bRc * logInvDV + p.muR + p.sigmaR * randn();
-    const z = (p.v + di - p.wMod * (cD + cR)) / p.sigmaN;
-    const pR = sigmoid(z);
-    const isR = Math.random() < pR ? 1 : 0;
-    const ri = isR ? cR : cD;
-    rVals[i] = ri;
-    partyVals[i] = isR;
-    if (di !== 0 && ((isR && di < 0) || (!isR && di > 0))) mismatches++;
-    if (returnFull) { r[i] = ri; party[i] = isR ? 'R' : 'D'; }
-  }
-
-  const idxArr = Array.from({ length: N }, (_, i) => i);
-  idxArr.sort((a, b) => rVals[a] - rVals[b]);
-  const medianIdx = idxArr[(N - 1) >> 1];
-  const medianIdeology = rVals[medianIdx];
-  const medianParty = partyVals[medianIdx] ? 'R' : 'D';
-
-  let rSeats = 0;
-  for (let i = 0; i < N; i++) if (partyVals[i]) rSeats++;
-
-  if (returnFull) return { d, r, party, medianIdeology, medianParty, medianIdx, rSeats, mismatches };
-  return { medianIdeology, medianParty, rSeats, mismatches };
-}
-
-function runSimulations(p, n) {
-  const meds = new Float64Array(n);
-  const parties = new Uint8Array(n);
-  const seats = new Int32Array(n);
-  const mismatches = new Int32Array(n);
-  for (let s = 0; s < n; s++) {
-    const out = simulateOne(p, false);
-    meds[s] = out.medianIdeology;
-    parties[s] = out.medianParty === 'R' ? 1 : 0;
-    seats[s] = out.rSeats;
-    mismatches[s] = out.mismatches;
-  }
-  // Districts are deterministic, so a single realization suffices
-  const districtPool = generateDistricts(p.m, p.muDist, p.sigmaDist);
-  return { meds, parties, seats, mismatches, districtPool };
-}
-
-// ============================================================================
-// PARAM MAPPING — read user-facing knobs and expand into the full param set
+// PARAM MAPPING — read user-facing knobs and expand into the full param set.
+// All formulas live in model.js; this just gathers slider values and runs
+// them through the helpers there.
 // ============================================================================
 const sliderIds = ['v', 'districtCompet', 'dAmbMod', 'rAmbMod', 'dIntMod', 'rIntMod', 'qualImp'];
 
@@ -450,31 +318,32 @@ function readParams() {
     if (numInput) return parseFloat(numInput.value);
     return parseFloat(document.getElementById(id).value);
   };
+  const cfg = window.CONFIG;
   const sD = num('dAmbMod');
   const sR = num('rAmbMod');
   const bD = num('dIntMod');
   const bR = num('rIntMod');
+  const sigmaDist = num('districtCompet');
+  const dm = cfg.districtMean, cmD = cfg.candidateMean.D, cmR = cfg.candidateMean.R;
+  const im = cfg.intentionalMod;
   return {
     m: CONST.m,
     nsim: CONST.nsim,
     v: num('v'),
-    muDist: CONST.muDist,
-    sigmaDist: num('districtCompet'),
-    // The ambient-moderation slider value is used directly as σ; the
-    // candidate-ideology mean μ is anchored at `defaultMu` when σ is at
-    // its slider default, and moves with `slope` per unit of σ away
-    // from that default — so default-μ and default-σ can be edited
-    // independently in config.js.
-    muD: window.CONFIG.candidateMean.D.defaultMu
-       + window.CONFIG.candidateMean.D.slope * (sD - window.CONFIG.sliders.dAmbMod.value),
-    sigmaD: sD,
-    muR: window.CONFIG.candidateMean.R.defaultMu
-       + window.CONFIG.candidateMean.R.slope * (sR - window.CONFIG.sliders.rAmbMod.value),
-    sigmaR: sR,
-    bDs: bD, bDc: bD,     // 1:1 swing/compet ratio
-    bRs: bR, bRc: bR,
+    epsPct: CONST.epsPct,
     sigmaN: CONST.sigmaN,
+    batesW: CONST.bates?.weight ?? 0,
+    batesN: CONST.bates?.N      ?? 3,
+    muDist: anchoredLinear(sigmaDist, cfg.sliders.districtCompet.value, dm.defaultMu, dm.slope),
+    sigmaDist: sigmaDist,
+    muD: anchoredLinear(sD, cfg.sliders.dAmbMod.value, cmD.defaultMu, cmD.slope),
+    sigmaD: sD,
+    muR: anchoredLinear(sR, cfg.sliders.rAmbMod.value, cmR.defaultMu, cmR.slope),
+    sigmaR: sR,
+    bDs: bD, bDc: bD,    // 1:1 swing/compet ratio
+    bRs: bR, bRc: bR,
     wMod: num('qualImp'),
+    ...intentionalModOffsets(im.mode, im.K, im.L, im.meanAmp, im.varAmp, im.meanBreadth, im.varBreadth, im.varModRatio),
   };
 }
 
@@ -493,15 +362,16 @@ function renderHistogram(meds, parties) {
   const histCfg = window.CONFIG.histograms.median;
   let lo = histCfg.defaultRange[0], hi = histCfg.defaultRange[1];
   const roundTo = histCfg.roundTo;
+  const pTail  = histCfg.extendPercentile;
   const n = meds.length;
   if (n > 0) {
     const sorted = Array.from(meds).sort((a, b) => a - b);
-    const loExt = sorted[Math.max(0, Math.floor(n * 0.01))];
-    const hiExt = sorted[Math.min(n - 1, Math.ceil(n * 0.99) - 1)];
+    const loExt = sorted[Math.max(0, Math.floor(n * pTail))];
+    const hiExt = sorted[Math.min(n - 1, Math.ceil(n * (1 - pTail)) - 1)];
     if (loExt < lo) lo = Math.floor(loExt / roundTo) * roundTo;
     if (hiExt > hi) hi = Math.ceil(hiExt / roundTo) * roundTo;
   }
-  const binSize = (hi - lo) / 40;
+  const binSize = (hi - lo) / histCfg.nBins;
 
   const traces = [
     { x: dMeds, type: 'histogram', name: 'Median Is D',
@@ -769,23 +639,24 @@ function init() {
 init();
 
 // ============================================================================
-// "SEE MORE PLOTS" — 20 example chambers + mismatch distribution
+// "SEE MORE PLOTS" — example chambers + mismatch distribution.  Counts come
+// from CONFIG.morePlots (nChambers, nSimsForMismatch) so they're tunable.
 // ============================================================================
-const N_PLOTS_MORE = 20;
-const N_SIM_FOR_MISMATCH = 500;
-
 function renderMorePlots() {
   const params = readParams();
   const grid = document.getElementById('chambersGrid');
   grid.innerHTML = '';
-  for (let i = 0; i < N_PLOTS_MORE; i++) {
+  const nChambers = window.CONFIG.morePlots.nChambers;
+  for (let i = 0; i < nChambers; i++) {
     const cell = document.createElement('div');
     cell.className = 'chamberCell';
     cell.id = 'chamberCell_' + i;
     grid.appendChild(cell);
     renderExampleChamber(params, cell.id, i);
   }
-  renderMismatchChart(params);
+  const stats = computeMismatchStats(params);
+  renderMismatchChart('morePlotsMismatchChart', stats, false);
+  renderMismatchChart('morePlotsMismatchRateChart', stats, true);
 }
 
 function renderExampleChamber(params, divId, idx) {
@@ -817,14 +688,18 @@ function renderExampleChamber(params, divId, idx) {
   }, { displayModeBar: false, responsive: true });
 }
 
-function renderMismatchChart(params) {
+// Compute the mismatch counts per signed-partisanship bin, plus the number
+// of districts in each bin (the deterministic district pool).  This shared
+// computation feeds both the absolute and per-district mismatch charts.
+function computeMismatchStats(params) {
   const binSize = window.CONFIG.histograms.district.binSize;
+  const nSims = window.CONFIG.morePlots.nSimsForMismatch;
   const lo = -100, hi = 100;
   const nBins = Math.max(1, Math.round((hi - lo) / binSize));
   const rInD = new Array(nBins).fill(0);
   const dInR = new Array(nBins).fill(0);
 
-  for (let s = 0; s < N_SIM_FOR_MISMATCH; s++) {
+  for (let s = 0; s < nSims; s++) {
     const sim = simulateOne(params, true);
     for (let i = 0; i < sim.d.length; i++) {
       const di = sim.d[i];
@@ -837,6 +712,14 @@ function renderMismatchChart(params) {
       else     dInR[idx]++;
     }
   }
+  // Districts are deterministic so a single realization gives the bin counts.
+  const districts = generateDistricts(params.m, params.muDist, params.sigmaDist);
+  const distCounts = new Array(nBins).fill(0);
+  for (const di of districts) {
+    if (di === 0) continue;  // mirror the mismatch convention
+    const idx = Math.min(nBins - 1, Math.max(0, Math.floor((di - lo) / binSize)));
+    distCounts[idx]++;
+  }
   const centres = new Array(nBins);
   const ranges  = new Array(nBins);
   for (let i = 0; i < nBins; i++) {
@@ -845,31 +728,49 @@ function renderMismatchChart(params) {
     centres[i] = (a + b) / 2;
     ranges[i]  = [a, b];
   }
-  const avgRInD = rInD.map(c => c / N_SIM_FOR_MISMATCH);
-  const avgDInR = dInR.map(c => c / N_SIM_FOR_MISMATCH);
+  const avgRInD = rInD.map(c => c / nSims);
+  const avgDInR = dInR.map(c => c / nSims);
+  return { binSize, centres, ranges, avgRInD, avgDInR, distCounts, nSims };
+}
 
-  Plotly.newPlot('morePlotsMismatchChart', [
-    { x: centres, y: avgRInD, type: 'bar', name: 'R wins D-lean district',
+// Render the two-sided mismatch distribution.  When `perDistrict` is true the
+// bar heights are divided by the number of districts at that partisanship,
+// turning the chart into the per-district mismatch rate.
+function renderMismatchChart(divId, stats, perDistrict) {
+  const { binSize, centres, ranges, avgRInD, avgDInR, distCounts, nSims } = stats;
+  const yR = perDistrict
+    ? avgRInD.map((c, i) => distCounts[i] > 0 ? c / distCounts[i] : 0)
+    : avgRInD;
+  const yD = perDistrict
+    ? avgDInR.map((c, i) => distCounts[i] > 0 ? c / distCounts[i] : 0)
+    : avgDInR;
+  const ylabel = perDistrict ? 'Mismatches per district' : 'Avg count per chamber';
+  const valuePrefix = perDistrict ? 'rate' : 'avg';
+  const valueFmt    = perDistrict ? '.3f' : '.3f';
+  const title = perDistrict
+    ? `Mismatch Rate per District (${nSims} sims)`
+    : `Avg Mismatches per Chamber by District Partisanship (${nSims} sims)`;
+
+  Plotly.newPlot(divId, [
+    { x: centres, y: yR, type: 'bar', name: 'R wins D-lean district',
       marker: { color: 'rgba(214,39,40,0.75)' },
       width: binSize, customdata: ranges,
       hovertemplate:
         'partisanship: %{customdata[0]:.1f}% to %{customdata[1]:.1f}%<br>' +
-        'avg R wins: %{y:.3f}<extra></extra>' },
-    { x: centres, y: avgDInR, type: 'bar', name: 'D wins R-lean district',
+        `${valuePrefix} R wins: %{y:${valueFmt}}<extra></extra>` },
+    { x: centres, y: yD, type: 'bar', name: 'D wins R-lean district',
       marker: { color: 'rgba(31,119,180,0.75)' },
       width: binSize, customdata: ranges,
       hovertemplate:
         'partisanship: %{customdata[0]:.1f}% to %{customdata[1]:.1f}%<br>' +
-        'avg D wins: %{y:.3f}<extra></extra>' },
+        `${valuePrefix} D wins: %{y:${valueFmt}}<extra></extra>` },
   ], {
-    title: { text:
-      `Avg Mismatches per Chamber by District Partisanship (${N_SIM_FOR_MISMATCH} sims)`,
-      font: { size: 13 } },
+    title: { text: title, font: { size: 13 } },
     xaxis: {
       title: { text: 'District Partisanship %  (← Democratic · Republican →)', standoff: 4 },
       ticksuffix: '%', range: [-100, 100], zeroline: true, zerolinecolor: '#888'
     },
-    yaxis: { title: 'Avg count per chamber' },
+    yaxis: { title: ylabel, range: perDistrict ? [0, 1] : undefined },
     margin: { l: 60, r: 20, t: 50, b: 80 },
     legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: -0.18, yanchor: 'top' },
     bargap: 0.02
