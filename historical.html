@@ -69,9 +69,16 @@
 <!-- Current simulator run, pulled live from localStorage (written by
      index.html on every render).  Hidden when no run is cached yet.
      Sits below the historical-year panels so it reads as the simulator's
-     comparison sketch against the empirical history above. -->
-<div id="simRunPanel" class="panel full" style="display: none; margin-top: 12px;">
-  <div id="simRunChart" class="chart" style="height: 300px;"></div>
+     comparison sketch against the empirical history above.  Same row
+     layout as the historical years: seats-by-partisanship on the left,
+     per-district election margin distribution on the right. -->
+<div id="simRunRow" class="yearRow" style="display: none; margin-top: 12px;">
+  <div class="panel">
+    <div id="simRunChart" class="chart" style="height: 300px;"></div>
+  </div>
+  <div class="panel">
+    <div id="simRunMarginChart" class="chart" style="height: 300px;"></div>
+  </div>
 </div>
 
 <div class="footnote">
@@ -291,21 +298,28 @@ function renderYearChart(divId, year, stats, yMax) {
   }, { displayModeBar: false, responsive: true });
 }
 
-// Render the live simulator-run chart from data the main page wrote to
+// Render the live simulator-run row from data the main page wrote to
 // localStorage on its last render.  Stays hidden if no run is cached.
-// Reuses the year-chart visual style + the shared yMax so the simulator
-// chart sits visually next to the historical ones at the same scale.
-function renderSimulatorRun(yMax) {
+// Reuses the year-chart visual style + the shared yMax / mMax so the
+// simulator panels sit visually next to the historical ones at the same
+// scale.  Layout mirrors the per-year rows: seats-by-partisanship on the
+// left, per-district election margin distribution on the right.
+function renderSimulatorRun(yMax, mMax) {
   let saved;
   try { saved = JSON.parse(localStorage.getItem('simulator_current_run') || 'null'); }
   catch (_) { saved = null; }
-  const panel = document.getElementById('simRunPanel');
+  const row = document.getElementById('simRunRow');
   if (!saved || !saved.centres || !saved.avgDWins) {
-    panel.style.display = 'none';
+    row.style.display = 'none';
     return;
   }
-  panel.style.display = '';
-  const { binSize, centres, ranges, avgDWins, avgRWins, rGerry, dGerry, v } = saved;
+  row.style.display = '';
+  const {
+    binSize, centres, ranges,
+    avgDWins, avgRWins,
+    avgDMargin, avgRMargin,
+    rGerry, dGerry, v,
+  } = saved;
   const totalD = avgDWins.reduce((a,b) => a + b, 0);
   const totalR = avgRWins.reduce((a,b) => a + b, 0);
   const titleParts = [
@@ -343,6 +357,45 @@ function renderSimulatorRun(yMax) {
     barmode: 'stack',
     plot_bgcolor: '#fff',
   }, { displayModeBar: false, responsive: true });
+
+  // Right panel: per-district election margin distribution.  Falls back
+  // gracefully if an older run (pre-margin-tracker) is in localStorage.
+  if (avgDMargin && avgRMargin) {
+    Plotly.newPlot('simRunMarginChart', [
+      {
+        x: centres, y: avgDMargin, type: 'bar', name: 'D-won',
+        marker: { color: 'rgba(31,119,180,0.85)', line: { width: 0 } },
+        width: binSize, customdata: ranges,
+        hovertemplate:
+          'margin: %{customdata[0]:.0f} to %{customdata[1]:.0f}<br>' +
+          'avg D-won seats: %{y:.2f}<extra></extra>',
+      },
+      {
+        x: centres, y: avgRMargin, type: 'bar', name: 'R-won',
+        marker: { color: 'rgba(214,39,40,0.85)', line: { width: 0 } },
+        width: binSize, customdata: ranges,
+        hovertemplate:
+          'margin: %{customdata[0]:.0f} to %{customdata[1]:.0f}<br>' +
+          'avg R-won seats: %{y:.2f}<extra></extra>',
+      },
+    ], {
+      title: { text: titleParts.join(' &nbsp;·&nbsp; '), font: { size: 13 }, x: 0.04, xanchor: 'left' },
+      xaxis: {
+        title: { text: 'Election margin  (← Democratic · Republican →)', standoff: 4, font: { size: 11 } },
+        range: [-100, 100], zeroline: true, zerolinecolor: '#333', zerolinewidth: 1,
+      },
+      yaxis: { title: { text: 'Seats', font: { size: 11 } }, range: [0, mMax] },
+      margin: { l: 50, r: 14, t: 38, b: 50 },
+      showlegend: false,
+      bargap: 0.05,
+      barmode: 'stack',
+      plot_bgcolor: '#fff',
+    }, { displayModeBar: false, responsive: true });
+  } else {
+    // Hide just the right panel if margin data isn't available.
+    document.getElementById('simRunMarginChart').innerHTML =
+      '<div style="padding:30px;color:#777;font-size:12px;text-align:center;">Re-run the simulator to populate this chart.</div>';
+  }
 }
 
 (async function main() {
@@ -390,10 +443,10 @@ function renderSimulatorRun(yMax) {
     renderMarginYearChart(rightChart.id, y, marginStats[y], mMax);
   }
   // Render the simulator's latest run (if any) at the top, on the same scale.
-  renderSimulatorRun(yMax);
+  renderSimulatorRun(yMax, mMax);
   // Live-update if the user re-runs the simulator in another tab.
   window.addEventListener('storage', (e) => {
-    if (e.key === 'simulator_current_run') renderSimulatorRun(yMax);
+    if (e.key === 'simulator_current_run') renderSimulatorRun(yMax, mMax);
   });
 })();
 </script>

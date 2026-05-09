@@ -521,12 +521,20 @@ function intentionalModOffsets(mode, K, L, meanBreadth, varBreadth) {
 // bins the ELECTED rep's ideology per district, separated by which party won
 // the seat.  Lets the see-more-plots section render per-party distributions
 // of the actual representatives that get sent to the chamber.
+//
+// `marginTracker`, when provided, is `{ lo, binSize, nBins, dCounts, rCounts }` —
+// same shape as electedTracker but bins the per-district election score `z`
+// (clipped to [lo, hi]).  z carries district lean + candidate-quality
+// adjustment + noise, and is the simulator's analog of a vote margin.
+// Useful for the "Distribution of per-district election margins" view that
+// parallels the historical House margin chart.
 function simulateOne(
 	p,
 	returnFull = false,
 	districtPool = null,
 	mismatchTracker = null,
-	electedTracker = null
+	electedTracker = null,
+	marginTracker = null
 ) {
 	// Districts are deterministic given (m, muDist, sigmaDist).  When
 	// simulateOne is called from runSimulations, the caller passes the
@@ -595,6 +603,12 @@ function simulateOne(
 	const atLo = electedTracker ? electedTracker.lo : 0;
 	const atStep = electedTracker ? electedTracker.binSize : 1;
 	const atNBins = electedTracker ? electedTracker.nBins : 0;
+	// Per-district margin tracker: bins z (clamped) split by which side won.
+	const mgDCounts = marginTracker ? marginTracker.dCounts : null;
+	const mgRCounts = marginTracker ? marginTracker.rCounts : null;
+	const mgLo = marginTracker ? marginTracker.lo : 0;
+	const mgStep = marginTracker ? marginTracker.binSize : 1;
+	const mgNBins = marginTracker ? marginTracker.nBins : 0;
 	let mismatches = 0; // R in D-lean district, or D in R-lean district (di ≠ 0)
 	if (vIsZero) {
 		// Fast path — only 2 mean bells per district instead of 4.
@@ -639,6 +653,13 @@ function simulateOne(
 				else if (bi >= atNBins) bi = atNBins - 1;
 				if (isR) atRCounts[bi]++;
 				else atDCounts[bi]++;
+			}
+			if (mgDCounts) {
+				let bi = ((z - mgLo) / mgStep) | 0;
+				if (bi < 0) bi = 0;
+				else if (bi >= mgNBins) bi = mgNBins - 1;
+				if (isR) mgRCounts[bi]++;
+				else mgDCounts[bi]++;
 			}
 			if (di !== 0 && ((isR && di < 0) || (!isR && di > 0))) {
 				mismatches++;
@@ -699,6 +720,13 @@ function simulateOne(
 				else if (bi >= atNBins) bi = atNBins - 1;
 				if (isR) atRCounts[bi]++;
 				else atDCounts[bi]++;
+			}
+			if (mgDCounts) {
+				let bi = ((z - mgLo) / mgStep) | 0;
+				if (bi < 0) bi = 0;
+				else if (bi >= mgNBins) bi = mgNBins - 1;
+				if (isR) mgRCounts[bi]++;
+				else mgDCounts[bi]++;
 			}
 			if (di !== 0 && ((isR && di < 0) || (!isR && di > 0))) {
 				mismatches++;
@@ -764,7 +792,16 @@ function simulateOne(
 // gets counted, into the bin matching their party).  Returned in the result
 // object as `electedBins` with `dCounts`, `rCounts`, `centres`, `ranges`,
 // plus per-chamber averages `avgD` / `avgR`.
-function runSimulations(p, n, mismatchBinSpec = null, electedBinSpec = null) {
+//
+// `marginBinSpec`, same shape — bins per-district election scores `z`,
+// split by D-won / R-won.  Returned as `marginBins`.
+function runSimulations(
+	p,
+	n,
+	mismatchBinSpec = null,
+	electedBinSpec = null,
+	marginBinSpec = null
+) {
 	const meds = new Float64Array(n);
 	const parties = new Uint8Array(n);
 	const seats = new Int32Array(n);
@@ -854,13 +891,34 @@ function runSimulations(p, n, mismatchBinSpec = null, electedBinSpec = null) {
 		electedBins = { dCounts, rCounts, centres, ranges, binSize, nBins };
 	}
 
+	// Optional per-district margin tracker (z-score histogram by winner).
+	let marginTracker = null;
+	let marginBins = null;
+	if (marginBinSpec) {
+		const { binSize, lo, hi } = marginBinSpec;
+		const nBins = Math.max(1, Math.round((hi - lo) / binSize));
+		const dCounts = new Float64Array(nBins);
+		const rCounts = new Float64Array(nBins);
+		marginTracker = { dCounts, rCounts, lo, binSize, nBins };
+		const centres = new Array(nBins);
+		const ranges = new Array(nBins);
+		for (let i = 0; i < nBins; i++) {
+			const a = lo + i * binSize;
+			const b = a + binSize;
+			centres[i] = (a + b) / 2;
+			ranges[i] = [a, b];
+		}
+		marginBins = { dCounts, rCounts, centres, ranges, binSize, nBins };
+	}
+
 	for (let s = 0; s < n; s++) {
 		const out = simulateOne(
 			p,
 			false,
 			districtPool,
 			mismatchTracker,
-			electedTracker
+			electedTracker,
+			marginTracker
 		);
 		meds[s] = out.medianIdeology;
 		parties[s] = out.medianParty === "R" ? 1 : 0;
@@ -902,6 +960,21 @@ function runSimulations(p, n, mismatchBinSpec = null, electedBinSpec = null) {
 		electedBins.nSims = n;
 	}
 
+	// Same normalisation for the per-district margin bins so the chart can
+	// plot avg per-chamber counts instead of cumulative.
+	if (marginBins) {
+		const nB = marginBins.nBins;
+		const avgD = new Array(nB);
+		const avgR = new Array(nB);
+		for (let i = 0; i < nB; i++) {
+			avgD[i] = marginBins.dCounts[i] / n;
+			avgR[i] = marginBins.rCounts[i] / n;
+		}
+		marginBins.avgD = avgD;
+		marginBins.avgR = avgR;
+		marginBins.nSims = n;
+	}
+
 	return {
 		meds,
 		parties,
@@ -911,5 +984,6 @@ function runSimulations(p, n, mismatchBinSpec = null, electedBinSpec = null) {
 		medianDistParts,
 		mismatchBins,
 		electedBins,
+		marginBins,
 	};
 }

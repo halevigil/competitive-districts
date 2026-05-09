@@ -4,8 +4,8 @@
 		<meta charset="UTF-8" />
 		<title>Median Ideology Simulator</title>
 		<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-		<script src="config.js?v=5"></script>
-		<script src="model.js?v=5"></script>
+		<script src="config.js?v=6"></script>
+		<script src="model.js?v=6"></script>
 		<style>
 			:root {
 				--bg: #fafafa;
@@ -366,7 +366,8 @@
 			#morePlotsRWinsChart,
 			#morePlotsDIdeologyChart,
 			#morePlotsRIdeologyChart,
-			#morePlotsMarginsChart {
+			#morePlotsMarginsChart,
+			#morePlotsDistrictMarginsChart {
 				width: 100%;
 				height: 360px;
 				margin-top: 16px;
@@ -589,6 +590,8 @@
 						<div id="morePlotsRIdeologyChart"></div>
 						<h4>Distribution of Election Margins</h4>
 						<div id="morePlotsMarginsChart"></div>
+						<h4>Distribution of Per-District Election Margins</h4>
+						<div id="morePlotsDistrictMarginsChart"></div>
 						<h4>20 Example Chambers</h4>
 						<div class="chambersGrid" id="chambersGrid"></div>
 					</div>
@@ -1090,7 +1093,10 @@
 						binSize: window.CONFIG.histograms.repIdeology.binSize,
 						lo:      window.CONFIG.histograms.repIdeology.lo,
 						hi:      window.CONFIG.histograms.repIdeology.hi,
-					}
+					},
+					// Per-district margin bins — same grid as the historical
+					// House-margin chart so the two read as parallel views.
+					{ binSize: histCfg.binSize, lo: -100, hi: 100 }
 				);
 				const example = simulateOne(p, true);
 				const t1 = performance.now();
@@ -1117,6 +1123,7 @@
 				// by historical.html.
 				try {
 					const mb = sims.mismatchBins;
+					const gb = sims.marginBins;
 					if (mb) {
 						localStorage.setItem(
 							"simulator_current_run",
@@ -1127,6 +1134,13 @@
 								ranges: mb.ranges,
 								avgDWins: mb.avgDWins,
 								avgRWins: mb.avgRWins,
+								// Per-district margin distribution — same bin
+								// geometry (centres / ranges shared with the
+								// seats chart so historical.html can use one
+								// pair).  avgDMargin / avgRMargin are average
+								// counts per chamber, just like avgDWins.
+								avgDMargin: gb ? gb.avgD : null,
+								avgRMargin: gb ? gb.avgR : null,
 								rGerry: p.rGerry,
 								dGerry: p.dGerry,
 								v: p.v,
@@ -1496,6 +1510,12 @@
 						rSeatsBySim: sims.seats,
 						totalSeats: 2 * params.m + 1,
 					});
+				}
+				if (sims.marginBins) {
+					renderDistrictMarginsChart(
+						"morePlotsDistrictMarginsChart",
+						sims.marginBins
+					);
 				}
 			}
 
@@ -1875,6 +1895,51 @@
 								line: { color: "#888", width: 1, dash: "dot" },
 							},
 						],
+					},
+					{ displayModeBar: false, responsive: true }
+				);
+			}
+
+			// Per-district election-margin distribution.  Bins z (clipped to
+			// [-100, +100]) split by which side won the seat.  Same visual
+			// style as the historical page's right-column House-margin chart
+			// so the two read as parallel views.
+			function renderDistrictMarginsChart(divId, marginBins) {
+				const { centres, ranges, avgD, avgR, binSize } = marginBins;
+				Plotly.newPlot(
+					divId,
+					[
+						{
+							x: centres, y: avgD, type: "bar", name: "D-won",
+							marker: { color: "rgba(31,119,180,0.85)", line: { width: 0 } },
+							width: binSize, customdata: ranges,
+							hovertemplate:
+								"margin: %{customdata[0]:.0f} to %{customdata[1]:.0f}<br>" +
+								"avg D-won seats: %{y:.2f}<extra></extra>",
+						},
+						{
+							x: centres, y: avgR, type: "bar", name: "R-won",
+							marker: { color: "rgba(214,39,40,0.85)", line: { width: 0 } },
+							width: binSize, customdata: ranges,
+							hovertemplate:
+								"margin: %{customdata[0]:.0f} to %{customdata[1]:.0f}<br>" +
+								"avg R-won seats: %{y:.2f}<extra></extra>",
+						},
+					],
+					{
+						title: { text: "Distribution of Per-District Election Margins", font: { size: 13 } },
+						xaxis: {
+							title: { text: "Election margin  (← Democratic · Republican →)", standoff: 4 },
+							range: [-100, 100], zeroline: true, zerolinecolor: '#333', zerolinewidth: 1,
+						},
+						yaxis: { title: "Avg seats per chamber" },
+						margin: { l: 60, r: 20, t: 50, b: 60 },
+						barmode: "stack",
+						bargap: 0.05,
+						legend: {
+							orientation: "h",
+							x: 0.5, xanchor: "center", y: -0.22, yanchor: "top",
+						},
 					},
 					{ displayModeBar: false, responsive: true }
 				);
