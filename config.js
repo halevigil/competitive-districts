@@ -258,5 +258,29 @@ window.CONFIG = {
 			rIntMod: 0.8, // a touch below default
 			qualImp: 0.35,
 		},
+		// Demo of the gerry → less-extreme-median effect.
+		// With ambMod maxed out (very wide candidate spreads), a small
+		// popular-vote tilt (v = +3% R) and gerry = 0, R sweeps the swing
+		// seats and wins ~234 — the chamber median sits ~17 deep into the
+		// R pool at ideology +37.  As gerry rises to 0.49, the swing seats
+		// vanish, R's seat count falls back to ~219 (razor-thin), and the
+		// median collapses to R's most-moderate winner near +15.  R stays
+		// the majority throughout (~90%+ of sims) and the median rep stays
+		// cleanly on the R side of 0.
+		"Gerry-compresses-median demo": {
+			v: 3,
+			rGerry: 0,
+			dGerry: 0,
+			dAmbMod: 22.5,
+			rAmbMod: 22.5,
+			// dIntMod / rIntMod left at the slider's auto-derived min so
+			// intentional moderation is OFF.  qualImp at 0 — voters don't
+			// punish extreme candidates.  Both off to isolate the pure
+			// "gerry shrinks majority size" mechanism.
+			dIntMod: 0.5,
+			rIntMod: 0.5,
+			qualImp: 0,
+			sigmaN: 5,
+		},
 	},
 };

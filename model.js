@@ -714,36 +714,29 @@ function simulateOne(
 			}
 		}
 
-	// Single O(N) pass for the median rep + seat count.  D candidates have
-	// mean -100, R candidates +100, so the sort would put all D-won reps at
-	// the bottom and all R-won at the top.  Median = the most-conservative
-	// D (max of D's) when D has the majority, or the most-liberal R (min of
-	// R's) when R does — no full sort needed.  ~5–10× faster than the old
-	// Array.from + comparator-sort, and zero per-sim allocation.
+	// Seat count + true chamber median by ideology.  We sort all 435 ideologies
+	// and take position m.  An earlier "fast path" picked min(R) or max(D)
+	// based on which party held the majority, but that only equals the true
+	// median when D and R don't overlap in ideology AND the majority is
+	// razor-thin (rSeats == m or m+1).  With high intMod or strong qualImp
+	// the ideology distributions overlap, and with one side winning by many
+	// seats the median sits well inside the majority's pool, not on its
+	// boundary — so we just sort.  N=435 is small; per-sim cost is fine.
+	let rSeats = 0;
+	for (let i = 0; i < N; i++) if (partyVals[i]) rSeats++;
 	const m = (N - 1) >> 1;
-	let rSeats = 0,
-		maxD = -Infinity,
-		minR = Infinity;
-	let maxDIdx = -1,
-		minRIdx = -1;
+	const sortedR = Array.from(rVals).sort((a, b) => a - b);
+	const medianIdeology = sortedR[m];
+	// Find the district index that produced this median ideology.  Ties (which
+	// can happen with bounded noise) are rare; first match wins.
+	let medianIdx = -1;
 	for (let i = 0; i < N; i++) {
-		const ri = rVals[i];
-		if (partyVals[i]) {
-			rSeats++;
-			if (ri < minR) {
-				minR = ri;
-				minRIdx = i;
-			}
-		} else {
-			if (ri > maxD) {
-				maxD = ri;
-				maxDIdx = i;
-			}
+		if (rVals[i] === medianIdeology) {
+			medianIdx = i;
+			break;
 		}
 	}
-	const medianParty = rSeats > m ? "R" : "D";
-	const medianIdeology = medianParty === "R" ? minR : maxD;
-	const medianIdx = medianParty === "R" ? minRIdx : maxDIdx;
+	const medianParty = partyVals[medianIdx] ? "R" : "D";
 
 	if (returnFull)
 		return {
