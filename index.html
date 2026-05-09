@@ -4,8 +4,8 @@
 		<meta charset="UTF-8" />
 		<title>Median Ideology Simulator</title>
 		<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-		<script src="config.js?v=12"></script>
-		<script src="model.js?v=12"></script>
+		<script src="config.js?v=13"></script>
+		<script src="model.js?v=13"></script>
 		<style>
 			:root {
 				--bg: #fafafa;
@@ -362,8 +362,7 @@
 				height: 200px;
 			}
 			#morePlotsRSeatsChart,
-			#morePlotsDIdeologyChart,
-			#morePlotsRIdeologyChart,
+			#morePlotsIdeologyChart,
 			#morePlotsDistrictMarginsChart {
 				width: 100%;
 				height: 360px;
@@ -579,10 +578,8 @@
 						</div>
 						<h4>Distribution of Per-District Election Margins</h4>
 						<div id="morePlotsDistrictMarginsChart"></div>
-						<h4>Distribution of Democratic Rep Ideology</h4>
-						<div id="morePlotsDIdeologyChart"></div>
-						<h4>Distribution of Republican Rep Ideology</h4>
-						<div id="morePlotsRIdeologyChart"></div>
+						<h4>Distribution of Rep Ideology</h4>
+						<div id="morePlotsIdeologyChart"></div>
 						<h4>20 Example Chambers</h4>
 						<div class="chambersGrid" id="chambersGrid"></div>
 					</div>
@@ -1497,8 +1494,7 @@
 					renderExampleChamber(params, cell.id, i);
 				}
 				if (sims.electedBins) {
-					renderElectedIdeologyChart("morePlotsDIdeologyChart", sims.electedBins, "D");
-					renderElectedIdeologyChart("morePlotsRIdeologyChart", sims.electedBins, "R");
+					renderElectedIdeologyChart("morePlotsIdeologyChart", sims.electedBins);
 				}
 				if (sims.marginBins) {
 					renderDistrictMarginsChart(
@@ -1601,44 +1597,39 @@
 			// their party.  Counts are per-chamber averages from the main
 			// 1000-sim run.  Auto-zooms x to the range where the bins are
 			// non-zero so the small support for one party fills the panel.
-			function renderElectedIdeologyChart(divId, electedBins, party) {
+			// Combined elected-rep ideology histogram: D and R distributions
+			// stacked on the same x-axis (both bins share centres/ranges
+			// from electedBins).  Same visual style as the per-district
+			// election margin chart on this page.
+			function renderElectedIdeologyChart(divId, electedBins) {
 				const { binSize, centres, ranges, avgD, avgR } = electedBins;
-				const ys = party === "R" ? avgR : avgD;
-				// Fixed shared x-range across both party charts — visually
-				// pins the two distributions to the same scale.  Pulled
-				// from CONFIG.histograms.repIdeology so a single config
-				// knob controls both ideology charts and the example
-				// chamber's y-axis range.
+				// Fixed x-range from CONFIG.histograms.repIdeology so this
+				// chart and the example-chamber scatter share a scale.
 				const ideoCfg = window.CONFIG.histograms.repIdeology;
 				const xLo = ideoCfg.lo;
 				const xHi = ideoCfg.hi;
-				const color =
-					party === "R"
-						? "rgba(214,39,40,0.85)"
-						: "rgba(31,119,180,0.85)";
-				const title =
-					party === "R"
-						? "Distribution of Republican Rep Ideology"
-						: "Distribution of Democratic Rep Ideology";
-				const ylabel = `Avg ${party === "R" ? "Republican" : "Democratic"} reps per chamber`;
 				Plotly.react(
 					divId,
 					[
 						{
-							x: centres,
-							y: ys,
-							type: "bar",
-							name: party,
-							marker: { color, line: { width: 0 } },
-							width: binSize,
-							customdata: ranges,
+							x: centres, y: avgD, type: "bar", name: "Democratic",
+							marker: { color: "rgba(31,119,180,0.85)", line: { width: 0 } },
+							width: binSize, customdata: ranges,
 							hovertemplate:
 								"ideology: %{customdata[0]:.0f} to %{customdata[1]:.0f}<br>" +
-								"avg candidates: %{y:.2f}<extra></extra>",
+								"avg D reps: %{y:.2f}<extra></extra>",
+						},
+						{
+							x: centres, y: avgR, type: "bar", name: "Republican",
+							marker: { color: "rgba(214,39,40,0.85)", line: { width: 0 } },
+							width: binSize, customdata: ranges,
+							hovertemplate:
+								"ideology: %{customdata[0]:.0f} to %{customdata[1]:.0f}<br>" +
+								"avg R reps: %{y:.2f}<extra></extra>",
 						},
 					],
 					{
-						title: { text: title, font: { size: 13 } },
+						title: { text: "Distribution of Rep Ideology", font: { size: 13 } },
 						xaxis: {
 							title: { text: "Rep Ideology  (← Liberal · Conservative →)", standoff: 4, font: { size: 11 } },
 							range: [xLo, xHi],
@@ -1650,10 +1641,14 @@
 							showticklabels: false,
 							ticks: "",
 						},
-						yaxis: { title: { text: ylabel, font: { size: 11 } } },
+						yaxis: { title: { text: "Avg reps per chamber", font: { size: 11 } } },
 						margin: { l: 60, r: 14, t: 38, b: 50 },
-						showlegend: false,
+						barmode: "stack",
 						bargap: 0.05,
+						legend: {
+							orientation: "h",
+							x: 0.5, xanchor: "center", y: -0.18, yanchor: "top",
+						},
 						plot_bgcolor: "#fff",
 					},
 					{ displayModeBar: false, responsive: true }
