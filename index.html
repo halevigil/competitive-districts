@@ -4,8 +4,8 @@
 		<meta charset="UTF-8" />
 		<title>Median Ideology Simulator</title>
 		<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-		<script src="config.js"></script>
-		<script src="model.js"></script>
+		<script src="config.js?v=2"></script>
+		<script src="model.js?v=2"></script>
 		<style>
 			:root {
 				--bg: #fafafa;
@@ -659,9 +659,10 @@
 						? num("sigmaN")
 						: CONST.sigmaN,
 					noiseType: CONST.noiseType ?? "bates",
-					batesW: CONST.bates?.weight ?? 0,
+					// sigmaN above is the noise scale; bates/tukey below set
+					// the SHAPE of the unit-variance draw that gets multiplied
+					// by sigmaN inside the inner loop.
 					batesN: CONST.bates?.N ?? 3,
-					tukeyW: CONST.tukey?.weight ?? 0,
 					tukeyLambda: CONST.tukey?.lambda ?? 0.14,
 					// District distribution weights (absolute mass each component
 					// contributes to the chamber pool).  See model.js →

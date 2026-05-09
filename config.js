@@ -50,40 +50,37 @@ window.CONFIG = {
 		// to district partisanship.
 		qualImp: { min: 0, max: 1.05, step: 0.05, value: 0.35 },
 
-		// Election noise σ — divisor on the (di − wMod·(cD+cR)) term in the
-		// hard-cutoff z, so smaller values make the cutoff sharper and
-		// larger values smear it out.  Floor > 0 so we never divide by zero.
-		sigmaN: { min: 0, max: 2, step: 0.1, value: 1 },
+		// Election noise σ — scales an additive unit-variance noise term that
+		// gets added to the score (di − wMod·(cD+cR)) before the hard cutoff
+		// at z = 0.  Larger values smear the cutoff out; 0 makes the election
+		// fully deterministic given the candidate draws.
+		sigmaN: { min: 0, max: 20, step: 0.1, value: 2 },
 	},
 
 	// ---------------- SIMULATION CONSTANTS -------------------------------------
 	constants: {
 		m: 217, // half-chamber size — total districts = 2*m + 1 = 435
 		nsim: 1000, // simulations per render
-		sigmaN: 2, // election noise σ
-		noiseType: "tukey",
+		sigmaN: 2, // fallback election noise σ if the slider is missing
+		// Election-noise SHAPE.  The actual noise σ comes from the sigmaN
+		// slider; this just picks the unit-variance distribution that gets
+		// scaled by it.
+		noiseType: "bates",
 		// Bates: continuous-N average of Uniform(−1, +1) draws, normalised to
 		// unit variance.  Bounded, bell-shaped, fast.
 		//   N = 1  → Uniform(−√3, +√3)               (flattest)
 		//   N = 2  → triangular
 		//   N = 3  → ≈ Gaussian-on-bounded-support
 		//   N → ∞  → Gaussian
-		// `weight` is the noise σ directly.  Set weight = 0 to disable.
-		bates: {
-			weight: 2,
-			N: 3,
-		},
+		bates: { N: 3 },
 		// Tukey lambda: single shape parameter controls the whole family.
 		//   λ = 0     → logistic (heavier than Gaussian)
 		//   λ ≈ 0.14  → ≈ Gaussian
 		//   λ = 0.5   → bounded, sub-Gaussian
 		//   λ = 1     → Uniform(−1, +1)
-		// NOT normalised to unit variance — `weight` is an outer multiplier
-		// on the raw draw, tune to taste.
-		tukey: {
-			weight: 0,
-			lambda: 0.14,
-		},
+		// NOT normalised — the raw draw is multiplied by sigmaN as-is, so
+		// switching to tukey changes the effective noise σ.
+		tukey: { lambda: 0.14 },
 	},
 
 	// ---------------- CANDIDATE-IDEOLOGY MEAN COUPLING -------------------------
