@@ -4,8 +4,8 @@
 		<meta charset="UTF-8" />
 		<title>Median Ideology Simulator</title>
 		<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-		<script src="config.js?v=6"></script>
-		<script src="model.js?v=6"></script>
+		<script src="config.js?v=7"></script>
+		<script src="model.js?v=7"></script>
 		<style>
 			:root {
 				--bg: #fafafa;
@@ -366,7 +366,6 @@
 			#morePlotsRWinsChart,
 			#morePlotsDIdeologyChart,
 			#morePlotsRIdeologyChart,
-			#morePlotsMarginsChart,
 			#morePlotsDistrictMarginsChart {
 				width: 100%;
 				height: 360px;
@@ -588,8 +587,6 @@
 						<div id="morePlotsDIdeologyChart"></div>
 						<h4>Distribution of Republican Rep Ideology</h4>
 						<div id="morePlotsRIdeologyChart"></div>
-						<h4>Distribution of Election Margins</h4>
-						<div id="morePlotsMarginsChart"></div>
 						<h4>Distribution of Per-District Election Margins</h4>
 						<div id="morePlotsDistrictMarginsChart"></div>
 						<h4>20 Example Chambers</h4>
@@ -1506,10 +1503,6 @@
 				if (sims.electedBins) {
 					renderElectedIdeologyChart("morePlotsDIdeologyChart", sims.electedBins, "D");
 					renderElectedIdeologyChart("morePlotsRIdeologyChart", sims.electedBins, "R");
-					renderMarginsChart("morePlotsMarginsChart", {
-						rSeatsBySim: sims.seats,
-						totalSeats: 2 * params.m + 1,
-					});
 				}
 				if (sims.marginBins) {
 					renderDistrictMarginsChart(
@@ -1808,89 +1801,6 @@
 								x1: half,
 								y0: 0,
 								y1: 1,
-								yref: "paper",
-								line: { color: "#888", width: 1, dash: "dot" },
-							},
-						],
-					},
-					{ displayModeBar: false, responsive: true }
-				);
-			}
-
-			// Distribution of election margins (R seats − D seats per sim).
-			// Same data as the seats chart but expressed as a margin and
-			// pinned to the [-100, +100] range so D+100 sits at the left and
-			// R+100 at the right; bars colored by which side wins (sign of
-			// the margin), with a dotted zero line marking a tied chamber.
-			function renderMarginsChart(divId, stats) {
-				const { rSeatsBySim, totalSeats } = stats;
-				// margin = R − D = 2·R − N
-				const margins = new Int32Array(rSeatsBySim.length);
-				for (let i = 0; i < rSeatsBySim.length; i++) {
-					margins[i] = 2 * rSeatsBySim[i] - totalSeats;
-				}
-				// Multi-seat bins across [-100, +100], clipping outliers to the
-				// edges.  Wider bins = chunkier bars, matching the visual
-				// weight of the per-party seats-by-partisanship charts on the
-				// historical page.
-				const lo = -100, hi = 100;
-				const binSize = window.CONFIG?.histograms?.district?.binSize || 2;
-				const nBins = Math.ceil((hi - lo) / binSize);
-				const counts = new Array(nBins).fill(0);
-				for (const m of margins) {
-					let idx = Math.floor((m - lo) / binSize);
-					if (idx < 0) idx = 0;
-					else if (idx >= nBins) idx = nBins - 1;
-					counts[idx]++;
-				}
-				const xR = [], yR = [], rangesR = [];
-				const xD = [], yD = [], rangesD = [];
-				for (let i = 0; i < nBins; i++) {
-					const a = lo + i * binSize;
-					const b = a + binSize;
-					const c = (a + b) / 2;
-					if (c > 0) { xR.push(c); yR.push(counts[i]); rangesR.push([a, b]); }
-					else        { xD.push(c); yD.push(counts[i]); rangesD.push([a, b]); }
-				}
-				Plotly.newPlot(
-					divId,
-					[
-						{
-							x: xD, y: yD, type: "bar", name: "D majority",
-							marker: { color: "rgba(31,119,180,0.85)", line: { width: 0 } },
-							width: binSize, customdata: rangesD,
-							hovertemplate:
-								"margin: %{customdata[0]:.0f} to %{customdata[1]:.0f}<br>" +
-								"count: %{y}<extra></extra>",
-						},
-						{
-							x: xR, y: yR, type: "bar", name: "R majority",
-							marker: { color: "rgba(214,39,40,0.85)", line: { width: 0 } },
-							width: binSize, customdata: rangesR,
-							hovertemplate:
-								"margin: %{customdata[0]:.0f} to %{customdata[1]:.0f}<br>" +
-								"count: %{y}<extra></extra>",
-						},
-					],
-					{
-						title: { text: "Distribution of Election Margins", font: { size: 13 } },
-						xaxis: {
-							title: { text: "Seat margin  (← Democratic · Republican →)", standoff: 4 },
-							range: [lo, hi],
-							tickvals: [-100, -50, 0, 50, 100],
-							ticktext: ["D+100", "D+50", "Tied", "R+50", "R+100"],
-							zeroline: false,
-						},
-						yaxis: { title: "Sim count" },
-						margin: { l: 60, r: 20, t: 50, b: 60 },
-						legend: {
-							orientation: "h",
-							x: 0.5, xanchor: "center", y: -0.22, yanchor: "top",
-						},
-						bargap: 0.05,
-						shapes: [
-							{
-								type: "line", x0: 0, x1: 0, y0: 0, y1: 1,
 								yref: "paper",
 								line: { color: "#888", width: 1, dash: "dot" },
 							},

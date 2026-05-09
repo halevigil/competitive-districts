@@ -27,13 +27,13 @@ window.CONFIG = {
 		// either to scale gerrymandering on both sides equally; uncheck the
 		// pin to make one party gerrymander more than the other.
 		// `gerry` is shared by both rGerry and dGerry sliders — edit once.
-		gerry: { min: 0, max: 0.49, step: 0.01, value: 0.15 },
+		gerry: { min: 0, max: 0.48, step: 0.01, value: 0.16 },
 
 		// Ambient candidate moderation: σ of the candidate-ideology distribution.
 		// Used directly as σ in the simulator; also drives μ through
 		// `candidateMean`.  Pinned together in the UI by default.
 		// Shared by both dAmbMod and rAmbMod sliders.
-		ambMod: { min: 2, max: 22.5, step: 0.1, value: 7.5 },
+		ambMod: { min: 2, max: 22.5, step: 0.1, value: 8 },
 
 		// Intentional moderation: how strongly candidates moderate toward the
 		// district median.  Pinned together in the UI by default.
@@ -44,11 +44,11 @@ window.CONFIG = {
 		// Slider min is auto-derived in index.html so neither meanAmp nor
 		// varAmp goes negative anywhere in [min, max].  Shared by both
 		// dIntMod and rIntMod sliders.
-		intMod: { max: 3, step: 0.05, value: 1 },
+		intMod: { max: 2, step: 0.05, value: 1 },
 
 		// How heavily voters punish ideologically extreme candidates relative
 		// to district partisanship.
-		qualImp: { min: 0, max: 1.05, step: 0.05, value: 0.35 },
+		qualImp: { min: 0, max: 0.9, step: 0.05, value: 0.3 },
 
 		// Election noise σ — scales an additive unit-variance noise term that
 		// gets added to the score (di − wMod·(cD+cR)) before the hard cutoff
@@ -138,10 +138,10 @@ window.CONFIG = {
 	districtGerry: {
 		removeRange: [-10, 10],
 		componentsR: [
-			{ mean: 20, sigma: 7, weight: 1 }, // packed safe-R bump
+			{ mean: 22, sigma: 7, weight: 1 }, // packed safe-R bump
 		],
 		componentsD: [
-			{ mean: -20, sigma: 7, weight: 1 }, // packed safe-D bump (mirror)
+			{ mean: -22, sigma: 7, weight: 1 }, // packed safe-D bump (mirror)
 		],
 	},
 
@@ -189,8 +189,8 @@ window.CONFIG = {
 		L: 6,
 		meanAmp: 3, // mean-moderation pull AT slider default
 		varAmp: 3, // candidate-σ bump amplitude AT slider default
-		meanAmpSlope: 3, // d(meanAmp) / d(slider)
-		varAmpSlope: 3, // d(varAmp)  / d(slider)
+		meanAmpSlope: 12, // d(meanAmp) / d(slider)
+		varAmpSlope: 12, // d(varAmp)  / d(slider)
 		meanBreadth: 9, // mean-bell half-decay distance in % points
 		varBreadth: 6, // σ-bell half-decay distance in % points
 	},
@@ -249,14 +249,14 @@ window.CONFIG = {
 			v: 1.5, // R+1.5% national popular-vote margin
 			rGerry: 0.19,
 			dGerry: 0.15,
-			dAmbMod: 10,
+			dAmbMod: 8.5,
 			rAmbMod: 7.5,
 			// Modest D-edge in intentional moderation (Slotkin, Gallego, etc.
 			// ran more aggressively moderate than their R counterparts).
 			// Both sides are within ~25% of the configured default amp.
-			dIntMod: 1.5, // a touch above default
-			rIntMod: 0.6, // a touch below default
-			qualImp: 0.35,
+			dIntMod: 1.2, // a touch above default
+			rIntMod: 0.7, // a touch below default
+			qualImp: 0.3,
 		},
 		// Demo of the gerry → less-extreme-median effect.
 		// With ambMod maxed out (very wide candidate spreads), a small
