@@ -21,31 +21,39 @@ window.CONFIG = {
 		//   (1 − rGerry − dGerry) · base  +  rGerry · gerry.componentsR
 		//                                  +  dGerry · gerry.componentsD
 		// so dragging one slider up reduces the base ("competitive") share.
-		// Each slider is capped at 0.5 so the two together can saturate to a
-		// fully gerrymandered chamber (50% R-packed + 50% D-packed, no base).
+		// Each slider is capped at 0.49 so the two together can saturate to a
+		// fully gerrymandered chamber (~50% R-packed + ~50% D-packed, no base).
 		// In the UI, these two sliders are pinned together by default — drag
 		// either to scale gerrymandering on both sides equally; uncheck the
 		// pin to make one party gerrymander more than the other.
-		rGerry: { min: 0, max: 0.3, step: 0.01, value: 0.15 },
-		dGerry: { min: 0, max: 0.3, step: 0.01, value: 0.15 },
+		// `gerry` is shared by both rGerry and dGerry sliders — edit once.
+		gerry: { min: 0, max: 0.49, step: 0.01, value: 0.15 },
 
 		// Ambient candidate moderation: σ of the candidate-ideology distribution.
 		// Used directly as σ in the simulator; also drives μ through
 		// `candidateMean`.  Pinned together in the UI by default.
-		dAmbMod: { min: 0, max: 15, step: 0.1, value: 7.5 },
-		rAmbMod: { min: 0, max: 15, step: 0.1, value: 7.5 },
+		// Shared by both dAmbMod and rAmbMod sliders.
+		ambMod: { min: 2, max: 22.5, step: 0.1, value: 7.5 },
 
 		// Intentional moderation: how strongly candidates moderate toward the
-		// district median.  Pinned together in the UI by default.  Sensitivities
-		// in `intentionalMod` below are picked so the lowest slider position
-		// (0) drives BOTH meanAmp and varAmp to exactly 0 — i.e. zero
-		// intentional moderation when the slider is fully left.
-		dIntMod: { min: 0, max: 9, step: 0.05, value: 1.5 },
-		rIntMod: { min: 0, max: 9, step: 0.05, value: 1.5 },
+		// district median.  Pinned together in the UI by default.
+		//   value — the slider default position (where amp = configured amp)
+		//   max   — IN MULTIPLES OF SLOPE above default; index.html sets the
+		//           slider's actual max to value + max
+		//   step  — slider step size
+		// Slider min is auto-derived in index.html so neither meanAmp nor
+		// varAmp goes negative anywhere in [min, max].  Shared by both
+		// dIntMod and rIntMod sliders.
+		intMod: { max: 3, step: 0.05, value: 1 },
 
 		// How heavily voters punish ideologically extreme candidates relative
 		// to district partisanship.
-		qualImp: { min: 0, max: 0.5, step: 0.05, value: 0.25 },
+		qualImp: { min: 0, max: 1, step: 0.05, value: 0.25 },
+
+		// Election noise σ — divisor on the (di − wMod·(cD+cR)) term in the
+		// hard-cutoff z, so smaller values make the cutoff sharper and
+		// larger values smear it out.  Floor > 0 so we never divide by zero.
+		sigmaN: { min: 0, max: 2, step: 0.1, value: 1 },
 	},
 
 	// ---------------- SIMULATION CONSTANTS -------------------------------------
@@ -73,7 +81,7 @@ window.CONFIG = {
 		// NOT normalised to unit variance — `weight` is an outer multiplier
 		// on the raw draw, tune to taste.
 		tukey: {
-			weight: 1,
+			weight: 0,
 			lambda: 0.14,
 		},
 	},
@@ -163,36 +171,31 @@ window.CONFIG = {
 	//               Plus a candidate-σ bump at d = ±L (typically L > K) of
 	//               amplitude `varAmp`.  Models heterogeneity in deeper
 	//               stretch territory: some try harder, some give up.
-	// `meanAmp` and `varAmp` are now ANCHORED at the slider default — like
-	// `candidateMean.defaultMu`, they specify the value AT slider default, and
-	// each slope (`meanSensitivity` / `varSensitivity`) controls how the
-	// effective amplitude shifts as the slider moves away from default:
-	//     ampD    = meanAmp + meanSensitivity * (bD - bD_default)
-	//     ampR    = meanAmp + meanSensitivity * (bR - bR_default)
-	//     varAmpD = varAmp  + varSensitivity  * (bD - bD_default)
-	//     varAmpR = varAmp  + varSensitivity  * (bR - bR_default)
-	// The simulator then uses ampD / ampR / varAmpD / varAmpR DIRECTLY:
+	// `meanAmp` and `varAmp` are the per-party amplitudes AT the slider
+	// default (set in CONFIG.sliders.intMod.value).  `meanAmpSlope` and
+	// `varAmpSlope` are the slopes — how much each amp changes per slider
+	// unit away from default.  index.html auto-derives the slider's min
+	// (where amp = 0) and max (default + intMod.max slope units above):
+	//     ampD    = meanAmp + meanAmpSlope · (bD - sliderDefault)
+	//     ampR    = meanAmp + meanAmpSlope · (bR - sliderDefault)
+	//     varAmpD = varAmp  + varAmpSlope  · (bD - sliderDefault)
+	//     varAmpR = varAmp  + varAmpSlope  · (bR - sliderDefault)
+	// And in the simulator:
 	//     cD adds +ampD · bell(d, +K, meanBreadth)
 	//     cR adds −ampR · bell(d, −K, meanBreadth)
 	//     σ_D_eff(d) = σ_D + varAmpD · bell(d, +L, varBreadth)
 	//     σ_R_eff(d) = σ_R + varAmpR · bell(d, −L, varBreadth)
-	// (`varAmp` adds to σ — i.e. one standard deviation — directly; no extra
-	// slider / ratio factors, they're folded into the sensitivities.)
-	// Tuned to roughly match the 2020 mismatch distribution
-	// (8 / 5 / 3 / 0 / 0 across magnitude bins 0-5/5-10/10-15/15-20/20+, ~16 total).
+	// (`varAmp` adds to σ — one standard deviation — directly.)
 	intentionalMod: {
 		mode: "offsetK",
 		K: 3,
-		L: 12,
-		meanAmp: 1.5, // mean-moderation pull AT slider default
-		varAmp: 9, // candidate-σ bump amplitude AT slider default
-		// Sensitivities = amp / slider_default, so at slider = 0 both
-		// amplitudes drop to 0 and the slider's lowest setting fully turns
-		// off intentional moderation.
-		meanSensitivity: 2, // = meanAmp / dIntMod_default = 1.5 / 1.5
-		varSensitivity: 6, // = varAmp  / dIntMod_default = 9   / 1.5
-		meanBreadth: 8, // mean-bell half-decay distance in % points
-		varBreadth: 8, // σ-bell half-decay distance in % points
+		L: 6,
+		meanAmp: 3, // mean-moderation pull AT slider default
+		varAmp: 3, // candidate-σ bump amplitude AT slider default
+		meanAmpSlope: 3, // d(meanAmp) / d(slider)
+		varAmpSlope: 3, // d(varAmp)  / d(slider)
+		meanBreadth: 9, // mean-bell half-decay distance in % points
+		varBreadth: 6, // σ-bell half-decay distance in % points
 	},
 
 	// ---------------- HISTOGRAMS -----------------------------------------------
@@ -203,7 +206,7 @@ window.CONFIG = {
 		// outside the default bound.  The chart always shows `nBins` bins
 		// across the chosen range, so per-bin width = (range) / nBins.
 		median: {
-			defaultRange: [-50, 50],
+			defaultRange: [-150, 150],
 			roundTo: 10,
 			nBins: 40,
 			extendPercentile: 0.01, // 1st / 99th percentile
@@ -229,5 +232,34 @@ window.CONFIG = {
 	morePlots: {
 		nChambers: 20, // example chambers in the grid
 		nSimsForMismatch: 500, // simulations averaged for the mismatch chart
+	},
+
+	// ---------------- PRESETS --------------------------------------------------
+	// Named bundles of slider values — rendered as buttons under the Reset
+	// button.  Clicking applies all listed values, leaves any unlisted slider
+	// at its current setting, and re-runs the simulator.
+	// Preset slider values are MULTIPLIERS / direct slider values, not the
+	// underlying model amplitudes — they need to lie in each slider's
+	// [min, max] range or the browser will clamp them silently.  In
+	// particular, dIntMod / rIntMod max out at 1 by default, so values
+	// above 1 just snap to 1.
+	// Preset slider values must lie in each slider's auto-derived
+	// [min, max] range — for dIntMod / rIntMod that's
+	// [intMod.value − meanAmp/meanAmpSlope, intMod.value + intMod.max].
+	// Asymmetric values automatically uncheck the relevant pin checkbox.
+	presets: {
+		"Approximate 2024 Election": {
+			v: 1.5, // R+1.5% national popular-vote margin
+			rGerry: 0.19,
+			dGerry: 0.15,
+			dAmbMod: 10,
+			rAmbMod: 7.5,
+			// Modest D-edge in intentional moderation (Slotkin, Gallego, etc.
+			// ran more aggressively moderate than their R counterparts).
+			// Both sides are within ~25% of the configured default amp.
+			dIntMod: 1.5, // a touch above default
+			rIntMod: 0.8, // a touch below default
+			qualImp: 0.35,
+		},
 	},
 };

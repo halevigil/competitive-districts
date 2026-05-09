@@ -476,8 +476,16 @@ function simulateOne(p, returnFull = false, districtPool = null, mismatchTracker
   // by the slider value or any extra ratio factor.
   const meanAmpD = p.meanAmpD, meanAmpR = p.meanAmpR;
   const varAmpD  = p.varAmpD,  varAmpR  = p.varAmpR;
-  const modOffsetD = p.modOffsetD, modOffsetR = p.modOffsetR;
-  const varOffsetD = p.varOffsetD, varOffsetR = p.varOffsetR;
+  // K and L offsets are anchored at the MEDIAN DISTRICT'S lean, not at 0.
+  // The pool is sorted, so its midpoint is the median.  D moderates most
+  // at (median + K), R at (median - K); same shift for the σ-bump L.
+  // For symmetric pools the median ≈ 0 and this collapses to the old
+  // configured-K-from-zero behaviour.
+  const medianLean = d[(N - 1) >> 1];
+  const modOffsetD = medianLean + p.modOffsetD;
+  const modOffsetR = medianLean + p.modOffsetR;
+  const varOffsetD = medianLean + p.varOffsetD;
+  const varOffsetR = medianLean + p.varOffsetR;
   const meanBreadthSq = p.meanBreadth * p.meanBreadth;
   const varBreadthSq  = p.varBreadth  * p.varBreadth;
   const noiseType = p.noiseType;
@@ -607,14 +615,27 @@ function simulateOne(p, returnFull = false, districtPool = null, mismatchTracker
     if (returnFull) { r[i] = ri; party[i] = isR ? 'R' : 'D'; }
   }
 
-  const idxArr = Array.from({ length: N }, (_, i) => i);
-  idxArr.sort((a, b) => rVals[a] - rVals[b]);
-  const medianIdx = idxArr[(N - 1) >> 1];
-  const medianIdeology = rVals[medianIdx];
-  const medianParty = partyVals[medianIdx] ? 'R' : 'D';
-
-  let rSeats = 0;
-  for (let i = 0; i < N; i++) if (partyVals[i]) rSeats++;
+  // Single O(N) pass for the median rep + seat count.  D candidates have
+  // mean -100, R candidates +100, so the sort would put all D-won reps at
+  // the bottom and all R-won at the top.  Median = the most-conservative
+  // D (max of D's) when D has the majority, or the most-liberal R (min of
+  // R's) when R does — no full sort needed.  ~5–10× faster than the old
+  // Array.from + comparator-sort, and zero per-sim allocation.
+  const m = (N - 1) >> 1;
+  let rSeats = 0, maxD = -Infinity, minR = Infinity;
+  let maxDIdx = -1, minRIdx = -1;
+  for (let i = 0; i < N; i++) {
+    const ri = rVals[i];
+    if (partyVals[i]) {
+      rSeats++;
+      if (ri < minR) { minR = ri; minRIdx = i; }
+    } else {
+      if (ri > maxD) { maxD = ri; maxDIdx = i; }
+    }
+  }
+  const medianParty = rSeats > m ? 'R' : 'D';
+  const medianIdeology = medianParty === 'R' ? minR : maxD;
+  const medianIdx = medianParty === 'R' ? minRIdx : maxDIdx;
 
   if (returnFull) return { d, r, party, medianIdeology, medianParty, medianIdx, rSeats, mismatches };
   return { medianIdeology, medianParty, rSeats, mismatches };

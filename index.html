@@ -365,7 +365,8 @@
 			#morePlotsDWinsChart,
 			#morePlotsRWinsChart,
 			#morePlotsDIdeologyChart,
-			#morePlotsRIdeologyChart {
+			#morePlotsRIdeologyChart,
+			#morePlotsMarginsChart {
 				width: 100%;
 				height: 360px;
 				margin-top: 16px;
@@ -501,8 +502,20 @@
 						is.</span
 					>
 				</div>
+				<div class="row">
+					<label>Election Noise</label>
+					<input type="range" id="sigmaN" />
+					<span class="hint"
+						>Lower → election outcomes track district partisanship
+						and candidate ideology more deterministically.  Higher
+						→ more random per-district swings.</span
+					>
+				</div>
 
 				<button id="reset">Reset to defaults</button>
+				<!-- Preset buttons are populated from CONFIG.presets at init().
+				     Each button sets the listed sliders and re-runs the sim. -->
+				<div id="presets"></div>
 			</div>
 
 			<!-- ============ CHARTS ============ -->
@@ -574,6 +587,8 @@
 						<div id="morePlotsDIdeologyChart"></div>
 						<h4>Distribution of Republican Rep Ideology</h4>
 						<div id="morePlotsRIdeologyChart"></div>
+						<h4>Distribution of Election Margins</h4>
+						<div id="morePlotsMarginsChart"></div>
 						<h4>20 Example Chambers</h4>
 						<div class="chambersGrid" id="chambersGrid"></div>
 					</div>
@@ -603,6 +618,7 @@
 				"dIntMod",
 				"rIntMod",
 				"qualImp",
+				"sigmaN",
 			];
 
 			// Pairs of sliders that share a "move both together" pin checkbox.
@@ -636,7 +652,12 @@
 					nsim: CONST.nsim,
 					v: num("v"),
 					epsPct: CONST.epsPct,
-					sigmaN: CONST.sigmaN,
+					// sigmaN is now slider-controlled (see CONFIG.sliders.sigmaN);
+					// fall back to the constant for any older config that
+					// doesn't expose the slider.
+					sigmaN: document.getElementById("sigmaN")
+						? num("sigmaN")
+						: CONST.sigmaN,
 					noiseType: CONST.noiseType ?? "bates",
 					batesW: CONST.bates?.weight ?? 0,
 					batesN: CONST.bates?.N ?? 3,
@@ -664,22 +685,22 @@
 					),
 					sigmaR: sR,
 					wMod: num("qualImp"),
-					// Intentional-moderation amplitudes are anchored at the
-					// slider default — meanAmp / varAmp give the value AT
-					// default, and meanSensitivity / varSensitivity scale
-					// the slope away from default.  Same pattern as
-					// candidateMean's defaultMu / slope coupling above.
+					// Anchored-linear amp: at slider = default the amp equals
+					// the configured `meanAmp` / `varAmp`; the slope is the
+					// configured `meanAmpSlope` / `varAmpSlope`.  Slider min
+					// and max are auto-derived in init() so amp ≥ 0 across
+					// the whole range.
 					meanAmpD: im.mode === "offsetK"
-						? anchoredLinear(bD, cfg.sliders.dIntMod.value, im.meanAmp, im.meanSensitivity)
+						? anchoredLinear(bD, cfg.sliders.dIntMod.value, im.meanAmp, im.meanAmpSlope)
 						: 0,
 					meanAmpR: im.mode === "offsetK"
-						? anchoredLinear(bR, cfg.sliders.rIntMod.value, im.meanAmp, im.meanSensitivity)
+						? anchoredLinear(bR, cfg.sliders.rIntMod.value, im.meanAmp, im.meanAmpSlope)
 						: 0,
 					varAmpD: im.mode === "offsetK"
-						? anchoredLinear(bD, cfg.sliders.dIntMod.value, im.varAmp, im.varSensitivity)
+						? anchoredLinear(bD, cfg.sliders.dIntMod.value, im.varAmp, im.varAmpSlope)
 						: 0,
 					varAmpR: im.mode === "offsetK"
-						? anchoredLinear(bR, cfg.sliders.rIntMod.value, im.varAmp, im.varSensitivity)
+						? anchoredLinear(bR, cfg.sliders.rIntMod.value, im.varAmp, im.varAmpSlope)
 						: 0,
 					...intentionalModOffsets(
 						im.mode,
@@ -1178,6 +1199,47 @@
 			}
 
 			function init() {
+				// Expand shared D/R config blocks into per-side slider IDs.
+				// Saves having to maintain rGerry + dGerry, dAmbMod + rAmbMod,
+				// dIntMod + rIntMod separately — the user edits one block and
+				// both sides pick it up.  Each side gets its own copy so a
+				// preset (or pin-pair drag) can override one side without
+				// affecting the other.
+				const sharedPairs = {
+					gerry: ["rGerry", "dGerry"],
+					ambMod: ["rAmbMod", "dAmbMod"],
+					intMod: ["rIntMod", "dIntMod"],
+				};
+				for (const [shared, ids] of Object.entries(sharedPairs)) {
+					const block = window.CONFIG.sliders[shared];
+					if (!block) continue;
+					for (const id of ids) {
+						window.CONFIG.sliders[id] = { ...block };
+					}
+					delete window.CONFIG.sliders[shared];
+				}
+
+				// dIntMod / rIntMod auto-derive slider min and max from the
+				// user's six knobs (meanAmp, varAmp at default + their two
+				// slopes + the chosen slider default + max-as-multiples-of-
+				// slope-above-default).  Linear amp curve:
+				//     amp(slider) = configured_amp + slope · (slider - default)
+				// Min is set so amp = 0 at min for the LATER zero-crossing
+				// (so neither meanAmp nor varAmp goes negative).  Max is
+				// `default + intMod.max` (max counted as slope units above).
+				const im_ = window.CONFIG.intentionalMod;
+				const intCfg = window.CONFIG.sliders.dIntMod; // shared block
+				const sliderDefault = intCfg.value;
+				const meanZero = sliderDefault - im_.meanAmp / im_.meanAmpSlope;
+				const varZero  = sliderDefault - im_.varAmp  / im_.varAmpSlope;
+				const sliderMin = Math.max(meanZero, varZero);
+				const sliderMax = sliderDefault + intCfg.max;
+				for (const id of ["dIntMod", "rIntMod"]) {
+					window.CONFIG.sliders[id].min   = sliderMin;
+					window.CONFIG.sliders[id].max   = sliderMax;
+					window.CONFIG.sliders[id].value = sliderDefault;
+				}
+
 				// Apply slider attributes (min/max/step/default) from CONFIG so the
 				// numbers in config.js are the single source of truth.
 				for (const [id, attrs] of Object.entries(
@@ -1330,6 +1392,55 @@
 					.getElementById("reset")
 					.addEventListener("click", resetDefaults);
 
+				// Build preset buttons from CONFIG.presets.  Each button
+				// applies its slider bundle and triggers a render.  Before
+				// applying, any pin-pair whose D/R values differ in the
+				// preset gets unchecked — otherwise the pin would drag the
+				// later-set side back to match the earlier-set one.
+				const presetsContainer = document.getElementById("presets");
+				if (presetsContainer && window.CONFIG.presets) {
+					for (const [name, values] of Object.entries(
+						window.CONFIG.presets
+					)) {
+						const btn = document.createElement("button");
+						btn.textContent = name;
+						btn.style.marginTop = "6px";
+						btn.style.background = "#5b6e80";
+						btn.addEventListener("click", () => {
+							// Step 1: drop pin-pair sync wherever the preset
+							// asks for different D vs R values.
+							for (const pair of pinnedPairs) {
+								const hasD = pair.d in values;
+								const hasR = pair.r in values;
+								if (hasD && hasR && values[pair.d] !== values[pair.r]) {
+									const pin = document.getElementById(pair.pin);
+									if (pin) pin.checked = false;
+								}
+							}
+							// Step 2: apply all slider values.
+							for (const [id, v] of Object.entries(values)) {
+								const range = document.getElementById(id);
+								if (!range) continue;
+								range.value = v;
+								const numEl = document.getElementById(id + "_v");
+								if (numEl && numEl.tagName === "INPUT") {
+									numEl.value = formatVal(id, parseFloat(v));
+								}
+								range.dispatchEvent(
+									new Event("input", { bubbles: true })
+								);
+							}
+							updateVoteDisplay();
+							if (pendingTimer) {
+								clearTimeout(pendingTimer);
+								pendingTimer = null;
+							}
+							run();
+						});
+						presetsContainer.appendChild(btn);
+					}
+				}
+
 				// "See more plots" — lazy-render on first open, refresh button regenerates
 				// under the current sliders.
 				const morePlots = document.getElementById("morePlots");
@@ -1380,6 +1491,10 @@
 				if (sims.electedBins) {
 					renderElectedIdeologyChart("morePlotsDIdeologyChart", sims.electedBins, "D");
 					renderElectedIdeologyChart("morePlotsRIdeologyChart", sims.electedBins, "R");
+					renderMarginsChart("morePlotsMarginsChart", {
+						rSeatsBySim: sims.seats,
+						totalSeats: 2 * params.m + 1,
+					});
 				}
 			}
 
@@ -1672,6 +1787,78 @@
 								x1: half,
 								y0: 0,
 								y1: 1,
+								yref: "paper",
+								line: { color: "#888", width: 1, dash: "dot" },
+							},
+						],
+					},
+					{ displayModeBar: false, responsive: true }
+				);
+			}
+
+			// Distribution of election margins (R seats − D seats per sim).
+			// Same data as the seats chart but expressed as a margin and
+			// pinned to the [-100, +100] range so D+100 sits at the left and
+			// R+100 at the right; bars colored by which side wins (sign of
+			// the margin), with a dotted zero line marking a tied chamber.
+			function renderMarginsChart(divId, stats) {
+				const { rSeatsBySim, totalSeats } = stats;
+				// margin = R − D = 2·R − N
+				const margins = new Int32Array(rSeatsBySim.length);
+				for (let i = 0; i < rSeatsBySim.length; i++) {
+					margins[i] = 2 * rSeatsBySim[i] - totalSeats;
+				}
+				// 1-seat bins across [-100, +100], clipping outliers to the edges.
+				const lo = -100, hi = 100;
+				const nBins = hi - lo + 1;
+				const counts = new Array(nBins).fill(0);
+				for (const m of margins) {
+					let idx = m - lo;
+					if (idx < 0) idx = 0;
+					else if (idx >= nBins) idx = nBins - 1;
+					counts[idx]++;
+				}
+				const xR = [], yR = [], xD = [], yD = [];
+				for (let i = 0; i < nBins; i++) {
+					const x = lo + i;
+					if (x > 0) { xR.push(x); yR.push(counts[i]); }
+					else        { xD.push(x); yD.push(counts[i]); }
+				}
+				Plotly.newPlot(
+					divId,
+					[
+						{
+							x: xD, y: yD, type: "bar", name: "D majority",
+							marker: { color: "rgba(31,119,180,0.75)" },
+							hovertemplate:
+								"margin: %{x}<br>count: %{y}<extra></extra>",
+						},
+						{
+							x: xR, y: yR, type: "bar", name: "R majority",
+							marker: { color: "rgba(214,39,40,0.75)" },
+							hovertemplate:
+								"margin: %{x}<br>count: %{y}<extra></extra>",
+						},
+					],
+					{
+						title: { text: "Distribution of Election Margins", font: { size: 13 } },
+						xaxis: {
+							title: { text: "Seat margin  (← Democratic · Republican →)", standoff: 4 },
+							range: [lo, hi],
+							tickvals: [-100, -50, 0, 50, 100],
+							ticktext: ["D+100", "D+50", "Tied", "R+50", "R+100"],
+							zeroline: false,
+						},
+						yaxis: { title: "Sim count" },
+						margin: { l: 60, r: 20, t: 50, b: 60 },
+						legend: {
+							orientation: "h",
+							x: 0.5, xanchor: "center", y: -0.22, yanchor: "top",
+						},
+						bargap: 0.05,
+						shapes: [
+							{
+								type: "line", x0: 0, x1: 0, y0: 0, y1: 1,
 								yref: "paper",
 								line: { color: "#888", width: 1, dash: "dot" },
 							},
