@@ -47,7 +47,7 @@ window.CONFIG = {
 		// `meanAmp / meanAmpSlope === intMod.max` (i.e. the "amp = 0" point
 		// is the same distance below default as the slider max is above).
 		// Shared by both dIntMod and rIntMod sliders.
-		intMod: { max: 1, step: 0.05, value: 1 },
+		intMod: { max: 4, step: 0.05, value: 1 },
 
 		// How heavily voters punish ideologically extreme candidates relative
 		// to district partisanship.
@@ -57,7 +57,7 @@ window.CONFIG = {
 		// gets added to the score (di − wMod·(cD+cR)) before the hard cutoff
 		// at z = 0.  Larger values smear the cutoff out; 0 makes the election
 		// fully deterministic given the candidate draws.
-		sigmaN: { min: 0, max: 20, step: 0.1, value: 2 },
+		sigmaN: { min: 0, max: 4, step: 0.1, value: 2 },
 	},
 
 	// ---------------- SIMULATION CONSTANTS -------------------------------------
@@ -264,7 +264,7 @@ window.CONFIG = {
 			//   1.8 → meanAmp = 5.4 (D moderates aggressively)
 			//   0.0 → meanAmp = 0   (R has no intentional-moderation pull)
 			dIntMod: 1.8,
-			rIntMod: 0,
+			rIntMod: 0.1,
 			qualImp: 0.3,
 		},
 		// Demo of the gerry → less-extreme-median effect.

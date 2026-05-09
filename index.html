@@ -4,8 +4,8 @@
 		<meta charset="UTF-8" />
 		<title>Median Ideology Simulator</title>
 		<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-		<script src="config.js?v=8"></script>
-		<script src="model.js?v=8"></script>
+		<script src="config.js?v=9"></script>
+		<script src="model.js?v=9"></script>
 		<style>
 			:root {
 				--bg: #fafafa;
@@ -1160,9 +1160,6 @@
 			}
 
 			function resetDefaults() {
-				// Pin checkbox state is intentionally NOT reset — it's a UI
-				// preference, not a model parameter, so a user who unpinned a
-				// pair to set them independently keeps that arrangement.
 				for (const id of sliderIds) {
 					const range = document.getElementById(id);
 					range.value = range.defaultValue;
@@ -1171,6 +1168,14 @@
 						numEl.value = formatVal(id, parseFloat(range.value));
 					}
 					range.dispatchEvent(new Event("input"));
+				}
+				// Re-check every "move both sliders together" pin so the chamber
+				// returns to fully-symmetric defaults.  All defaults are equal
+				// across each pinned pair, so re-checking here doesn't change
+				// any slider positions, just restores the linked-drag behaviour.
+				for (const pair of pinnedPairs) {
+					const pin = document.getElementById(pair.pin);
+					if (pin) pin.checked = true;
 				}
 				updateVoteDisplay();
 				if (pendingTimer) {
