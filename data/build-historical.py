@@ -74,6 +74,32 @@ with open("house-winners.csv", "w", newline="") as f:
 print("house-winners.csv written")
 
 # -----------------------------------------------------------------------------
+# Per-district House election MARGIN — same source as house-winners.csv but
+# expressed as (R% − D%) in percentage points.  Districts where one of D / R
+# didn't run (or got rounded to zero votes) are stored as ±100 so the
+# histogram on the historical page can still bin them.  Used for the
+# right-column "Distribution of Election Margins" chart on historical.html.
+# -----------------------------------------------------------------------------
+with open("house-margins.csv", "w", newline="") as f:
+    w = csv.writer(f)
+    w.writerow(["cycle", "state", "district", "margin", "winner_party"])
+    for (year, state, district), candidates in sorted(house_rows.items()):
+        if not candidates:
+            continue
+        by_party = defaultdict(int)
+        for votes, party in candidates:
+            by_party[party] += votes
+        total = sum(by_party.values())
+        if total <= 0:
+            continue
+        d_pct = 100.0 * by_party.get("D", 0) / total
+        r_pct = 100.0 * by_party.get("R", 0) / total
+        margin = round(r_pct - d_pct, 2)
+        winner = max(by_party.items(), key=lambda kv: kv[1])[0]
+        w.writerow([year, state, district, margin, winner])
+print("house-margins.csv written")
+
+# -----------------------------------------------------------------------------
 # Presidential margin per CD, from the two Daily Kos / Downballot sheets.
 # Output schema:
 #   cycle           — election year (e.g. 2024)

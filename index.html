@@ -4,8 +4,8 @@
 		<meta charset="UTF-8" />
 		<title>Median Ideology Simulator</title>
 		<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-		<script src="config.js?v=4"></script>
-		<script src="model.js?v=4"></script>
+		<script src="config.js?v=5"></script>
+		<script src="model.js?v=5"></script>
 		<style>
 			:root {
 				--bg: #fafafa;
@@ -1809,36 +1809,47 @@
 				for (let i = 0; i < rSeatsBySim.length; i++) {
 					margins[i] = 2 * rSeatsBySim[i] - totalSeats;
 				}
-				// 1-seat bins across [-100, +100], clipping outliers to the edges.
+				// Multi-seat bins across [-100, +100], clipping outliers to the
+				// edges.  Wider bins = chunkier bars, matching the visual
+				// weight of the per-party seats-by-partisanship charts on the
+				// historical page.
 				const lo = -100, hi = 100;
-				const nBins = hi - lo + 1;
+				const binSize = window.CONFIG?.histograms?.district?.binSize || 2;
+				const nBins = Math.ceil((hi - lo) / binSize);
 				const counts = new Array(nBins).fill(0);
 				for (const m of margins) {
-					let idx = m - lo;
+					let idx = Math.floor((m - lo) / binSize);
 					if (idx < 0) idx = 0;
 					else if (idx >= nBins) idx = nBins - 1;
 					counts[idx]++;
 				}
-				const xR = [], yR = [], xD = [], yD = [];
+				const xR = [], yR = [], rangesR = [];
+				const xD = [], yD = [], rangesD = [];
 				for (let i = 0; i < nBins; i++) {
-					const x = lo + i;
-					if (x > 0) { xR.push(x); yR.push(counts[i]); }
-					else        { xD.push(x); yD.push(counts[i]); }
+					const a = lo + i * binSize;
+					const b = a + binSize;
+					const c = (a + b) / 2;
+					if (c > 0) { xR.push(c); yR.push(counts[i]); rangesR.push([a, b]); }
+					else        { xD.push(c); yD.push(counts[i]); rangesD.push([a, b]); }
 				}
 				Plotly.newPlot(
 					divId,
 					[
 						{
 							x: xD, y: yD, type: "bar", name: "D majority",
-							marker: { color: "rgba(31,119,180,0.75)" },
+							marker: { color: "rgba(31,119,180,0.85)", line: { width: 0 } },
+							width: binSize, customdata: rangesD,
 							hovertemplate:
-								"margin: %{x}<br>count: %{y}<extra></extra>",
+								"margin: %{customdata[0]:.0f} to %{customdata[1]:.0f}<br>" +
+								"count: %{y}<extra></extra>",
 						},
 						{
 							x: xR, y: yR, type: "bar", name: "R majority",
-							marker: { color: "rgba(214,39,40,0.75)" },
+							marker: { color: "rgba(214,39,40,0.85)", line: { width: 0 } },
+							width: binSize, customdata: rangesR,
 							hovertemplate:
-								"margin: %{x}<br>count: %{y}<extra></extra>",
+								"margin: %{customdata[0]:.0f} to %{customdata[1]:.0f}<br>" +
+								"count: %{y}<extra></extra>",
 						},
 					],
 					{

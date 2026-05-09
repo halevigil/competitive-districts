@@ -6,8 +6,8 @@ README.md
 fly.toml
 
 # Raw upstream data + the build script that turns it into the served CSVs.
-# Only data/house-winners.csv and data/pres-by-cd.csv need to ship; the
-# preprocessor and the multi-MB raw inputs do not.
+# Only data/house-winners.csv, data/house-margins.csv, and data/pres-by-cd.csv
+# need to ship; the preprocessor and the multi-MB raw inputs do not.
 data/538-house-raw.csv
 data/dailykos-2008-2020-pres-by-cd-2020-cycle.csv
 data/downballot-2024-pres-by-cd.csv

@@ -255,7 +255,7 @@ window.CONFIG = {
 			// ran more aggressively moderate than their R counterparts).
 			// Both sides are within ~25% of the configured default amp.
 			dIntMod: 1.5, // a touch above default
-			rIntMod: 0.8, // a touch below default
+			rIntMod: 0.6, // a touch below default
 			qualImp: 0.35,
 		},
 		// Demo of the gerry → less-extreme-median effect.

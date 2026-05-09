@@ -28,6 +28,15 @@
     grid-template-columns: repeat(2, 1fr);
     gap: 12px;
   }
+  /* Each year takes one full-width row; inside that row, the seats-by-pres
+     chart sits on the left and the per-district House margin distribution
+     on the right.  Last row (the "current simulator run") is one panel. */
+  .yearRow {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
   .panel {
     background: var(--panel);
     border: 1px solid var(--border);
@@ -43,15 +52,16 @@
 </head>
 <body>
 
-<h1>Historical House Seats by District Presidential Margin, 2008–2024</h1>
+<h1>Historical House Seats and Election Margins, 2008–2024</h1>
 <div class="subtitle">
-  For each presidential cycle, the histogram of US House seats split by who
-  actually won each district's House race (blue = Democratic, red = Republican),
-  binned by the district's presidential margin (R% − D%).  Bin width is
-  configurable in <code>historical_config.js</code>.  Same visual style as
-  the simulator's "Democratic Seats by District Partisanship" and
-  "Republican Seats by District Partisanship" charts, so you can compare
-  against the model's output.
+  Each row is one presidential cycle.  <b>Left:</b> US House seats binned by
+  the district's presidential margin (R% − D%), coloured by who actually won
+  the House race (blue = Democratic, red = Republican).  <b>Right:</b>
+  distribution of per-district House election margins (R% − D% in the House
+  race itself) for that cycle.  Bin width is configurable in
+  <code>historical_config.js</code>.  Same visual style as the simulator's
+  per-party seats-by-partisanship and election-margins charts so you can
+  compare against the model's output.
 </div>
 
 <div id="charts" class="grid"><div class="loading full">Loading data…</div></div>
@@ -121,11 +131,16 @@ function parseCsv(text) {
 }
 
 async function loadAll() {
-  const [houseText, presText] = await Promise.all([
+  const [houseText, presText, marginText] = await Promise.all([
     fetch('data/house-winners.csv').then(r => r.text()),
     fetch('data/pres-by-cd.csv').then(r => r.text()),
+    fetch('data/house-margins.csv').then(r => r.text()),
   ]);
-  return { house: parseCsv(houseText), pres: parseCsv(presText) };
+  return {
+    house: parseCsv(houseText),
+    pres:  parseCsv(presText),
+    margins: parseCsv(marginText),
+  };
 }
 
 // Index: (cycle, state, district) → winner_party
@@ -168,6 +183,74 @@ function buildYear(year, presRows, houseIdx) {
     ranges[i]  = [a, b];
   }
   return { centres, ranges, dCounts, rCounts, nMatched, nUnmatched, nD, nR };
+}
+
+// Per-district House election-margin distribution for one cycle.  Same bin
+// grid as the seats-by-pres chart so the two read as parallel views of the
+// same year; bars stacked by D-won / R-won (which collapses to a coloured
+// histogram by sign of the margin, since margin sign IS the winner).
+function buildMarginYear(year, marginRows) {
+  const lo = -100, hi = 100;
+  const nBins = Math.ceil((hi - lo) / binSize);
+  const dCounts = new Array(nBins).fill(0);
+  const rCounts = new Array(nBins).fill(0);
+  let nD = 0, nR = 0;
+  for (const m of marginRows) {
+    if (+m.cycle !== year) continue;
+    const margin = parseFloat(m.margin);
+    if (!isFinite(margin)) continue;
+    let idx = Math.floor((margin - lo) / binSize);
+    if (idx < 0) idx = 0; else if (idx >= nBins) idx = nBins - 1;
+    if (m.winner_party === 'D') { dCounts[idx]++; nD++; }
+    else if (m.winner_party === 'R') { rCounts[idx]++; nR++; }
+  }
+  const centres = new Array(nBins);
+  const ranges  = new Array(nBins);
+  for (let i = 0; i < nBins; i++) {
+    const a = lo + i * binSize;
+    const b = a + binSize;
+    centres[i] = (a + b) / 2;
+    ranges[i]  = [a, b];
+  }
+  return { centres, ranges, dCounts, rCounts, nD, nR };
+}
+
+function renderMarginYearChart(divId, year, stats, yMax) {
+  const { centres, ranges, dCounts, rCounts, nD, nR } = stats;
+  const titleParts = [
+    `<b>${year}</b>`,
+    `D-won ${nD}, R-won ${nR}`,
+  ];
+  Plotly.newPlot(divId, [
+    {
+      x: centres, y: dCounts, type: 'bar', name: 'D-won',
+      marker: { color: 'rgba(31,119,180,0.85)', line: { width: 0 } },
+      width: binSize, customdata: ranges,
+      hovertemplate:
+        'House margin: %{customdata[0]:.0f}% to %{customdata[1]:.0f}%<br>' +
+        'D-won seats: %{y}<extra></extra>',
+    },
+    {
+      x: centres, y: rCounts, type: 'bar', name: 'R-won',
+      marker: { color: 'rgba(214,39,40,0.85)', line: { width: 0 } },
+      width: binSize, customdata: ranges,
+      hovertemplate:
+        'House margin: %{customdata[0]:.0f}% to %{customdata[1]:.0f}%<br>' +
+        'R-won seats: %{y}<extra></extra>',
+    },
+  ], {
+    title: { text: titleParts.join(' &nbsp;·&nbsp; '), font: { size: 13 }, x: 0.04, xanchor: 'left' },
+    xaxis: {
+      title: { text: 'House election margin %  (← Democratic · Republican →)', standoff: 4, font: { size: 11 } },
+      ticksuffix: '%', range: [-100, 100], zeroline: true, zerolinecolor: '#333', zerolinewidth: 1,
+    },
+    yaxis: { title: { text: 'Seats', font: { size: 11 } }, range: [0, yMax] },
+    margin: { l: 50, r: 14, t: 38, b: 50 },
+    showlegend: false,
+    bargap: 0.05,
+    barmode: 'stack',
+    plot_bgcolor: '#fff',
+  }, { displayModeBar: false, responsive: true });
 }
 
 function renderYearChart(divId, year, stats, yMax) {
@@ -273,27 +356,38 @@ function renderSimulatorRun(yMax) {
   }
   const houseIdx = indexHouse(data.house);
   const yearStats = {};
+  const marginStats = {};
   let yMax = 0;
+  let mMax = 0;
   for (const y of YEARS) {
-    yearStats[y] = buildYear(y, data.pres, houseIdx);
+    yearStats[y]   = buildYear(y, data.pres, houseIdx);
+    marginStats[y] = buildMarginYear(y, data.margins);
     for (const v of yearStats[y].dCounts) if (v > yMax) yMax = v;
     for (const v of yearStats[y].rCounts) if (v > yMax) yMax = v;
+    for (const v of marginStats[y].dCounts) if (v > mMax) mMax = v;
+    for (const v of marginStats[y].rCounts) if (v > mMax) mMax = v;
   }
   // Headroom that scales with bin size.
   yMax = Math.ceil(yMax / 5) * 5 + Math.max(2, Math.round(binSize / 2));
-  // Build the panels.
+  mMax = Math.ceil(mMax / 5) * 5 + Math.max(2, Math.round(binSize / 2));
+  // Build the rows: one per year, two charts side-by-side.
   container.innerHTML = '';
-  for (let i = 0; i < YEARS.length; i++) {
-    const y = YEARS[i];
-    const panel = document.createElement('div');
-    panel.className = 'panel' + (i === YEARS.length - 1 ? ' full' : '');
-    const div = document.createElement('div');
-    div.id = 'c' + y;
-    div.className = 'chart';
-    if (i === YEARS.length - 1) div.style.height = '300px';
-    panel.appendChild(div);
-    container.appendChild(panel);
-    renderYearChart(div.id, y, yearStats[y], yMax);
+  for (const y of YEARS) {
+    const row = document.createElement('div');
+    row.className = 'yearRow';
+    // Left: existing seats-by-pres-margin chart.
+    const leftPanel  = document.createElement('div'); leftPanel.className  = 'panel';
+    const leftChart  = document.createElement('div'); leftChart.id  = 'c' + y;        leftChart.className  = 'chart';
+    leftPanel.appendChild(leftChart);
+    // Right: new House election margin distribution.
+    const rightPanel = document.createElement('div'); rightPanel.className = 'panel';
+    const rightChart = document.createElement('div'); rightChart.id = 'm' + y;        rightChart.className = 'chart';
+    rightPanel.appendChild(rightChart);
+    row.appendChild(leftPanel);
+    row.appendChild(rightPanel);
+    container.appendChild(row);
+    renderYearChart(leftChart.id, y, yearStats[y], yMax);
+    renderMarginYearChart(rightChart.id, y, marginStats[y], mMax);
   }
   // Render the simulator's latest run (if any) at the top, on the same scale.
   renderSimulatorRun(yMax);
