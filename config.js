@@ -38,13 +38,16 @@ window.CONFIG = {
 		// Intentional moderation: how strongly candidates moderate toward the
 		// district median.  Pinned together in the UI by default.
 		//   value — the slider default position (where amp = configured amp)
-		//   max   — IN MULTIPLES OF SLOPE above default; index.html sets the
-		//           slider's actual max to value + max
+		//   max   — slider units above default; index.html sets the slider's
+		//           actual max to value + max
 		//   step  — slider step size
-		// Slider min is auto-derived in index.html so neither meanAmp nor
-		// varAmp goes negative anywhere in [min, max].  Shared by both
-		// dIntMod and rIntMod sliders.
-		intMod: { max: 2, step: 0.05, value: 1 },
+		// Slider min is auto-derived in index.html as the slider value where
+		// amp = 0.  For the default to sit at the midpoint of the track,
+		// keep `intentionalMod.{mean,var}AmpSlope` set so that
+		// `meanAmp / meanAmpSlope === intMod.max` (i.e. the "amp = 0" point
+		// is the same distance below default as the slider max is above).
+		// Shared by both dIntMod and rIntMod sliders.
+		intMod: { max: 1, step: 0.05, value: 1 },
 
 		// How heavily voters punish ideologically extreme candidates relative
 		// to district partisanship.
@@ -189,8 +192,12 @@ window.CONFIG = {
 		L: 6,
 		meanAmp: 3, // mean-moderation pull AT slider default
 		varAmp: 3, // candidate-σ bump amplitude AT slider default
-		meanAmpSlope: 12, // d(meanAmp) / d(slider)
-		varAmpSlope: 12, // d(varAmp)  / d(slider)
+		// Slopes are tied to `intMod.max` so the slider's auto-derived "amp = 0"
+		// min sits the same distance below default as the slider max is above.
+		// With max = 1: slope = meanAmp / max = 3, giving slider range [0, 2]
+		// with default at 1 (midpoint), amp range [0, 6].
+		meanAmpSlope: 3, // d(meanAmp) / d(slider)
+		varAmpSlope: 3, // d(varAmp)  / d(slider)
 		meanBreadth: 9, // mean-bell half-decay distance in % points
 		varBreadth: 6, // σ-bell half-decay distance in % points
 	},
@@ -253,9 +260,11 @@ window.CONFIG = {
 			rAmbMod: 7.5,
 			// Modest D-edge in intentional moderation (Slotkin, Gallego, etc.
 			// ran more aggressively moderate than their R counterparts).
-			// Both sides are within ~25% of the configured default amp.
-			dIntMod: 1.2, // a touch above default
-			rIntMod: 0.7, // a touch below default
+			// Slider values map to amps via anchoredLinear(slider, 1, 3, 3):
+			//   1.8 → meanAmp = 5.4 (D moderates aggressively)
+			//   0.0 → meanAmp = 0   (R has no intentional-moderation pull)
+			dIntMod: 1.8,
+			rIntMod: 0,
 			qualImp: 0.3,
 		},
 		// Demo of the gerry → less-extreme-median effect.
@@ -273,12 +282,12 @@ window.CONFIG = {
 			dGerry: 0,
 			dAmbMod: 22.5,
 			rAmbMod: 22.5,
-			// dIntMod / rIntMod left at the slider's auto-derived min so
+			// dIntMod / rIntMod at the slider's auto-derived min (0) so
 			// intentional moderation is OFF.  qualImp at 0 — voters don't
 			// punish extreme candidates.  Both off to isolate the pure
 			// "gerry shrinks majority size" mechanism.
-			dIntMod: 0.5,
-			rIntMod: 0.5,
+			dIntMod: 0,
+			rIntMod: 0,
 			qualImp: 0,
 			sigmaN: 5,
 		},
