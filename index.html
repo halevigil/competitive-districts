@@ -4,8 +4,8 @@
 		<meta charset="UTF-8" />
 		<title>Median Ideology Simulator</title>
 		<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-		<script src="config.js?v=9"></script>
-		<script src="model.js?v=9"></script>
+		<script src="config.js?v=10"></script>
+		<script src="model.js?v=10"></script>
 		<style>
 			:root {
 				--bg: #fafafa;
@@ -1414,11 +1414,15 @@
 				// applying, any pin-pair whose D/R values differ in the
 				// preset gets unchecked — otherwise the pin would drag the
 				// later-set side back to match the earlier-set one.
+				// A preset's optional `enabled: false` flag keeps it in the
+				// config (preserved across edits) but hides its button.
+				// `enabled` is also stripped before slider application.
 				const presetsContainer = document.getElementById("presets");
 				if (presetsContainer && window.CONFIG.presets) {
 					for (const [name, values] of Object.entries(
 						window.CONFIG.presets
 					)) {
+						if (values.enabled === false) continue;
 						const btn = document.createElement("button");
 						btn.textContent = name;
 						btn.style.marginTop = "6px";
@@ -1434,8 +1438,10 @@
 									if (pin) pin.checked = false;
 								}
 							}
-							// Step 2: apply all slider values.
+							// Step 2: apply all slider values (skip the
+							// `enabled` metadata key — not a slider id).
 							for (const [id, v] of Object.entries(values)) {
+								if (id === "enabled") continue;
 								const range = document.getElementById(id);
 								if (!range) continue;
 								range.value = v;

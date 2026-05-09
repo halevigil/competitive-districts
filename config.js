@@ -276,7 +276,9 @@ window.CONFIG = {
 		// median collapses to R's most-moderate winner near +15.  R stays
 		// the majority throughout (~90%+ of sims) and the median rep stays
 		// cleanly on the R side of 0.
+		// Hidden by default — flip `enabled` to true to show the button.
 		"Gerry-compresses-median demo": {
+			enabled: false,
 			v: 3,
 			rGerry: 0,
 			dGerry: 0,
