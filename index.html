@@ -4,8 +4,8 @@
 		<meta charset="UTF-8" />
 		<title>Median Ideology Simulator</title>
 		<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-		<script src="config.js?v=10"></script>
-		<script src="model.js?v=10"></script>
+		<script src="config.js?v=11"></script>
+		<script src="model.js?v=11"></script>
 		<style>
 			:root {
 				--bg: #fafafa;
@@ -362,8 +362,6 @@
 				height: 200px;
 			}
 			#morePlotsRSeatsChart,
-			#morePlotsDWinsChart,
-			#morePlotsRWinsChart,
 			#morePlotsDIdeologyChart,
 			#morePlotsRIdeologyChart,
 			#morePlotsDistrictMarginsChart {
@@ -579,10 +577,6 @@
 								under the current sliders.</span
 							>
 						</div>
-						<h4>Democratic Seats by District Partisanship</h4>
-						<div id="morePlotsDWinsChart"></div>
-						<h4>Republican Seats by District Partisanship</h4>
-						<div id="morePlotsRWinsChart"></div>
 						<h4>Distribution of Democratic Rep Ideology</h4>
 						<div id="morePlotsDIdeologyChart"></div>
 						<h4>Distribution of Republican Rep Ideology</h4>
@@ -1502,15 +1496,6 @@
 					grid.appendChild(cell);
 					renderExampleChamber(params, cell.id, i);
 				}
-				// Reuse the main 1000-sim run's per-bin mismatch counts and
-				// per-sim R-seat counts — no separate simulation pass needed.
-				const stats = {
-					...sims.mismatchBins,
-					rSeatsBySim: sims.seats,
-					totalSeats: 2 * params.m + 1,
-				};
-				renderPartyWinsChart("morePlotsDWinsChart", stats, "D");
-				renderPartyWinsChart("morePlotsRWinsChart", stats, "R");
 				if (sims.electedBins) {
 					renderElectedIdeologyChart("morePlotsDIdeologyChart", sims.electedBins, "D");
 					renderElectedIdeologyChart("morePlotsRIdeologyChart", sims.electedBins, "R");
@@ -1675,60 +1660,6 @@
 				);
 			}
 
-			// Render the two-sided mismatch distribution.  When `perDistrict` is true the
-			// Render the per-party seats-by-district-partisanship histogram.
-			// `party` is "D" or "R".  Uses the per-bin total-wins counts that
-			// runSimulations accumulated during the main 1000-sim pass.
-			function renderPartyWinsChart(divId, stats, party) {
-				const { binSize, centres, ranges, avgRWins, avgDWins } = stats;
-				const ys = party === "R" ? avgRWins : avgDWins;
-				const color =
-					party === "R"
-						? "rgba(214,39,40,0.85)"
-						: "rgba(31,119,180,0.85)";
-				const xlabel = "District Partisanship %  (← Democratic · Republican →)";
-				const ylabel = `Avg ${party === "R" ? "Republican" : "Democratic"} seats per chamber`;
-				const title =
-					party === "R"
-						? "Republican Seats by District Partisanship"
-						: "Democratic Seats by District Partisanship";
-				Plotly.react(
-					divId,
-					[
-						{
-							x: centres,
-							y: ys,
-							type: "bar",
-							name: party,
-							marker: { color, line: { width: 0 } },
-							width: binSize,
-							customdata: ranges,
-							hovertemplate:
-								"partisanship: %{customdata[0]:.0f}% to %{customdata[1]:.0f}%<br>" +
-								"avg seats: %{y:.2f}<extra></extra>",
-						},
-					],
-					{
-						title: { text: title, font: { size: 13 } },
-						xaxis: {
-							title: { text: xlabel, standoff: 4, font: { size: 11 } },
-							ticksuffix: "%",
-							range: [-100, 100],
-							zeroline: true,
-							zerolinecolor: "#333",
-							zerolinewidth: 1,
-						},
-						yaxis: { title: { text: ylabel, font: { size: 11 } } },
-						margin: { l: 60, r: 14, t: 38, b: 50 },
-						showlegend: false,
-						bargap: 0.05,
-						plot_bgcolor: "#fff",
-					},
-					{ displayModeBar: false, responsive: true }
-				);
-			}
-
-
 			// Histogram of total Republican seats across the simulations.  Bins are 1
 			// seat wide; bars are red when R majority and blue when D majority, split
 			// at the chamber's majority threshold (m + 1 = totalSeats/2 + 0.5).
@@ -1851,7 +1782,13 @@
 						title: { text: "Distribution of Per-District Election Margins", font: { size: 13 } },
 						xaxis: {
 							title: { text: "Election margin  (← Democratic · Republican →)", standoff: 4 },
-							range: [-100, 100], zeroline: true, zerolinecolor: '#333', zerolinewidth: 1,
+							range: [-100, 100],
+							// Pin tick labels so the axis numbers are always
+							// visible regardless of plot width.
+							tickmode: "array",
+							tickvals: [-100, -75, -50, -25, 0, 25, 50, 75, 100],
+							ticktext: ["−100", "−75", "−50", "−25", "0", "+25", "+50", "+75", "+100"],
+							zeroline: true, zerolinecolor: '#333', zerolinewidth: 1,
 						},
 						yaxis: { title: "Avg seats per chamber" },
 						margin: { l: 60, r: 20, t: 50, b: 60 },

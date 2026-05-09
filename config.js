@@ -27,7 +27,7 @@ window.CONFIG = {
 		// either to scale gerrymandering on both sides equally; uncheck the
 		// pin to make one party gerrymander more than the other.
 		// `gerry` is shared by both rGerry and dGerry sliders — edit once.
-		gerry: { min: 0, max: 0.48, step: 0.01, value: 0.16 },
+		gerry: { min: 0, max: 0.49, step: 0.01, value: 0.16 },
 
 		// Ambient candidate moderation: σ of the candidate-ideology distribution.
 		// Used directly as σ in the simulator; also drives μ through
