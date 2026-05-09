@@ -48,7 +48,7 @@ window.CONFIG = {
 
 		// How heavily voters punish ideologically extreme candidates relative
 		// to district partisanship.
-		qualImp: { min: 0, max: 1, step: 0.05, value: 0.25 },
+		qualImp: { min: 0, max: 1.05, step: 0.05, value: 0.35 },
 
 		// Election noise σ — divisor on the (di − wMod·(cD+cR)) term in the
 		// hard-cutoff z, so smaller values make the cutoff sharper and
