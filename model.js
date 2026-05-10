@@ -755,6 +755,12 @@ function simulateOne(
 	const m = (N - 1) >> 1;
 	const sortedR = Array.from(rVals).sort((a, b) => a - b);
 	const medianIdeology = sortedR[m];
+	// 40th / 60th percentile reps by ideology.  Useful for getting a sense of
+	// the chamber's "middle band" rather than just the median seat — at high
+	// majority widths the median is deep inside one party's pool, so the 40th
+	// and 60th percentile bracket the actual moderate range.
+	const p40Ideology = sortedR[Math.floor(0.4 * N)];
+	const p60Ideology = sortedR[Math.floor(0.6 * N)];
 	// Find the district index that produced this median ideology.  Ties (which
 	// can happen with bounded noise) are rare; first match wins.
 	let medianIdx = -1;
@@ -772,12 +778,14 @@ function simulateOne(
 			r,
 			party,
 			medianIdeology,
+			p40Ideology,
+			p60Ideology,
 			medianParty,
 			medianIdx,
 			rSeats,
 			mismatches,
 		};
-	return { medianIdeology, medianParty, rSeats, mismatches };
+	return { medianIdeology, p40Ideology, p60Ideology, medianParty, rSeats, mismatches };
 }
 
 // `mismatchBinSpec`, when provided, is `{ binSize, lo, hi }` — the bins the
@@ -803,6 +811,8 @@ function runSimulations(
 	marginBinSpec = null
 ) {
 	const meds = new Float64Array(n);
+	const p40s = new Float64Array(n);
+	const p60s = new Float64Array(n);
 	const parties = new Uint8Array(n);
 	const seats = new Int32Array(n);
 	const mismatches = new Int32Array(n);
@@ -921,6 +931,8 @@ function runSimulations(
 			marginTracker
 		);
 		meds[s] = out.medianIdeology;
+		p40s[s] = out.p40Ideology;
+		p60s[s] = out.p60Ideology;
 		parties[s] = out.medianParty === "R" ? 1 : 0;
 		seats[s] = out.rSeats;
 		mismatches[s] = out.mismatches;
@@ -977,6 +989,8 @@ function runSimulations(
 
 	return {
 		meds,
+		p40s,
+		p60s,
 		parties,
 		seats,
 		mismatches,

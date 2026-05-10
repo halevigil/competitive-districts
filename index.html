@@ -4,8 +4,8 @@
 		<meta charset="UTF-8" />
 		<title>Median Ideology Simulator</title>
 		<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-		<script src="config.js?v=13"></script>
-		<script src="model.js?v=13"></script>
+		<script src="config.js?v=14"></script>
+		<script src="model.js?v=14"></script>
 		<style>
 			:root {
 				--bg: #fafafa;
@@ -1026,6 +1026,19 @@
 						? sortedMDP[(n - 1) >> 1]
 						: (sortedMDP[n / 2 - 1] + sortedMDP[n / 2]) / 2;
 
+				// Median across sims of the chamber's 40th- and 60th-percentile
+				// rep-by-ideology positions.  Together with the 50th-percentile
+				// median ideology already shown above, these bracket the
+				// chamber's "moderate band" — useful when the majority is wide
+				// enough that the 50th-percentile rep is deep inside one
+				// party's pool.
+				const medOfArray = (arr) => {
+					const a = Array.from(arr).sort((x, y) => x - y);
+					return n % 2 ? a[(n - 1) >> 1] : (a[n / 2 - 1] + a[n / 2]) / 2;
+				};
+				const median40 = medOfArray(sims.p40s);
+				const median60 = medOfArray(sims.p60s);
+
 				const dPill = `<span class="pill D">D</span>`;
 				const rPill = `<span class="pill R">R</span>`;
 				document.getElementById("stats").innerHTML = `
@@ -1043,6 +1056,8 @@
       &nbsp;|&nbsp; when median is R: <span class="num">${
 			cntR ? (sumR / cntR).toFixed(1) : "–"
 		}</span></div>
+    <div>Median 40th-percentile ideology: <span class="num">${median40.toFixed(1)}</span>
+      &nbsp;|&nbsp; Median 60th-percentile ideology: <span class="num">${median60.toFixed(1)}</span></div>
     <div>Average Republican seat share: <span class="num">${(
 		meanRShare * 100
 	).toFixed(1)}%</span>
