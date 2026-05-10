@@ -4,8 +4,8 @@
 		<meta charset="UTF-8" />
 		<title>Median Ideology Simulator</title>
 		<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-		<script src="config.js?v=16"></script>
-		<script src="model.js?v=16"></script>
+		<script src="config.js?v=17"></script>
+		<script src="model.js?v=17"></script>
 		<style>
 			:root {
 				--bg: #fafafa;
@@ -991,12 +991,23 @@
 				}
 				pR /= n;
 				const N = 2 * p.m + 1;
-				let totalSeats = 0;
-				for (let i = 0; i < n; i++) totalSeats += sims.seats[i];
-				const meanRShare = totalSeats / (n * N);
-				let totalMismatch = 0;
-				for (let i = 0; i < n; i++) totalMismatch += sims.mismatches[i];
-				const meanMismatch = totalMismatch / n;
+				// Median R seat share and median mismatch count across sims.
+				// Both distributions are skewed enough that the mean misleads:
+				// for seat share a 50/50 toss-up averages out near 0.5 even
+				// when each individual sim is far from balanced; mismatches
+				// have a long right tail when noise / qualImp let extreme
+				// candidates flip safe seats.
+				const sortedSeats = Array.from(sims.seats).sort((a, b) => a - b);
+				const medianSeats =
+					n % 2
+						? sortedSeats[(n - 1) >> 1]
+						: (sortedSeats[n / 2 - 1] + sortedSeats[n / 2]) / 2;
+				const medianRShare = medianSeats / N;
+				const sortedMis = Array.from(sims.mismatches).sort((a, b) => a - b);
+				const medianMismatch =
+					n % 2
+						? sortedMis[(n - 1) >> 1]
+						: (sortedMis[n / 2 - 1] + sortedMis[n / 2]) / 2;
 				// Majority margin = (winning party's seats) − (m − 1).  With N = 2m+1 the
 				// majority threshold is m+1, so a bare majority gives a margin of 2.
 				// Use the median across simulations rather than the mean — the
@@ -1078,13 +1089,13 @@
 		Number.isFinite(medianRMed) ? medianRMed.toFixed(1) : "–"
 	}</span>
       <span style="color:var(--muted);font-size:11px">(Hastert-rule pivot)</span></div>
-    <div>Average Republican seat share: <span class="num">${(
-		meanRShare * 100
+    <div>Median Republican seat share: <span class="num">${(
+		medianRShare * 100
 	).toFixed(1)}%</span>
-      &nbsp;|&nbsp; median majority seat margin: <span class="num">${medianMajority.toFixed(
+      &nbsp;|&nbsp; Median majority seat margin: <span class="num">${medianMajority.toFixed(
 			1
 		)}</span></div>
-    <div>Average "mismatched" reps per chamber: <span class="num">${meanMismatch.toFixed(
+    <div>Median "mismatched" reps per chamber: <span class="num">${medianMismatch.toFixed(
 		1
 	)}</span>
       <span style="color:var(--muted);font-size:11px">(R in D-lean districts or D in R-lean districts)</span></div>
