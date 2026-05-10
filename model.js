@@ -752,15 +752,45 @@ function simulateOne(
 	// boundary — so we just sort.  N=435 is small; per-sim cost is fine.
 	let rSeats = 0;
 	for (let i = 0; i < N; i++) if (partyVals[i]) rSeats++;
+	const dSeats = N - rSeats;
 	const m = (N - 1) >> 1;
 	const sortedR = Array.from(rVals).sort((a, b) => a - b);
 	const medianIdeology = sortedR[m];
-	// 40th / 60th percentile reps by ideology.  Useful for getting a sense of
-	// the chamber's "middle band" rather than just the median seat — at high
-	// majority widths the median is deep inside one party's pool, so the 40th
-	// and 60th percentile bracket the actual moderate range.
-	const p40Ideology = sortedR[Math.floor(0.4 * N)];
-	const p60Ideology = sortedR[Math.floor(0.6 * N)];
+	// 1/3 and 2/3 percentile reps by ideology.  Brackets the chamber's
+	// moderate band — at wide majority widths the 50th-percentile rep is
+	// deep inside one party's pool, so the thirds give the actual range.
+	const p33Ideology = sortedR[Math.floor(N / 3)];
+	const p67Ideology = sortedR[Math.floor((2 * N) / 3)];
+	// Per-party median ideology — the most-moderate / median member of each
+	// caucus.  D occupies the bottom dSeats positions of sortedR (the D and
+	// R distributions don't overlap when intMod is moderate), so the D
+	// median is at sortedR[dSeats >> 1] and the R median is offset by
+	// dSeats from the start of the R block.  When intMod is strong enough
+	// to put a few D reps above some R reps, this is approximate — but the
+	// per-party medians still describe the typical caucus ideology.  Hastert-
+	// rule territory: legislation moves at the majority's median, not the
+	// chamber median.
+	let dMedianIdeology = NaN;
+	let rMedianIdeology = NaN;
+	if (dSeats > 0 || rSeats > 0) {
+		// Pull the D and R subsequences out of the per-district arrays and
+		// sort each.  N is small enough that two extra sorts are cheap.
+		const dSorted = new Float64Array(dSeats);
+		const rSorted = new Float64Array(rSeats);
+		let di = 0, ri = 0;
+		for (let i = 0; i < N; i++) {
+			if (partyVals[i]) rSorted[ri++] = rVals[i];
+			else dSorted[di++] = rVals[i];
+		}
+		if (dSeats > 0) {
+			dSorted.sort();
+			dMedianIdeology = dSorted[(dSeats - 1) >> 1];
+		}
+		if (rSeats > 0) {
+			rSorted.sort();
+			rMedianIdeology = rSorted[(rSeats - 1) >> 1];
+		}
+	}
 	// Find the district index that produced this median ideology.  Ties (which
 	// can happen with bounded noise) are rare; first match wins.
 	let medianIdx = -1;
@@ -778,14 +808,25 @@ function simulateOne(
 			r,
 			party,
 			medianIdeology,
-			p40Ideology,
-			p60Ideology,
+			p33Ideology,
+			p67Ideology,
+			dMedianIdeology,
+			rMedianIdeology,
 			medianParty,
 			medianIdx,
 			rSeats,
 			mismatches,
 		};
-	return { medianIdeology, p40Ideology, p60Ideology, medianParty, rSeats, mismatches };
+	return {
+		medianIdeology,
+		p33Ideology,
+		p67Ideology,
+		dMedianIdeology,
+		rMedianIdeology,
+		medianParty,
+		rSeats,
+		mismatches,
+	};
 }
 
 // `mismatchBinSpec`, when provided, is `{ binSize, lo, hi }` — the bins the
@@ -811,8 +852,10 @@ function runSimulations(
 	marginBinSpec = null
 ) {
 	const meds = new Float64Array(n);
-	const p40s = new Float64Array(n);
-	const p60s = new Float64Array(n);
+	const p33s = new Float64Array(n);
+	const p67s = new Float64Array(n);
+	const dMeds = new Float64Array(n);
+	const rMeds = new Float64Array(n);
 	const parties = new Uint8Array(n);
 	const seats = new Int32Array(n);
 	const mismatches = new Int32Array(n);
@@ -931,8 +974,10 @@ function runSimulations(
 			marginTracker
 		);
 		meds[s] = out.medianIdeology;
-		p40s[s] = out.p40Ideology;
-		p60s[s] = out.p60Ideology;
+		p33s[s] = out.p33Ideology;
+		p67s[s] = out.p67Ideology;
+		dMeds[s] = out.dMedianIdeology;
+		rMeds[s] = out.rMedianIdeology;
 		parties[s] = out.medianParty === "R" ? 1 : 0;
 		seats[s] = out.rSeats;
 		mismatches[s] = out.mismatches;
@@ -989,8 +1034,10 @@ function runSimulations(
 
 	return {
 		meds,
-		p40s,
-		p60s,
+		p33s,
+		p67s,
+		dMeds,
+		rMeds,
 		parties,
 		seats,
 		mismatches,

@@ -4,8 +4,8 @@
 		<meta charset="UTF-8" />
 		<title>Median Ideology Simulator</title>
 		<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-		<script src="config.js?v=14"></script>
-		<script src="model.js?v=14"></script>
+		<script src="config.js?v=15"></script>
+		<script src="model.js?v=15"></script>
 		<style>
 			:root {
 				--bg: #fafafa;
@@ -1026,18 +1026,31 @@
 						? sortedMDP[(n - 1) >> 1]
 						: (sortedMDP[n / 2 - 1] + sortedMDP[n / 2]) / 2;
 
-				// Median across sims of the chamber's 40th- and 60th-percentile
+				// Median across sims of the chamber's 1/3- and 2/3-percentile
 				// rep-by-ideology positions.  Together with the 50th-percentile
 				// median ideology already shown above, these bracket the
 				// chamber's "moderate band" — useful when the majority is wide
 				// enough that the 50th-percentile rep is deep inside one
 				// party's pool.
+				// Also median across sims of each caucus's median ideology —
+				// the rep that controls the chamber under the Hastert rule
+				// (legislation moves at the majority caucus's median, not the
+				// chamber median).  NaNs (from sims with 0 reps in a party)
+				// are filtered before taking the median.
 				const medOfArray = (arr) => {
 					const a = Array.from(arr).sort((x, y) => x - y);
 					return n % 2 ? a[(n - 1) >> 1] : (a[n / 2 - 1] + a[n / 2]) / 2;
 				};
-				const median40 = medOfArray(sims.p40s);
-				const median60 = medOfArray(sims.p60s);
+				const medOfFiniteArray = (arr) => {
+					const a = Array.from(arr).filter(Number.isFinite).sort((x, y) => x - y);
+					if (!a.length) return NaN;
+					const k = a.length;
+					return k % 2 ? a[(k - 1) >> 1] : (a[k / 2 - 1] + a[k / 2]) / 2;
+				};
+				const median33 = medOfArray(sims.p33s);
+				const median67 = medOfArray(sims.p67s);
+				const medianDMed = medOfFiniteArray(sims.dMeds);
+				const medianRMed = medOfFiniteArray(sims.rMeds);
 
 				const dPill = `<span class="pill D">D</span>`;
 				const rPill = `<span class="pill R">R</span>`;
@@ -1056,8 +1069,15 @@
       &nbsp;|&nbsp; when median is R: <span class="num">${
 			cntR ? (sumR / cntR).toFixed(1) : "–"
 		}</span></div>
-    <div>Median 40th-percentile ideology: <span class="num">${median40.toFixed(1)}</span>
-      &nbsp;|&nbsp; Median 60th-percentile ideology: <span class="num">${median60.toFixed(1)}</span></div>
+    <div>Median 33rd-percentile ideology: <span class="num">${median33.toFixed(1)}</span>
+      &nbsp;|&nbsp; Median 67th-percentile ideology: <span class="num">${median67.toFixed(1)}</span></div>
+    <div>Median Democratic-caucus median ideology: <span class="num">${
+		Number.isFinite(medianDMed) ? medianDMed.toFixed(1) : "–"
+	}</span>
+      &nbsp;|&nbsp; Median Republican-caucus median ideology: <span class="num">${
+		Number.isFinite(medianRMed) ? medianRMed.toFixed(1) : "–"
+	}</span>
+      <span style="color:var(--muted);font-size:11px">(Hastert-rule pivot)</span></div>
     <div>Average Republican seat share: <span class="num">${(
 		meanRShare * 100
 	).toFixed(1)}%</span>
