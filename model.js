@@ -871,10 +871,26 @@ function runSimulations(
 		p.base,
 		p.gerry
 	);
-	// The median-district partisanship is now the same for every sim — single
-	// value repeated across the array (kept array-shaped so renderStats can
-	// use the same code path).
-	const medianDistParts = new Float64Array(n).fill(districtPool[m]);
+	// Two tie-break maps: under perfect symmetry the middle district sits at
+	// exactly lean 0, and floating-point trivia decides who wins it (and
+	// therefore the chamber).  Nudge the boundary district ±TIEBREAK_EPS
+	// from its natural lean to make two pools — one that lets D-gerry take
+	// the last seat, one that lets R-gerry take it — and run half the sims
+	// on each so the tie averages out.  For asymmetric configs where the
+	// natural mid is already clearly one side, the ±0.05 nudge is too small
+	// to flip anything, so this is a no-op there.
+	const TIEBREAK_EPS = 0.05;
+	const naturalMid = districtPool[m];
+	const poolD = districtPool.slice();
+	const poolR = districtPool.slice();
+	poolD[m] = naturalMid - TIEBREAK_EPS;
+	poolR[m] = naturalMid + TIEBREAK_EPS;
+	// medianDistParts records the boundary lean each sim actually used, so
+	// the displayed "median district partisanship" averages both variants.
+	const medianDistParts = new Float64Array(n);
+	for (let i = 0; i < n; i++) {
+		medianDistParts[i] = (i & 1) === 0 ? poolD[m] : poolR[m];
+	}
 
 	// Build the optional mismatch-bin tracker.  Pre-compute each district's
 	// bin index once so the inner loop just does one array bump per mismatch.
@@ -965,10 +981,12 @@ function runSimulations(
 	}
 
 	for (let s = 0; s < n; s++) {
+		// Even sims use the D-tiebreak pool, odd sims the R-tiebreak pool.
+		const pool = (s & 1) === 0 ? poolD : poolR;
 		const out = simulateOne(
 			p,
 			false,
-			districtPool,
+			pool,
 			mismatchTracker,
 			electedTracker,
 			marginTracker
