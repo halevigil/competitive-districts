@@ -4,8 +4,8 @@
 		<meta charset="UTF-8" />
 		<title>Median Ideology Simulator</title>
 		<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-		<script src="config.js?v=15"></script>
-		<script src="model.js?v=15"></script>
+		<script src="config.js?v=16"></script>
+		<script src="model.js?v=16"></script>
 		<style>
 			:root {
 				--bg: #fafafa;
@@ -976,23 +976,20 @@
 
 			function renderStats(sims, p) {
 				const n = sims.meds.length;
-				let pR = 0,
-					sumR = 0,
-					sumD = 0,
-					cntR = 0,
-					cntD = 0;
+				let pR = 0, cntR = 0, cntD = 0;
+				const medsR = [];
+				const medsD = [];
 				for (let i = 0; i < n; i++) {
 					if (sims.parties[i]) {
 						pR++;
-						sumR += sims.meds[i];
 						cntR++;
+						medsR.push(sims.meds[i]);
 					} else {
-						sumD += sims.meds[i];
 						cntD++;
+						medsD.push(sims.meds[i]);
 					}
 				}
 				pR /= n;
-				const meanMed = mean(Array.from(sims.meds));
 				const N = 2 * p.m + 1;
 				let totalSeats = 0;
 				for (let i = 0; i < n; i++) totalSeats += sims.seats[i];
@@ -1047,6 +1044,9 @@
 					const k = a.length;
 					return k % 2 ? a[(k - 1) >> 1] : (a[k / 2 - 1] + a[k / 2]) / 2;
 				};
+				const medianMed = medOfArray(sims.meds);
+				const medianMedD = medsD.length ? medOfFiniteArray(medsD) : NaN;
+				const medianMedR = medsR.length ? medOfFiniteArray(medsR) : NaN;
 				const median33 = medOfArray(sims.p33s);
 				const median67 = medOfArray(sims.p67s);
 				const medianDMed = medOfFiniteArray(sims.dMeds);
@@ -1062,19 +1062,19 @@
     <div>Chance the median representative is a Republican: <span class="num">${(
 		pR * 100
 	).toFixed(1)}%</span> ${pR > 0.5 ? rPill : dPill}</div>
-    <div>Average median ideology: <span class="num">${meanMed.toFixed(1)}</span>
+    <div>Median ideology of median representative: <span class="num">${medianMed.toFixed(1)}</span>
       &nbsp;|&nbsp; when median is D: <span class="num">${
-			cntD ? (sumD / cntD).toFixed(1) : "–"
+			Number.isFinite(medianMedD) ? medianMedD.toFixed(1) : "–"
 		}</span>
       &nbsp;|&nbsp; when median is R: <span class="num">${
-			cntR ? (sumR / cntR).toFixed(1) : "–"
+			Number.isFinite(medianMedR) ? medianMedR.toFixed(1) : "–"
 		}</span></div>
-    <div>Median 33rd-percentile ideology: <span class="num">${median33.toFixed(1)}</span>
-      &nbsp;|&nbsp; Median 67th-percentile ideology: <span class="num">${median67.toFixed(1)}</span></div>
-    <div>Median Democratic-caucus median ideology: <span class="num">${
+    <div>Median ideology of 33rd-percentile representative: <span class="num">${median33.toFixed(1)}</span>
+      &nbsp;|&nbsp; Median ideology of 67th-percentile representative: <span class="num">${median67.toFixed(1)}</span></div>
+    <div>Median ideology of median Democratic representative: <span class="num">${
 		Number.isFinite(medianDMed) ? medianDMed.toFixed(1) : "–"
 	}</span>
-      &nbsp;|&nbsp; Median Republican-caucus median ideology: <span class="num">${
+      &nbsp;|&nbsp; Median ideology of median Republican representative: <span class="num">${
 		Number.isFinite(medianRMed) ? medianRMed.toFixed(1) : "–"
 	}</span>
       <span style="color:var(--muted);font-size:11px">(Hastert-rule pivot)</span></div>
