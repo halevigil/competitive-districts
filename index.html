@@ -4,8 +4,8 @@
 		<meta charset="UTF-8" />
 		<title>Median Ideology Simulator</title>
 		<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-		<script src="config.js?v=29"></script>
-		<script src="model.js?v=29"></script>
+		<script src="config.js?v=30"></script>
+		<script src="model.js?v=30"></script>
 		<style>
 			:root {
 				--bg: #fafafa;
@@ -752,7 +752,12 @@
 					if (loExt < lo) lo = Math.floor(loExt / roundTo) * roundTo;
 					if (hiExt > hi) hi = Math.ceil(hiExt / roundTo) * roundTo;
 				}
-				const binSize = (hi - lo) / histCfg.nBins;
+				// Use the same bin width as the per-party rep-ideology charts
+				// so the two views read on a consistent scale.  Falls back to
+				// the (range / nBins) derivation if repIdeology isn't set.
+				const binSize =
+					window.CONFIG.histograms.repIdeology?.binSize ??
+					(hi - lo) / histCfg.nBins;
 
 				const traces = [
 					{

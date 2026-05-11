@@ -30,7 +30,7 @@ window.CONFIG = {
 		// home, so runSimulations runs half its sims with the boundary seat
 		// nudged toward D and half toward R; otherwise the tiebreak is off.
 		// `gerry` is shared by both rGerry and dGerry sliders — edit once.
-		gerry: { min: 0, max: 0.5, step: 0.01, value: 0.16 },
+		gerry: { min: 0, max: 0.49, step: 0.01, value: 0.16 },
 
 		// Ambient candidate moderation: σ of the candidate-ideology distribution.
 		// Used directly as σ in the simulator; also drives μ through
@@ -269,7 +269,7 @@ window.CONFIG = {
 		// settings, and the example-chamber scatter chart's y-axis range
 		// is also taken from `[lo, hi]` so the two views line up.
 		repIdeology: {
-			binSize: 3,
+			binSize: 5,
 			lo: -150,
 			hi: 150,
 		},
