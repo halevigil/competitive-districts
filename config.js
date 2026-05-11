@@ -190,6 +190,13 @@ window.CONFIG = {
 		mode: "offsetK",
 		K: 0,
 		L: 0,
+		// How much of the popular-vote shift `v` feeds into where candidates
+		// strategically moderate.  Bell centres land at d_i + waveWeight·v − modOffset,
+		// so 0 ignores the wave entirely (intMod anchored on the district's own
+		// lean), 1 treats moderation as fully wave-adjusted, and intermediate
+		// values blend the two.  Applies to both the mean bell and the
+		// variance-bump bell, and to the meanAmp-driven tail term.
+		waveWeight: 0,
 		meanAmp: 6, // mean-moderation pull AT slider default
 		varAmp: 0, // candidate-σ bump amplitude AT slider default
 		// Slopes are tied to `intMod.max` so the slider's auto-derived "amp = 0"

@@ -608,13 +608,13 @@ function simulateOne(
 	// meanAmp at the bell's peak.
 	const meanAmpTailFactorD = p.meanAmpTailFactorD ?? 0;
 	const meanAmpTailFactorR = p.meanAmpTailFactorR ?? 0;
-	// Intentional moderation is anchored at d_i alone — the popular-vote
-	// shift v moves WHO WINS each district (via the z-score below) but
-	// doesn't move where candidates strategically moderate.  A single bell
-	// per party at modOffset (which already includes the median-lean shift),
-	// not a sum of two bells at d_i and d_i + v.  The v=0 fast path /
-	// v != 0 path now differ only in the z-score formula; the candidate
-	// computation is identical.
+	// Intentional moderation anchors on d_i + waveWeight·v.  waveWeight = 0
+	// recovers the pure-district-lean anchor (intMod ignores the wave);
+	// waveWeight = 1 makes intMod fully wave-adjusted; values in between
+	// blend.  v already enters the z-score directly for who-wins-each-
+	// district; this knob is just about WHERE candidates moderate.
+	const waveWeight = p.waveWeight ?? 0;
+	const vShift = waveWeight * v;
 	const vIsZero = v === 0;
 
 	// Hoist mismatch-tracker fields to locals so the per-district bumps are
@@ -719,13 +719,19 @@ function simulateOne(
 	} else
 		for (let i = 0; i < N; i++) {
 			const di = d[i];
-			const aD = di - modOffsetD;
-			const aR = di - modOffsetR;
+			// Bell-center "effective district" — d_i + waveWeight·v.  At
+			// waveWeight=0 this is just d_i (intMod ignores the wave); at 1
+			// it's d_i + v (intMod fully wave-adjusted); intermediate values
+			// blend.  Stretch territory below uses the raw d_i — "is this
+			// district really hostile to me" doesn't depend on the wave.
+			const diEff = di + vShift;
+			const aD = diEff - modOffsetD;
+			const aR = diEff - modOffsetR;
 			const bellD_D = Math.exp(-(aD * aD) / meanBreadthDSq);
 			const bellD_R = Math.exp(-(aR * aR) / meanBreadthRSq);
-			// Variance-bump bells.
-			const aVD = di - varOffsetD;
-			const aVR = di - varOffsetR;
+			// Variance-bump bells use the same wave-blended anchor.
+			const aVD = diEff - varOffsetD;
+			const aVR = diEff - varOffsetR;
 			const bellVar_D = Math.exp(-(aVD * aVD) / varBreadthDSq);
 			const bellVar_R = Math.exp(-(aVR * aVR) / varBreadthRSq);
 			const sigmaD_eff = sigmaD + varAmpD * bellVar_D;

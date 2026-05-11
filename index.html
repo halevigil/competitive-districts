@@ -4,8 +4,8 @@
 		<meta charset="UTF-8" />
 		<title>Median Ideology Simulator</title>
 		<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-		<script src="config.js?v=26"></script>
-		<script src="model.js?v=26"></script>
+		<script src="config.js?v=27"></script>
+		<script src="model.js?v=27"></script>
 		<style>
 			:root {
 				--bg: #fafafa;
@@ -719,6 +719,7 @@
 					meanAmpTailFactorR: Math.max(0,
 						anchoredLinear(bR, cfg.sliders.rIntMod.value, im.meanAmpTailFactor ?? 0, im.meanAmpTailFactorSlope ?? 0)),
 					candidateTailScale: cfg.candidateTailScale ?? 0,
+					waveWeight: im.waveWeight ?? 0,
 					...intentionalModOffsets(im.mode, im.K, im.L),
 				};
 			}
