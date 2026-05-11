@@ -650,10 +650,14 @@ function simulateOne(
 			// Stretch territory grows linearly forever — D's grow tail when
 			// they're in an R-leaning district (di > medianLean), R's grow
 			// tail when they're in a D-leaning district (di < medianLean).
+			// On top of that, meanAmp (the intentional-moderation pull) ALSO
+			// widens the tail at its bell, so wherever the moderation push is
+			// strong the candidates also fan out more — "some try hard, some
+			// don't" heterogeneity at the same locations where the pull happens.
 			const stretchD = di > medianLean ? di - medianLean : 0;
 			const stretchR = di < medianLean ? medianLean - di : 0;
-			const tailScaleD = tailBase + tailGrowthD * stretchD;
-			const tailScaleR = tailBase + tailGrowthR * stretchR;
+			const tailScaleD = tailBase + tailGrowthD * stretchD + meanAmpD * bellD_D;
+			const tailScaleR = tailBase + tailGrowthR * stretchR + meanAmpR * bellD_R;
 			const cD = meanScaleD * bellD_D + muD + sigmaD_eff * randn() + tailScaleD * laplaceSample();
 			const cR = -meanScaleR * bellD_R + muR + sigmaR_eff * randn() + tailScaleR * laplaceSample();
 			// sigmaN is the σ of the additive election-noise term: a unit-variance
@@ -722,11 +726,14 @@ function simulateOne(
 			const bellVar_R = Math.exp(-(aVR * aVR) / varBreadthRSq);
 			const sigmaD_eff = sigmaD + varAmpD * bellVar_D;
 			const sigmaR_eff = sigmaR + varAmpR * bellVar_R;
-			// Stretch territory grows linearly forever (see fast-path comment).
+			// Stretch territory grows linearly forever, plus meanAmp adds a
+			// tail bump at the same bell where it pulls the mean
+			// (see fast-path comment).  v != 0 splits the bell across both
+			// the swing and competitive offsets.
 			const stretchD = di > medianLean ? di - medianLean : 0;
 			const stretchR = di < medianLean ? medianLean - di : 0;
-			const tailScaleD = tailBase + tailGrowthD * stretchD;
-			const tailScaleR = tailBase + tailGrowthR * stretchR;
+			const tailScaleD = tailBase + tailGrowthD * stretchD + meanAmpD * (bellD_D + bellDV_D);
+			const tailScaleR = tailBase + tailGrowthR * stretchR + meanAmpR * (bellD_R + bellDV_R);
 			const cD =
 				meanAmpD * (bellD_D + bellDV_D) + muD + sigmaD_eff * randn() + tailScaleD * laplaceSample();
 			const cR =

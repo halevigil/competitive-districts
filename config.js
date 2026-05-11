@@ -33,7 +33,7 @@ window.CONFIG = {
 		// Used directly as σ in the simulator; also drives μ through
 		// `candidateMean`.  Pinned together in the UI by default.
 		// Shared by both dAmbMod and rAmbMod sliders.
-		ambMod: { min: 2, max: 22.5, step: 0.1, value: 8 },
+		ambMod: { min: 2, max: 22.5, step: 0.1, value: 6 },
 
 		// Intentional moderation: how strongly candidates moderate toward the
 		// district median.  Pinned together in the UI by default.
@@ -47,7 +47,7 @@ window.CONFIG = {
 		// `meanAmp / meanAmpSlope === intMod.max` (i.e. the "amp = 0" point
 		// is the same distance below default as the slider max is above).
 		// Shared by both dIntMod and rIntMod sliders.
-		intMod: { max: 4, step: 0.05, value: 1 },
+		intMod: { max: 3, step: 0.05, value: 1 },
 
 		// How heavily voters punish ideologically extreme candidates relative
 		// to district partisanship.
@@ -57,7 +57,7 @@ window.CONFIG = {
 		// gets added to the score (di − wMod·(cD+cR)) before the hard cutoff
 		// at z = 0.  Larger values smear the cutoff out; 0 makes the election
 		// fully deterministic given the candidate draws.
-		sigmaN: { min: 0, max: 4, step: 0.1, value: 2 },
+		sigmaN: { min: 0, max: 4, step: 0.1, value: 1 },
 	},
 
 	// ---------------- SIMULATION CONSTANTS -------------------------------------
@@ -188,23 +188,23 @@ window.CONFIG = {
 	// (`varAmp` adds to σ — one standard deviation — directly.)
 	intentionalMod: {
 		mode: "offsetK",
-		K: 3,
+		K: 0,
 		L: 6,
-		meanAmp: 3, // mean-moderation pull AT slider default
+		meanAmp: 12, // mean-moderation pull AT slider default
 		varAmp: 0, // candidate-σ bump amplitude AT slider default
 		// Slopes are tied to `intMod.max` so the slider's auto-derived "amp = 0"
 		// min sits the same distance below default as the slider max is above.
 		// With max = 1: slope = meanAmp / max = 3, giving slider range [0, 2]
 		// with default at 1 (midpoint), amp range [0, 6].
-		meanAmpSlope: 3, // d(meanAmp) / d(slider)
+		meanAmpSlope: 12, // d(meanAmp) / d(slider)
 		varAmpSlope: 0, // d(varAmp)  / d(slider)
 		// Bell half-decay distances at slider default.  meanBreadthSlope /
 		// varBreadthSlope let the bells widen as the intMod slider goes up
 		// (parties moderate more aggressively AND across a wider swing
 		// zone).  Set the slope to 0 to keep breadth fixed.
-		meanBreadth: 9, // mean-bell half-decay distance at slider default
+		meanBreadth: 6, // mean-bell half-decay distance at slider default
 		varBreadth: 6, // σ-bell half-decay distance at slider default
-		meanBreadthSlope: 6, // d(meanBreadth) / d(slider)
+		meanBreadthSlope: 3, // d(meanBreadth) / d(slider)
 		varBreadthSlope: 6, // d(varBreadth)  / d(slider)
 		// Candidate-ideology tail growth in stretch territory.  Adds a
 		// Laplace-distributed component to cD / cR whose scale is 0 at
@@ -213,8 +213,8 @@ window.CONFIG = {
 		// heterogeneity in deep-stretch districts.  Per-party scaling is
 		// driven by each party's intMod slider via anchoredLinear, just
 		// like the other amps.
-		tailGrowth: 0.25, // Laplace-scale growth per % stretch, at slider default
-		tailGrowthSlope: 0.25, // d(tailGrowth) / d(slider)
+		tailGrowth: 0.2, // Laplace-scale growth per % stretch, at slider default
+		tailGrowthSlope: 0.2, // d(tailGrowth) / d(slider)
 	},
 
 	// Always-on Laplace tail on candidate ideology, separate from intMod.
@@ -222,7 +222,7 @@ window.CONFIG = {
 	// Gaussian core, so chambers occasionally pull a clearly off-trend
 	// candidate even in safe districts.  Set to 0 to recover pure-Gaussian
 	// candidate ideologies.
-	candidateTailScale: 5,
+	candidateTailScale: 0.25,
 
 	// ---------------- HISTOGRAMS -----------------------------------------------
 	histograms: {
