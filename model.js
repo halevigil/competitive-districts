@@ -922,22 +922,28 @@ function runSimulations(
 		p.base,
 		p.gerry
 	);
-	// Two tie-break maps: under perfect symmetry the middle district sits at
-	// exactly lean 0, and floating-point trivia decides who wins it (and
-	// therefore the chamber).  Nudge the boundary district ±TIEBREAK_EPS
-	// from its natural lean to make two pools — one that lets D-gerry take
-	// the last seat, one that lets R-gerry take it — and run half the sims
-	// on each so the tie averages out.  For asymmetric configs where the
-	// natural mid is already clearly one side, the ±0.05 nudge is too small
-	// to flip anything, so this is a no-op there.
+	// Tie-break maps: only relevant when the chamber is fully gerrymandered
+	// (rGerry = dGerry = 0.5 → no base contribution at all → no district
+	// naturally lands near the chamber midline; the "boundary district" is
+	// contrived).  Force the boundary seat to ±TIEBREAK_EPS — one map with
+	// D taking it, one with R — and run half the sims on each.  Anywhere
+	// else, the base distribution still puts a real district at the
+	// boundary, so we just use the natural pool for every sim.
 	const TIEBREAK_EPS = 0.05;
-	const naturalMid = districtPool[m];
-	const poolD = districtPool.slice();
-	const poolR = districtPool.slice();
-	poolD[m] = naturalMid - TIEBREAK_EPS;
-	poolR[m] = naturalMid + TIEBREAK_EPS;
-	// medianDistParts records the boundary lean each sim actually used, so
-	// the displayed "median district partisanship" averages both variants.
+	const fullyGerried = p.rGerry >= 0.5 && p.dGerry >= 0.5;
+	let poolD, poolR;
+	if (fullyGerried) {
+		poolD = districtPool.slice();
+		poolR = districtPool.slice();
+		poolD[m] = -TIEBREAK_EPS; // D takes the boundary seat
+		poolR[m] =  TIEBREAK_EPS; // R takes the boundary seat
+	} else {
+		poolD = districtPool;
+		poolR = districtPool;
+	}
+	// medianDistParts records the boundary lean each sim actually used so
+	// the displayed "median district partisanship" averages both variants
+	// when the tiebreak is active; otherwise it's just the single value.
 	const medianDistParts = new Float64Array(n);
 	for (let i = 0; i < n; i++) {
 		medianDistParts[i] = (i & 1) === 0 ? poolD[m] : poolR[m];

@@ -21,13 +21,16 @@ window.CONFIG = {
 		//   (1 − rGerry − dGerry) · base  +  rGerry · gerry.componentsR
 		//                                  +  dGerry · gerry.componentsD
 		// so dragging one slider up reduces the base ("competitive") share.
-		// Each slider is capped at 0.49 so the two together can saturate to a
-		// fully gerrymandered chamber (~50% R-packed + ~50% D-packed, no base).
+		// Each slider is capped at 0.5 so the two together can saturate the
+		// chamber completely (rGerry = dGerry = 0.5 → no base contribution).
 		// In the UI, these two sliders are pinned together by default — drag
 		// either to scale gerrymandering on both sides equally; uncheck the
 		// pin to make one party gerrymander more than the other.
+		// At the full-saturation limit the boundary district has no natural
+		// home, so runSimulations runs half its sims with the boundary seat
+		// nudged toward D and half toward R; otherwise the tiebreak is off.
 		// `gerry` is shared by both rGerry and dGerry sliders — edit once.
-		gerry: { min: 0, max: 0.49, step: 0.01, value: 0.16 },
+		gerry: { min: 0, max: 0.5, step: 0.01, value: 0.16 },
 
 		// Ambient candidate moderation: σ of the candidate-ideology distribution.
 		// Used directly as σ in the simulator; also drives μ through
@@ -197,14 +200,14 @@ window.CONFIG = {
 		// values blend the two.  Applies to both the mean bell and the
 		// variance-bump bell, and to the meanAmp-driven tail term.
 		waveWeight: 0,
-		meanAmp: 6, // mean-moderation pull AT slider default
-		varAmp: 0, // candidate-σ bump amplitude AT slider default
+		meanAmp: 3, // mean-moderation pull AT slider default
+		varAmp: 3, // candidate-σ bump amplitude AT slider default
 		// Slopes are tied to `intMod.max` so the slider's auto-derived "amp = 0"
 		// min sits the same distance below default as the slider max is above.
 		// With max = 1: slope = meanAmp / max = 3, giving slider range [0, 2]
 		// with default at 1 (midpoint), amp range [0, 6].
-		meanAmpSlope: 6, // d(meanAmp) / d(slider)
-		varAmpSlope: 0, // d(varAmp)  / d(slider)
+		meanAmpSlope: 3, // d(meanAmp) / d(slider)
+		varAmpSlope: 3, // d(varAmp)  / d(slider)
 		// Bell half-decay distances at slider default.  meanBreadthSlope /
 		// varBreadthSlope let the bells widen as the intMod slider goes up
 		// (parties moderate more aggressively AND across a wider swing
@@ -220,8 +223,8 @@ window.CONFIG = {
 		// heterogeneity in deep-stretch districts.  Per-party scaling is
 		// driven by each party's intMod slider via anchoredLinear, just
 		// like the other amps.
-		tailGrowth: 0, // Laplace-scale growth per % stretch, at slider default
-		tailGrowthSlope: 0, // d(tailGrowth) / d(slider)
+		tailGrowth: 0.1, // Laplace-scale growth per % stretch, at slider default
+		tailGrowthSlope: 0.1, // d(tailGrowth) / d(slider)
 		// On top of the stretch-territory growth above, meanAmp also widens
 		// the tail at its bell — wherever the moderation pull is strong, the
 		// candidates also fan out more.  Per-party factor follows the same
@@ -231,8 +234,8 @@ window.CONFIG = {
 		// `meanAmpTailFactorSlope` is how it changes with the intMod
 		// slider.  Floored at 0 in readParams so we never get a negative
 		// tail-factor; 0 across both knobs disables the contribution.
-		meanAmpTailFactor: 0.5,
-		meanAmpTailFactorSlope: 0.5,
+		meanAmpTailFactor: 0,
+		meanAmpTailFactorSlope: 0,
 	},
 
 	// Always-on Laplace tail on candidate ideology, separate from intMod.
@@ -240,7 +243,7 @@ window.CONFIG = {
 	// Gaussian core, so chambers occasionally pull a clearly off-trend
 	// candidate even in safe districts.  Set to 0 to recover pure-Gaussian
 	// candidate ideologies.
-	candidateTailScale: 0,
+	candidateTailScale: 0.5,
 
 	// ---------------- HISTOGRAMS -----------------------------------------------
 	histograms: {
@@ -296,14 +299,14 @@ window.CONFIG = {
 			v: 1.5, // R+1.5% national popular-vote margin
 			rGerry: 0.19,
 			dGerry: 0.15,
-			dAmbMod: 8.5,
+			dAmbMod: 10.5,
 			rAmbMod: 7.5,
 			// Modest D-edge in intentional moderation (Slotkin, Gallego, etc.
 			// ran more aggressively moderate than their R counterparts).
 			// Slider values map to amps via anchoredLinear(slider, 1, 3, 3):
 			//   1.8 → meanAmp = 5.4 (D moderates aggressively)
 			//   0.0 → meanAmp = 0   (R has no intentional-moderation pull)
-			dIntMod: 1.8,
+			dIntMod: 2.0,
 			rIntMod: 0.1,
 			qualImp: 0.3,
 		},
