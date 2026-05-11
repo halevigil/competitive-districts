@@ -4,8 +4,8 @@
 		<meta charset="UTF-8" />
 		<title>Median Ideology Simulator</title>
 		<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-		<script src="config.js?v=23"></script>
-		<script src="model.js?v=23"></script>
+		<script src="config.js?v=25"></script>
+		<script src="model.js?v=25"></script>
 		<style>
 			:root {
 				--bg: #fafafa;
@@ -1303,9 +1303,19 @@
 				const im_ = window.CONFIG.intentionalMod;
 				const intCfg = window.CONFIG.sliders.dIntMod; // shared block
 				const sliderDefault = intCfg.value;
-				const meanZero = sliderDefault - im_.meanAmp / im_.meanAmpSlope;
-				const varZero  = sliderDefault - im_.varAmp  / im_.varAmpSlope;
-				const sliderMin = Math.max(meanZero, varZero);
+				// Only consider an amp's zero-crossing if its slope is strictly
+				// positive (otherwise the amp is constant or shrinks with the
+				// slider — no "amp = 0" lower bound from that term).  Using
+				// −Infinity for the skipped cases makes Math.max pick the
+				// active constraint; if both are skipped we fall back to 0.
+				const meanZero = im_.meanAmpSlope > 0
+					? sliderDefault - im_.meanAmp / im_.meanAmpSlope
+					: -Infinity;
+				const varZero = im_.varAmpSlope > 0
+					? sliderDefault - im_.varAmp / im_.varAmpSlope
+					: -Infinity;
+				let sliderMin = Math.max(meanZero, varZero);
+				if (!isFinite(sliderMin)) sliderMin = 0;
 				const sliderMax = sliderDefault + intCfg.max;
 				for (const id of ["dIntMod", "rIntMod"]) {
 					window.CONFIG.sliders[id].min   = sliderMin;
@@ -1420,44 +1430,69 @@
 				updateVoteDisplay();
 
 				// Wire up pin-checkbox behaviour for the partisan slider pairs.
-				// While checked, dragging either slider snaps the other to the
-				// same value.  Toggling a pin on while the values disagree
-				// snaps both to their average (rounded to slider step).
+				// While checked, dragging either slider shifts the OTHER by
+				// the same delta — the offset between them is preserved, not
+				// the absolute equality.  Toggling the pin doesn't change any
+				// values; it just resyncs the "last value" trackers so the
+				// next drag computes its delta correctly.  When the partner
+				// would clamp at min/max, it just clamps — the driver slider
+				// is allowed to push past the partner's range.
 				for (const pair of pinnedPairs) {
 					const pin = document.getElementById(pair.pin);
 					const ds = document.getElementById(pair.d);
 					const rs = document.getElementById(pair.r);
 					if (!pin || !ds || !rs) continue;
-					const sync = (src, dst) => {
-						if (!pin.checked) return;
-						if (dst.value === src.value) return;
-						dst.value = src.value;
-						dst.dispatchEvent(
-							new Event("input", { bubbles: true })
+					let dsLast = parseFloat(ds.value);
+					let rsLast = parseFloat(rs.value);
+					let syncing = false; // re-entry guard
+					const shift = (src, dst, getLast, setLast, setOtherLast) => {
+						const newVal = parseFloat(src.value);
+						if (syncing || !pin.checked) {
+							setLast(newVal);
+							setOtherLast(parseFloat(dst.value));
+							return;
+						}
+						const delta = newVal - getLast();
+						setLast(newVal);
+						if (delta === 0) {
+							setOtherLast(parseFloat(dst.value));
+							return;
+						}
+						const lo = parseFloat(dst.min);
+						const hi = parseFloat(dst.max);
+						const target = Math.max(
+							lo,
+							Math.min(hi, parseFloat(dst.value) + delta)
 						);
+						syncing = true;
+						dst.value = target;
+						dst.dispatchEvent(new Event("input", { bubbles: true }));
+						syncing = false;
+						setOtherLast(parseFloat(dst.value));
 					};
-					ds.addEventListener("input", () => sync(ds, rs));
-					rs.addEventListener("input", () => sync(rs, ds));
+					ds.addEventListener("input", () =>
+						shift(
+							ds,
+							rs,
+							() => dsLast,
+							(v) => (dsLast = v),
+							(v) => (rsLast = v)
+						)
+					);
+					rs.addEventListener("input", () =>
+						shift(
+							rs,
+							ds,
+							() => rsLast,
+							(v) => (rsLast = v),
+							(v) => (dsLast = v)
+						)
+					);
 					pin.addEventListener("change", () => {
-						if (!pin.checked) return;
-						const step = parseFloat(ds.step) || 0;
-						const avg =
-							(parseFloat(ds.value) + parseFloat(rs.value)) / 2;
-						const snapped = step
-							? Math.round(avg / step) * step
-							: avg;
-						if (parseFloat(ds.value) !== snapped) {
-							ds.value = snapped;
-							ds.dispatchEvent(
-								new Event("input", { bubbles: true })
-							);
-						}
-						if (parseFloat(rs.value) !== snapped) {
-							rs.value = snapped;
-							rs.dispatchEvent(
-								new Event("input", { bubbles: true })
-							);
-						}
+						// No value changes on toggle — just resync trackers
+						// so the next drag computes a clean delta.
+						dsLast = parseFloat(ds.value);
+						rsLast = parseFloat(rs.value);
 					});
 				}
 
