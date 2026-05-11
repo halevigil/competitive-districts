@@ -4,8 +4,8 @@
 		<meta charset="UTF-8" />
 		<title>Median Ideology Simulator</title>
 		<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-		<script src="config.js?v=33"></script>
-		<script src="model.js?v=33"></script>
+		<script src="config.js?v=34"></script>
+		<script src="model.js?v=34"></script>
 		<style>
 			:root {
 				--bg: #fafafa;
@@ -463,7 +463,33 @@
 					>
 				</div>
 				<div class="row">
-					<label>Democratic Intentional Moderation in Swing Districts</label>
+					<label>Democratic Moderation in Same-Party Safe Districts</label>
+					<input type="range" id="dIntModSafe" />
+					<span class="hint"
+						>Higher → Democrats moderate more even in safely-D
+						districts (primary-from-the-centre pressure).</span
+					>
+				</div>
+				<div class="row">
+					<label>Republican Moderation in Same-Party Safe Districts</label>
+					<input type="range" id="rIntModSafe" />
+					<span class="hint"
+						>Higher → Republicans moderate more even in safely-R
+						districts.</span
+					>
+				</div>
+				<div class="pin-row">
+					<label
+						><input
+							type="checkbox"
+							id="dIntModSafe_rIntModSafe_pin"
+							checked
+						/>
+						Move both sliders together</label
+					>
+				</div>
+				<div class="row">
+					<label>Democratic Moderation in Swing Districts</label>
 					<input type="range" id="dIntModSwing" />
 					<span class="hint"
 						>Higher → Democrats run more moderate candidates in
@@ -471,7 +497,7 @@
 					>
 				</div>
 				<div class="row">
-					<label>Republican Intentional Moderation in Swing Districts</label>
+					<label>Republican Moderation in Swing Districts</label>
 					<input type="range" id="rIntModSwing" />
 					<span class="hint"
 						>Higher → Republicans run more moderate candidates in
@@ -489,7 +515,7 @@
 					>
 				</div>
 				<div class="row">
-					<label>Democratic Intentional Moderation in Opposite-Party Districts</label>
+					<label>Democratic Moderation in Opposite-Party Safe Districts</label>
 					<input type="range" id="dIntModOpp" />
 					<span class="hint"
 						>Higher → wider candidate-ideology tail when Democrats
@@ -497,7 +523,7 @@
 					>
 				</div>
 				<div class="row">
-					<label>Republican Intentional Moderation in Opposite-Party Districts</label>
+					<label>Republican Moderation in Opposite-Party Safe Districts</label>
 					<input type="range" id="rIntModOpp" />
 					<span class="hint"
 						>Higher → wider candidate-ideology tail when Republicans
@@ -632,6 +658,8 @@
 				"dGerry",
 				"dAmbMod",
 				"rAmbMod",
+				"dIntModSafe",
+				"rIntModSafe",
 				"dIntModSwing",
 				"rIntModSwing",
 				"dIntModOpp",
@@ -646,8 +674,9 @@
 			const pinnedPairs = [
 				{ d: "dGerry",  r: "rGerry",  pin: "dGerry_rGerry_pin"  },
 				{ d: "dAmbMod", r: "rAmbMod", pin: "dAmbMod_rAmbMod_pin" },
+				{ d: "dIntModSafe",  r: "rIntModSafe",  pin: "dIntModSafe_rIntModSafe_pin"   },
 				{ d: "dIntModSwing", r: "rIntModSwing", pin: "dIntModSwing_rIntModSwing_pin" },
-				{ d: "dIntModOpp",   r: "rIntModOpp",   pin: "dIntModOpp_rIntModOpp_pin"   },
+				{ d: "dIntModOpp",   r: "rIntModOpp",   pin: "dIntModOpp_rIntModOpp_pin"     },
 			];
 
 			function readParams() {
@@ -662,6 +691,8 @@
 				const cfg = window.CONFIG;
 				const sD = num("dAmbMod");
 				const sR = num("rAmbMod");
+				const bDSafe = num("dIntModSafe"); // own-side safe-district mean pull
+				const bRSafe = num("rIntModSafe");
 				const bDS = num("dIntModSwing"); // pulls candidates toward median in swing
 				const bRS = num("rIntModSwing");
 				const bDO = num("dIntModOpp");   // widens tail in opp-party territory
@@ -669,6 +700,8 @@
 				const cmD = cfg.candidateMean.D,
 					cmR = cfg.candidateMean.R;
 				const im = cfg.intentionalMod;
+				const safeDefD  = cfg.sliders.dIntModSafe.value;
+				const safeDefR  = cfg.sliders.rIntModSafe.value;
 				const swingDefD = cfg.sliders.dIntModSwing.value;
 				const swingDefR = cfg.sliders.rIntModSwing.value;
 				const oppDefD   = cfg.sliders.dIntModOpp.value;
@@ -744,6 +777,13 @@
 					tailGrowthR: Math.max(0,
 						anchoredLinear(bRO, oppDefR, im.tailGrowth ?? 0, im.tailGrowthSlope ?? 0)),
 					tailGrowthSaturation: im.tailGrowthSaturation ?? Infinity,
+					// Same-party safe-district mean-pull amp: driven by the
+					// SAFE slider.  Floored at 0 near its amp-0 min.
+					safeAmpD: Math.max(0,
+						anchoredLinear(bDSafe, safeDefD, im.safeAmp ?? 0, im.safeAmpSlope ?? 0)),
+					safeAmpR: Math.max(0,
+						anchoredLinear(bRSafe, safeDefR, im.safeAmp ?? 0, im.safeAmpSlope ?? 0)),
+					safeAmpSaturation: im.safeAmpSaturation ?? Infinity,
 					// Per-party meanAmp-tail factor uses the SWING slider since
 					// it scales the meanAmp's contribution to the tail at its
 					// swing-zone bell.  Floored at 0.
@@ -1324,6 +1364,7 @@
 				const sharedPairs = {
 					gerry: ["rGerry", "dGerry"],
 					ambMod: ["rAmbMod", "dAmbMod"],
+					intModSafe:  ["rIntModSafe",  "dIntModSafe"],
 					intModSwing: ["rIntModSwing", "dIntModSwing"],
 					intModOpp:   ["rIntModOpp",   "dIntModOpp"],
 				};
@@ -1369,6 +1410,15 @@
 					[
 						(im_.tailGrowthSlope ?? 0) > 0
 							? oppDef - (im_.tailGrowth ?? 0) / im_.tailGrowthSlope
+							: -Infinity,
+					]
+				);
+				const safeDef = window.CONFIG.sliders.dIntModSafe.value;
+				setSliderRange(
+					["dIntModSafe", "rIntModSafe"],
+					[
+						(im_.safeAmpSlope ?? 0) > 0
+							? safeDef - (im_.safeAmp ?? 0) / im_.safeAmpSlope
 							: -Infinity,
 					]
 				);

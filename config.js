@@ -38,17 +38,20 @@ window.CONFIG = {
 		// Shared by both dAmbMod and rAmbMod sliders.
 		ambMod: { min: 2, max: 22.5, step: 0.1, value: 6 },
 
-		// Intentional moderation is split into two sliders per party.
-		//   intModSwing: pulls candidates toward the median IN SWING DISTRICTS
-		//                — drives meanAmp, varAmp, and their bell widths.
+		// Intentional moderation is split into three sliders per party,
+		// one per district type:
+		//   intModSafe:  pulls candidates toward the centre in OWN-PARTY
+		//                safe districts — drives safeAmp (linear in own-side
+		//                stretch distance, capped at safeAmpSaturation).
+		//   intModSwing: pulls candidates toward the median IN SWING
+		//                DISTRICTS — drives meanAmp, varAmp, and their bell
+		//                widths.
 		//   intModOpp:   widens the candidate-ideology TAIL as you move into
-		//                opposite-party territory — drives tailGrowth.
+		//                OPPOSITE-PARTY safe districts — drives tailGrowth.
 		// Each slider's UI value sits at `value` by default; slider min is
 		// auto-derived in index.html as the slider value where the relevant
-		// amp = 0.  For the default to sit at the midpoint of the track,
-		// keep the relevant slope tied to `max` (see comments in
-		// intentionalMod below for the exact constraints).
-		// Shared by both d-side and r-side sliders.
+		// amp = 0.  Shared by both d-side and r-side sliders.
+		intModSafe:  { max: 3, step: 0.05, value: 1 },
 		intModSwing: { max: 3, step: 0.05, value: 1 },
 		intModOpp:   { max: 3, step: 0.05, value: 1 },
 
@@ -240,6 +243,17 @@ window.CONFIG = {
 		// tail-factor; 0 across both knobs disables the contribution.
 		meanAmpTailFactor: 0,
 		meanAmpTailFactorSlope: 0,
+		// Same-party safe-district pull toward the centre.  Models primary-
+		// from-the-centre / "no reason to be too extreme even when safe"
+		// pressure.  Pull grows linearly with how far d_i sits on the OWN
+		// party's side of the median, capped at safeAmpSaturation:
+		//   pullD = +safeAmp_D · min(medianLean − di, safeAmpSaturation)  (di < medianLean)
+		//   pullR = −safeAmp_R · min(di − medianLean, safeAmpSaturation)  (di > medianLean)
+		// safeAmp_X comes from anchoredLinear(intModSafe slider, default,
+		// safeAmp, safeAmpSlope), floored at 0 in readParams.
+		safeAmp: 0,
+		safeAmpSlope: 0,
+		safeAmpSaturation: 20,
 	},
 
 	// Always-on Laplace tail on candidate ideology, separate from intMod.
@@ -307,8 +321,10 @@ window.CONFIG = {
 			rAmbMod: 7.5,
 			// Modest D-edge in intentional moderation (Slotkin, Gallego, etc.
 			// ran more aggressively moderate than their R counterparts).
-			// Each party's intMod is split into two sliders now: swing-zone
-			// pull (drives meanAmp / varAmp) and opposite-party tail growth.
+			// Each party's intMod is split into three sliders: same-party
+			// safe pull, swing-zone pull, and opposite-party tail growth.
+			dIntModSafe:  2.0,
+			rIntModSafe:  0.1,
 			dIntModSwing: 2.0,
 			rIntModSwing: 0.1,
 			dIntModOpp:   2.0,
@@ -332,10 +348,12 @@ window.CONFIG = {
 			dGerry: 0,
 			dAmbMod: 22.5,
 			rAmbMod: 22.5,
-			// Both intMod sliders at the auto-derived min (0) so all
+			// All three intMod sliders at the auto-derived min (0) so all
 			// intentional moderation is OFF.  qualImp at 0 — voters don't
 			// punish extreme candidates.  Isolates the pure
 			// "gerry shrinks majority size" mechanism.
+			dIntModSafe:  0,
+			rIntModSafe:  0,
 			dIntModSwing: 0,
 			rIntModSwing: 0,
 			dIntModOpp:   0,

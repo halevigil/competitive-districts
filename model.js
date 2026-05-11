@@ -606,6 +606,13 @@ function simulateOne(
 	// d_i is `tailGrowthSaturation` % points past the median on the other
 	// party's side, growth stops.  Infinity disables the cap.
 	const tailGrowthSaturation = p.tailGrowthSaturation ?? Infinity;
+	// Same-party safe-district mean pull: in OWN-side safe territory,
+	// pull candidates toward the centre by safeAmp · own-side-stretch,
+	// capped at safeAmpSaturation.  Each party adds the pull on its own
+	// side (D in di < medianLean, R in di > medianLean).
+	const safeAmpD = p.safeAmpD ?? 0;
+	const safeAmpR = p.safeAmpR ?? 0;
+	const safeAmpSaturation = p.safeAmpSaturation ?? Infinity;
 	// Scales how much meanAmp's bell adds to the tail.  Per-party (driven by
 	// each side's intMod slider via anchoredLinear in readParams).  0 = mean
 	// pull doesn't touch the tail; 1 = one unit of Laplace scale per unit of
@@ -672,10 +679,19 @@ function simulateOne(
 			const stretchR = di < medianLean
 				? Math.min(medianLean - di, tailGrowthSaturation)
 				: 0;
+			// Own-side safe stretch: D's safe territory is di < medianLean,
+			// R's is di > medianLean.  Pull toward 0 grows linearly with
+			// own-side distance, capped at safeAmpSaturation.
+			const safeStretchD = di < medianLean
+				? Math.min(medianLean - di, safeAmpSaturation)
+				: 0;
+			const safeStretchR = di > medianLean
+				? Math.min(di - medianLean, safeAmpSaturation)
+				: 0;
 			const tailScaleD = tailBase + tailGrowthD * stretchD + meanAmpTailFactorD * meanAmpD * bellD_D;
 			const tailScaleR = tailBase + tailGrowthR * stretchR + meanAmpTailFactorR * meanAmpR * bellD_R;
-			const cD = meanAmpD * bellD_D + muD + sigmaD_eff * randn() + tailScaleD * laplaceSample();
-			const cR = -meanAmpR * bellD_R + muR + sigmaR_eff * randn() + tailScaleR * laplaceSample();
+			const cD = meanAmpD * bellD_D + safeAmpD * safeStretchD + muD + sigmaD_eff * randn() + tailScaleD * laplaceSample();
+			const cR = -meanAmpR * bellD_R - safeAmpR * safeStretchR + muR + sigmaR_eff * randn() + tailScaleR * laplaceSample();
 			// sigmaN is the σ of the additive election-noise term: a unit-variance
 			// shape (Bates or Tukey) scaled by sigmaN and added to the score.
 			const noise =
@@ -753,12 +769,19 @@ function simulateOne(
 			const stretchR = di < medianLean
 				? Math.min(medianLean - di, tailGrowthSaturation)
 				: 0;
+			// Own-side safe stretch (see fast-path comment).
+			const safeStretchD = di < medianLean
+				? Math.min(medianLean - di, safeAmpSaturation)
+				: 0;
+			const safeStretchR = di > medianLean
+				? Math.min(di - medianLean, safeAmpSaturation)
+				: 0;
 			const tailScaleD = tailBase + tailGrowthD * stretchD + meanAmpTailFactorD * meanAmpD * bellD_D;
 			const tailScaleR = tailBase + tailGrowthR * stretchR + meanAmpTailFactorR * meanAmpR * bellD_R;
 			const cD =
-				meanAmpD * bellD_D + muD + sigmaD_eff * randn() + tailScaleD * laplaceSample();
+				meanAmpD * bellD_D + safeAmpD * safeStretchD + muD + sigmaD_eff * randn() + tailScaleD * laplaceSample();
 			const cR =
-				-meanAmpR * bellD_R + muR + sigmaR_eff * randn() + tailScaleR * laplaceSample();
+				-meanAmpR * bellD_R - safeAmpR * safeStretchR + muR + sigmaR_eff * randn() + tailScaleR * laplaceSample();
 			// sigmaN is the σ of the additive election-noise term (see fast-path
 			// comment above).
 			const noise =
