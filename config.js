@@ -43,9 +43,9 @@ window.CONFIG = {
 		//   intModOpp:   opposite-party-safe tail growth (drives
 		//                tailGrowth).  For D this is "in red districts",
 		//                for R "in blue".
-		intModSafe:  { max: 3, step: 0.05, value: 1 },
+		intModSafe: { max: 3, step: 0.05, value: 1 },
 		intModSwing: { max: 3, step: 0.05, value: 1 },
-		intModOpp:   { max: 3, step: 0.05, value: 1 },
+		intModOpp: { max: 3, step: 0.05, value: 1 },
 
 		// How heavily voters punish ideologically extreme candidates relative
 		// to district partisanship.
@@ -90,7 +90,7 @@ window.CONFIG = {
 	// these has been removed; tune via this block instead.
 	candidateMean: {
 		D: { mu: -100, sigma: 6 },
-		R: { mu:  100, sigma: 6 },
+		R: { mu: 100, sigma: 6 },
 	},
 
 	// ---------------- DISTRICT DISTRIBUTION ------------------------------------
@@ -167,28 +167,37 @@ window.CONFIG = {
 		// 1 treats it as fully wave-adjusted.
 		waveWeight: 0,
 		// Swing bell geometry (shared by mean / var / tail effects).
-		swingOffset: 0,           // K — bell peak distance from medianLean
-		swingBreadth: 6,          // bell half-decay distance (% points)
-		swingBreadthSlope: 0,     // d(breadth) / d(intModSwing slider)
+		swingOffset: 0, // K — bell peak distance from medianLean
+		swingBreadth: 6, // bell half-decay distance (% points)
+		swingBreadthSlope: 0, // d(breadth) / d(intModSwing slider)
 		// Opp ramp saturation: stretch distance (% points) at which the
 		// linear "deeper-into-opp-territory" effect plateaus.
 		oppSaturation: 20,
 		// Per-slider amps and slopes.  Defaults below match the prior
 		// behaviour (swing has all three; opp has tail only; safe is off).
 		safe: {
-			meanAmp: 0, meanAmpSlope: 0,
-			varAmp:  0, varAmpSlope:  0,
-			tailAmp: 0, tailAmpSlope: 0,
+			meanAmp: 0,
+			meanAmpSlope: 1,
+			varAmp: 0,
+			varAmpSlope: 1,
+			tailAmp: 0,
+			tailAmpSlope: 1,
 		},
 		swing: {
-			meanAmp: 6, meanAmpSlope: 9,
-			varAmp:  6, varAmpSlope:  9,
-			tailAmp: 0, tailAmpSlope: 0,
+			meanAmp: 6,
+			meanAmpSlope: 9,
+			varAmp: 6,
+			varAmpSlope: 9,
+			tailAmp: 0,
+			tailAmpSlope: 0,
 		},
 		opp: {
-			meanAmp: 0, meanAmpSlope: 0,
-			varAmp:  0, varAmpSlope:  0,
-			tailAmp: 6, tailAmpSlope: 6,
+			meanAmp: 0,
+			meanAmpSlope: 0,
+			varAmp: 0,
+			varAmpSlope: 0,
+			tailAmp: 6,
+			tailAmpSlope: 6,
 		},
 	},
 
@@ -257,12 +266,12 @@ window.CONFIG = {
 			// ran more aggressively moderate than their R counterparts).
 			// Each party's intMod is split into three sliders: same-party
 			// safe pull, swing-zone pull, and opposite-party tail growth.
-			dIntModSafe:  2.0,
-			rIntModSafe:  0.1,
+			dIntModSafe: 2.0,
+			rIntModSafe: 0.1,
 			dIntModSwing: 2.0,
 			rIntModSwing: 0.1,
-			dIntModOpp:   2.0,
-			rIntModOpp:   0.1,
+			dIntModOpp: 2.0,
+			rIntModOpp: 0.1,
 			qualImp: 0.3,
 		},
 		// Demo of the gerry → less-extreme-median effect.
@@ -284,12 +293,12 @@ window.CONFIG = {
 			// intentional moderation is OFF.  qualImp at 0 — voters don't
 			// punish extreme candidates.  Isolates the pure
 			// "gerry shrinks majority size" mechanism.
-			dIntModSafe:  0,
-			rIntModSafe:  0,
+			dIntModSafe: 0,
+			rIntModSafe: 0,
 			dIntModSwing: 0,
 			rIntModSwing: 0,
-			dIntModOpp:   0,
-			rIntModOpp:   0,
+			dIntModOpp: 0,
+			rIntModOpp: 0,
 			qualImp: 0,
 			sigmaN: 5,
 		},
