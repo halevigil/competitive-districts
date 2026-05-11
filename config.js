@@ -50,7 +50,7 @@ window.CONFIG = {
 
 		// How heavily voters punish ideologically extreme candidates relative
 		// to district partisanship.
-		qualImp: { min: 0, max: 0.9, step: 0.05, value: 0.3 },
+		qualImp: { min: 0, max: 0.9, step: 0.05, value: 0.2 },
 
 		// Election noise σ — scales an additive unit-variance noise term that
 		// gets added to the score (di − wMod·(cD+cR)) before the hard cutoff
@@ -171,7 +171,7 @@ window.CONFIG = {
 		waveWeight: 0,
 		// Swing bell geometry (shared by mean / var / tail effects).
 		swingOffset: 0, // K — bell peak distance from medianLean
-		swingBreadth: 6, // bell half-decay distance (% points)
+		swingBreadth: 8, // bell half-decay distance (% points)
 		// Opp ramp saturation: stretch distance (% points) at which the
 		// linear "deeper-into-opp-territory" effect plateaus.
 		oppSaturation: 20,
@@ -187,9 +187,9 @@ window.CONFIG = {
 		//   var  — added directly to the Gaussian-core σ of cD / cR.
 		//   tail — added directly to the Laplace-tail scale of cD / cR.
 		// The block's shape function in d_i then multiplies each of these.
-		safe:  { mean: 0, var: 0, tail: 1 },
-		swing: { mean: 6, var: 6, tail: 0 },
-		opp:   { mean: 2, var: 0, tail: 6 },
+		safe: { mean: 8, var: 8, tail: 0 },
+		swing: { mean: 16, var: 4, tail: 2 },
+		opp: { mean: 2, var: 0, tail: 12 },
 	},
 
 	// ---------------- HISTOGRAMS -----------------------------------------------
@@ -246,13 +246,13 @@ window.CONFIG = {
 			// ran more aggressively moderate than their R counterparts).
 			// Each party's intMod is split into three sliders: same-party
 			// safe pull, swing-zone pull, and opposite-party tail growth.
-			dIntModSafe: 2.0,
-			rIntModSafe: 0.1,
-			dIntModSwing: 2.0,
-			rIntModSwing: 0.1,
-			dIntModOpp: 2.0,
-			rIntModOpp: 0.1,
-			qualImp: 0.3,
+			dIntModSafe: 1.2,
+			rIntModSafe: 1,
+			dIntModSwing: 1.5,
+			rIntModSwing: 0.4,
+			dIntModOpp: 1,
+			rIntModOpp: 1,
+			qualImp: 0.2,
 		},
 		// Demo of the gerry → less-extreme-median effect.
 		// With ambMod maxed out (very wide candidate spreads), a small

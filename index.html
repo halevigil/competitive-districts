@@ -4,8 +4,8 @@
 		<meta charset="UTF-8" />
 		<title>Median Ideology Simulator</title>
 		<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-		<script src="config.js?v=43"></script>
-		<script src="model.js?v=43"></script>
+		<script src="config.js?v=44"></script>
+		<script src="model.js?v=44"></script>
 		<style>
 			:root {
 				--bg: #fafafa;
@@ -435,19 +435,19 @@
 
 				<h3>Candidates</h3>
 				<div class="row">
-					<label>Democratic Moderation in Blue Districts</label>
+					<label>Democratic Ambient Moderation</label>
 					<input type="range" id="dIntModSafe" />
 					<span class="hint"
-						>Higher → Democrats moderate more even in safely-D
-						(blue) districts.</span
+						>Higher → Democrats run more moderate candidates
+						across all districts (uniform).</span
 					>
 				</div>
 				<div class="row">
-					<label>Republican Moderation in Red Districts</label>
+					<label>Republican Ambient Moderation</label>
 					<input type="range" id="rIntModSafe" />
 					<span class="hint"
-						>Higher → Republicans moderate more even in safely-R
-						(red) districts.</span
+						>Higher → Republicans run more moderate candidates
+						across all districts (uniform).</span
 					>
 				</div>
 				<div class="pin-row">
