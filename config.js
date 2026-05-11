@@ -215,6 +215,12 @@ window.CONFIG = {
 		// like the other amps.
 		tailGrowth: 0.2, // Laplace-scale growth per % stretch, at slider default
 		tailGrowthSlope: 0.2, // d(tailGrowth) / d(slider)
+		// On top of the stretch-territory growth above, meanAmp also widens
+		// the tail at its bell — wherever the moderation pull is strong, the
+		// candidates also fan out more.  `meanAmpTailFactor` scales that
+		// contribution: 0 disables it, 1 adds one unit of Laplace scale per
+		// unit of meanAmp at the bell's peak.
+		meanAmpTailFactor: 0.25,
 	},
 
 	// Always-on Laplace tail on candidate ideology, separate from intMod.
