@@ -38,19 +38,19 @@ window.CONFIG = {
 		// Shared by both dAmbMod and rAmbMod sliders.
 		ambMod: { min: 2, max: 22.5, step: 0.1, value: 6 },
 
-		// Intentional moderation: how strongly candidates moderate toward the
-		// district median.  Pinned together in the UI by default.
-		//   value — the slider default position (where amp = configured amp)
-		//   max   — slider units above default; index.html sets the slider's
-		//           actual max to value + max
-		//   step  — slider step size
-		// Slider min is auto-derived in index.html as the slider value where
+		// Intentional moderation is split into two sliders per party.
+		//   intModSwing: pulls candidates toward the median IN SWING DISTRICTS
+		//                — drives meanAmp, varAmp, and their bell widths.
+		//   intModOpp:   widens the candidate-ideology TAIL as you move into
+		//                opposite-party territory — drives tailGrowth.
+		// Each slider's UI value sits at `value` by default; slider min is
+		// auto-derived in index.html as the slider value where the relevant
 		// amp = 0.  For the default to sit at the midpoint of the track,
-		// keep `intentionalMod.{mean,var}AmpSlope` set so that
-		// `meanAmp / meanAmpSlope === intMod.max` (i.e. the "amp = 0" point
-		// is the same distance below default as the slider max is above).
-		// Shared by both dIntMod and rIntMod sliders.
-		intMod: { max: 3, step: 0.05, value: 1 },
+		// keep the relevant slope tied to `max` (see comments in
+		// intentionalMod below for the exact constraints).
+		// Shared by both d-side and r-side sliders.
+		intModSwing: { max: 3, step: 0.05, value: 1 },
+		intModOpp:   { max: 3, step: 0.05, value: 1 },
 
 		// How heavily voters punish ideologically extreme candidates relative
 		// to district partisanship.
@@ -206,14 +206,14 @@ window.CONFIG = {
 		// min sits the same distance below default as the slider max is above.
 		// With max = 1: slope = meanAmp / max = 3, giving slider range [0, 2]
 		// with default at 1 (midpoint), amp range [0, 6].
-		meanAmpSlope: 12, // d(meanAmp) / d(slider)
-		varAmpSlope: 12, // d(varAmp)  / d(slider)
+		meanAmpSlope: 9, // d(meanAmp) / d(slider)
+		varAmpSlope: 9, // d(varAmp)  / d(slider)
 		// Bell half-decay distances at slider default.  meanBreadthSlope /
 		// varBreadthSlope let the bells widen as the intMod slider goes up
 		// (parties moderate more aggressively AND across a wider swing
 		// zone).  Set the slope to 0 to keep breadth fixed.
-		meanBreadth: 4, // mean-bell half-decay distance at slider default
-		varBreadth: 4, // σ-bell half-decay distance at slider default
+		meanBreadth: 6, // mean-bell half-decay distance at slider default
+		varBreadth: 6, // σ-bell half-decay distance at slider default
 		meanBreadthSlope: 0, // d(meanBreadth) / d(slider)
 		varBreadthSlope: 0, // d(varBreadth)  / d(slider)
 		// Candidate-ideology tail growth in stretch territory.  Adds a
@@ -223,8 +223,8 @@ window.CONFIG = {
 		// Captures "some try hard, some give up" heterogeneity in deep-
 		// stretch districts.  Per-party scaling is driven by each party's
 		// intMod slider via anchoredLinear, just like the other amps.
-		tailGrowth: 0.4, // Laplace-scale growth per % stretch, at slider default
-		tailGrowthSlope: 0.4, // d(tailGrowth) / d(slider)
+		tailGrowth: 0.3, // Laplace-scale growth per % stretch, at slider default
+		tailGrowthSlope: 0.3, // d(tailGrowth) / d(slider)
 		// Saturation: stretch distance (in % points) beyond which the linear
 		// growth stops.  Effective stretch = min(actual stretch, saturation).
 		// Set to Infinity to keep the original "grows forever" behaviour.
@@ -307,11 +307,12 @@ window.CONFIG = {
 			rAmbMod: 7.5,
 			// Modest D-edge in intentional moderation (Slotkin, Gallego, etc.
 			// ran more aggressively moderate than their R counterparts).
-			// Slider values map to amps via anchoredLinear(slider, 1, 3, 3):
-			//   1.8 → meanAmp = 5.4 (D moderates aggressively)
-			//   0.0 → meanAmp = 0   (R has no intentional-moderation pull)
-			dIntMod: 2.0,
-			rIntMod: 0.1,
+			// Each party's intMod is split into two sliders now: swing-zone
+			// pull (drives meanAmp / varAmp) and opposite-party tail growth.
+			dIntModSwing: 2.0,
+			rIntModSwing: 0.1,
+			dIntModOpp:   2.0,
+			rIntModOpp:   0.1,
 			qualImp: 0.3,
 		},
 		// Demo of the gerry → less-extreme-median effect.
@@ -331,12 +332,14 @@ window.CONFIG = {
 			dGerry: 0,
 			dAmbMod: 22.5,
 			rAmbMod: 22.5,
-			// dIntMod / rIntMod at the slider's auto-derived min (0) so
+			// Both intMod sliders at the auto-derived min (0) so all
 			// intentional moderation is OFF.  qualImp at 0 — voters don't
-			// punish extreme candidates.  Both off to isolate the pure
+			// punish extreme candidates.  Isolates the pure
 			// "gerry shrinks majority size" mechanism.
-			dIntMod: 0,
-			rIntMod: 0,
+			dIntModSwing: 0,
+			rIntModSwing: 0,
+			dIntModOpp:   0,
+			rIntModOpp:   0,
 			qualImp: 0,
 			sigmaN: 5,
 		},
