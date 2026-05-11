@@ -189,15 +189,15 @@ window.CONFIG = {
 	intentionalMod: {
 		mode: "offsetK",
 		K: 0,
-		L: 6,
-		meanAmp: 12, // mean-moderation pull AT slider default
-		varAmp: 0, // candidate-σ bump amplitude AT slider default
+		L: 0,
+		meanAmp: 6, // mean-moderation pull AT slider default
+		varAmp: 3, // candidate-σ bump amplitude AT slider default
 		// Slopes are tied to `intMod.max` so the slider's auto-derived "amp = 0"
 		// min sits the same distance below default as the slider max is above.
 		// With max = 1: slope = meanAmp / max = 3, giving slider range [0, 2]
 		// with default at 1 (midpoint), amp range [0, 6].
-		meanAmpSlope: 12, // d(meanAmp) / d(slider)
-		varAmpSlope: 0, // d(varAmp)  / d(slider)
+		meanAmpSlope: 6, // d(meanAmp) / d(slider)
+		varAmpSlope: 3, // d(varAmp)  / d(slider)
 		// Bell half-decay distances at slider default.  meanBreadthSlope /
 		// varBreadthSlope let the bells widen as the intMod slider goes up
 		// (parties moderate more aggressively AND across a wider swing
@@ -205,7 +205,7 @@ window.CONFIG = {
 		meanBreadth: 6, // mean-bell half-decay distance at slider default
 		varBreadth: 6, // σ-bell half-decay distance at slider default
 		meanBreadthSlope: 3, // d(meanBreadth) / d(slider)
-		varBreadthSlope: 6, // d(varBreadth)  / d(slider)
+		varBreadthSlope: 3, // d(varBreadth)  / d(slider)
 		// Candidate-ideology tail growth in stretch territory.  Adds a
 		// Laplace-distributed component to cD / cR whose scale is 0 at
 		// d_i = medianLean and grows linearly forever as d_i moves toward
@@ -213,14 +213,19 @@ window.CONFIG = {
 		// heterogeneity in deep-stretch districts.  Per-party scaling is
 		// driven by each party's intMod slider via anchoredLinear, just
 		// like the other amps.
-		tailGrowth: 0.2, // Laplace-scale growth per % stretch, at slider default
-		tailGrowthSlope: 0.2, // d(tailGrowth) / d(slider)
+		tailGrowth: 0.4, // Laplace-scale growth per % stretch, at slider default
+		tailGrowthSlope: 0.4, // d(tailGrowth) / d(slider)
 		// On top of the stretch-territory growth above, meanAmp also widens
 		// the tail at its bell — wherever the moderation pull is strong, the
-		// candidates also fan out more.  `meanAmpTailFactor` scales that
-		// contribution: 0 disables it, 1 adds one unit of Laplace scale per
-		// unit of meanAmp at the bell's peak.
-		meanAmpTailFactor: 0.25,
+		// candidates also fan out more.  Per-party factor follows the same
+		// anchored-linear pattern as meanAmp/meanAmpSlope:
+		//     factor_X = meanAmpTailFactor + meanAmpTailFactorSlope · (bX − sliderDefault)
+		// `meanAmpTailFactor` is the scale AT slider default;
+		// `meanAmpTailFactorSlope` is how it changes with the intMod
+		// slider.  Floored at 0 in readParams so we never get a negative
+		// tail-factor; 0 across both knobs disables the contribution.
+		meanAmpTailFactor: 0.1,
+		meanAmpTailFactorSlope: 0,
 	},
 
 	// Always-on Laplace tail on candidate ideology, separate from intMod.

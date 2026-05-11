@@ -602,10 +602,12 @@ function simulateOne(
 	const tailBase = p.candidateTailScale;
 	const tailGrowthD = p.tailGrowthD;
 	const tailGrowthR = p.tailGrowthR;
-	// Scales how much meanAmp's bell adds to the tail.  0 = mean pull doesn't
-	// touch the tail; 1 = one unit of Laplace scale per unit of meanAmp at
-	// the bell's peak.
-	const meanAmpTailFactor = p.meanAmpTailFactor ?? 0;
+	// Scales how much meanAmp's bell adds to the tail.  Per-party (driven by
+	// each side's intMod slider via anchoredLinear in readParams).  0 = mean
+	// pull doesn't touch the tail; 1 = one unit of Laplace scale per unit of
+	// meanAmp at the bell's peak.
+	const meanAmpTailFactorD = p.meanAmpTailFactorD ?? 0;
+	const meanAmpTailFactorR = p.meanAmpTailFactorR ?? 0;
 	// When v == 0 the +v bell equals the base bell, so the two-bell sum
 	// (swing + competitive) collapses to twice the base bell — we fold the
 	// factor of 2 into the scale once outside the loop.
@@ -660,8 +662,8 @@ function simulateOne(
 			// don't" heterogeneity at the same locations where the pull happens.
 			const stretchD = di > medianLean ? di - medianLean : 0;
 			const stretchR = di < medianLean ? medianLean - di : 0;
-			const tailScaleD = tailBase + tailGrowthD * stretchD + meanAmpTailFactor * meanAmpD * bellD_D;
-			const tailScaleR = tailBase + tailGrowthR * stretchR + meanAmpTailFactor * meanAmpR * bellD_R;
+			const tailScaleD = tailBase + tailGrowthD * stretchD + meanAmpTailFactorD * meanAmpD * bellD_D;
+			const tailScaleR = tailBase + tailGrowthR * stretchR + meanAmpTailFactorR * meanAmpR * bellD_R;
 			const cD = meanScaleD * bellD_D + muD + sigmaD_eff * randn() + tailScaleD * laplaceSample();
 			const cR = -meanScaleR * bellD_R + muR + sigmaR_eff * randn() + tailScaleR * laplaceSample();
 			// sigmaN is the σ of the additive election-noise term: a unit-variance
@@ -736,8 +738,8 @@ function simulateOne(
 			// the swing and competitive offsets.
 			const stretchD = di > medianLean ? di - medianLean : 0;
 			const stretchR = di < medianLean ? medianLean - di : 0;
-			const tailScaleD = tailBase + tailGrowthD * stretchD + meanAmpTailFactor * meanAmpD * (bellD_D + bellDV_D);
-			const tailScaleR = tailBase + tailGrowthR * stretchR + meanAmpTailFactor * meanAmpR * (bellD_R + bellDV_R);
+			const tailScaleD = tailBase + tailGrowthD * stretchD + meanAmpTailFactorD * meanAmpD * (bellD_D + bellDV_D);
+			const tailScaleR = tailBase + tailGrowthR * stretchR + meanAmpTailFactorR * meanAmpR * (bellD_R + bellDV_R);
 			const cD =
 				meanAmpD * (bellD_D + bellDV_D) + muD + sigmaD_eff * randn() + tailScaleD * laplaceSample();
 			const cR =
