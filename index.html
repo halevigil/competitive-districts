@@ -4,8 +4,8 @@
 		<meta charset="UTF-8" />
 		<title>Median Ideology Simulator</title>
 		<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-		<script src="config.js?v=40"></script>
-		<script src="model.js?v=40"></script>
+		<script src="config.js?v=41"></script>
+		<script src="model.js?v=41"></script>
 		<style>
 			:root {
 				--bg: #fafafa;
@@ -665,8 +665,8 @@
 				const bRSwing = num("rIntModSwing");
 				const bDOpp   = num("dIntModOpp");
 				const bROpp   = num("rIntModOpp");
-				const cb = cfg.candidateBase;
 				const im = cfg.intentionalMod;
+				const magnitude = cfg.candidateMagnitude ?? 100;
 				const safeDef  = cfg.sliders.dIntModSafe.value;
 				const swingDef = cfg.sliders.dIntModSwing.value;
 				const oppDef   = cfg.sliders.dIntModOpp.value;
@@ -712,10 +712,8 @@
 					dGerry: num("dGerry"),
 					base: cfg.districtBase,
 					gerry: cfg.districtGerry,
-					muD: -cb.magnitude,
-					sigmaD: cb.sigma,
-					muR: +cb.magnitude,
-					sigmaR: cb.sigma,
+					muD: -magnitude,
+					muR: +magnitude,
 					wMod: num("qualImp"),
 					// Three slider blocks, each producing per-party mean / var
 					// / tail amps via anchoredLinear (floored at 0).
@@ -736,7 +734,6 @@
 						resolveBlock(im.opp,   bDOpp,   bROpp,   oppDef),
 						{ saturation: im.oppSaturation ?? 20 }
 					),
-					candidateTailScale: cfg.candidateTailScale ?? 0,
 					waveWeight: im.waveWeight ?? 0,
 				};
 			}

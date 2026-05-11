@@ -560,12 +560,8 @@ function simulateOne(
 	// Hoist all `p.X` reads out of the inner loop so V8 keeps the constants
 	// in registers / locals instead of re-walking the params object N times.
 	const v = p.v;
-	const muD = p.muD,
-		muR = p.muR,
-		sigmaD = p.sigmaD,
-		sigmaR = p.sigmaR;
-	const wMod = p.wMod,
-		sigmaN = p.sigmaN;
+	const muD = p.muD, muR = p.muR;
+	const wMod = p.wMod, sigmaN = p.sigmaN;
 	// Intentional moderation: three sliders per party (safe / swing / opp),
 	// each with three effects (mean / var / tail).  Per-party effective amps
 	// are pre-anchored in readParams and arrive as scalars.
@@ -586,7 +582,6 @@ function simulateOne(
 	// invSat instead of dividing.
 	const oppSaturation = opp.saturation || 1;
 	const invOppSat = 1 / oppSaturation;
-	const tailBase = p.candidateTailScale;
 	const noiseType = p.noiseType;
 	const batesN = p.batesN;
 	const tukeyLambda = p.tukeyLambda;
@@ -643,8 +638,8 @@ function simulateOne(
 			const varBumpR  = safe.varR  + swing.varR  * swingR + opp.varR  * oppR;
 			const tailBumpD = safe.tailD + swing.tailD * swingD + opp.tailD * oppD;
 			const tailBumpR = safe.tailR + swing.tailR * swingR + opp.tailR * oppR;
-			const cD = muD + meanPullD + (sigmaD + varBumpD) * randn() + (tailBase + tailBumpD) * laplaceSample();
-			const cR = muR - meanPullR + (sigmaR + varBumpR) * randn() + (tailBase + tailBumpR) * laplaceSample();
+			const cD = muD + meanPullD + varBumpD * randn() + tailBumpD * laplaceSample();
+			const cR = muR - meanPullR + varBumpR * randn() + tailBumpR * laplaceSample();
 			// sigmaN is the σ of the additive election-noise term: a unit-variance
 			// shape (Bates or Tukey) scaled by sigmaN and added to the score.
 			const noise =
@@ -715,8 +710,8 @@ function simulateOne(
 			const varBumpR  = safe.varR  + swing.varR  * swingR + opp.varR  * oppR;
 			const tailBumpD = safe.tailD + swing.tailD * swingD + opp.tailD * oppD;
 			const tailBumpR = safe.tailR + swing.tailR * swingR + opp.tailR * oppR;
-			const cD = muD + meanPullD + (sigmaD + varBumpD) * randn() + (tailBase + tailBumpD) * laplaceSample();
-			const cR = muR - meanPullR + (sigmaR + varBumpR) * randn() + (tailBase + tailBumpR) * laplaceSample();
+			const cD = muD + meanPullD + varBumpD * randn() + tailBumpD * laplaceSample();
+			const cR = muR - meanPullR + varBumpR * randn() + tailBumpR * laplaceSample();
 			// sigmaN is the σ of the additive election-noise term (see fast-path
 			// comment above).
 			const noise =

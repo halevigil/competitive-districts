@@ -85,18 +85,12 @@ window.CONFIG = {
 		tukey: { lambda: 0.14 },
 	},
 
-	// ---------------- CANDIDATE BASE DISTRIBUTION ------------------------------
-	// Before any moderation, candidate ideology is N(±magnitude, sigma)
-	// (D at −magnitude, R at +magnitude).  The "moderate the mean" effect
-	// is now expressed entirely through intentionalMod.safe.mean — at
-	// slider min it's 0 (candidates fully extreme), and pulling the safe
-	// slider up moves the effective mean toward 0.  Sigma is what remains
-	// as a base "spread" before intentionalMod.{safe,swing,opp}.var bumps
-	// it.
-	candidateBase: {
-		magnitude: 100,
-		sigma: 6,
-	},
+	// ---------------- CANDIDATE BASE MAGNITUDE ---------------------------------
+	// Before any moderation, candidate ideology is a point mass at ±magnitude
+	// (D at −magnitude, R at +magnitude).  All spread comes from
+	// intentionalMod.{safe,swing,opp}.var; all Laplace-tail from .tail.
+	// At intMod sliders = 0 the chamber is fully deterministic at ±100.
+	candidateMagnitude: 100,
 
 	// ---------------- DISTRICT DISTRIBUTION ------------------------------------
 	// The 435 district partisanships are drawn from an α-mixture:
@@ -218,13 +212,6 @@ window.CONFIG = {
 		},
 	},
 
-	// Always-on Laplace tail on candidate ideology, separate from intMod.
-	// Adds a moderate-tail component to every candidate draw on top of the
-	// Gaussian core, so chambers occasionally pull a clearly off-trend
-	// candidate even in safe districts.  Set to 0 to recover pure-Gaussian
-	// candidate ideologies.
-	candidateTailScale: 0,
-
 	// ---------------- HISTOGRAMS -----------------------------------------------
 	histograms: {
 		// Median-rep ideology histogram (top chart): the x-axis is fixed to
@@ -258,7 +245,6 @@ window.CONFIG = {
 	// ---------------- "SEE MORE PLOTS" SECTION ---------------------------------
 	morePlots: {
 		nChambers: 20, // example chambers in the grid
-		nSimsForMismatch: 500, // simulations averaged for the mismatch chart
 	},
 
 	// ---------------- PRESETS --------------------------------------------------
