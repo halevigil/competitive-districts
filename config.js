@@ -191,22 +191,38 @@ window.CONFIG = {
 		K: 3,
 		L: 6,
 		meanAmp: 3, // mean-moderation pull AT slider default
-		varAmp: 3, // candidate-σ bump amplitude AT slider default
+		varAmp: 0, // candidate-σ bump amplitude AT slider default
 		// Slopes are tied to `intMod.max` so the slider's auto-derived "amp = 0"
 		// min sits the same distance below default as the slider max is above.
 		// With max = 1: slope = meanAmp / max = 3, giving slider range [0, 2]
 		// with default at 1 (midpoint), amp range [0, 6].
 		meanAmpSlope: 3, // d(meanAmp) / d(slider)
-		varAmpSlope: 3, // d(varAmp)  / d(slider)
+		varAmpSlope: 0, // d(varAmp)  / d(slider)
 		// Bell half-decay distances at slider default.  meanBreadthSlope /
 		// varBreadthSlope let the bells widen as the intMod slider goes up
 		// (parties moderate more aggressively AND across a wider swing
 		// zone).  Set the slope to 0 to keep breadth fixed.
 		meanBreadth: 9, // mean-bell half-decay distance at slider default
 		varBreadth: 6, // σ-bell half-decay distance at slider default
-		meanBreadthSlope: 3, // d(meanBreadth) / d(slider)
-		varBreadthSlope: 3, // d(varBreadth)  / d(slider)
+		meanBreadthSlope: 6, // d(meanBreadth) / d(slider)
+		varBreadthSlope: 6, // d(varBreadth)  / d(slider)
+		// Candidate-ideology tail growth in stretch territory.  Adds a
+		// Laplace-distributed component to cD / cR whose scale is 0 at
+		// d_i = medianLean and grows linearly forever as d_i moves toward
+		// the OTHER party's side.  Captures "some try hard, some give up"
+		// heterogeneity in deep-stretch districts.  Per-party scaling is
+		// driven by each party's intMod slider via anchoredLinear, just
+		// like the other amps.
+		tailGrowth: 0.25, // Laplace-scale growth per % stretch, at slider default
+		tailGrowthSlope: 0.25, // d(tailGrowth) / d(slider)
 	},
+
+	// Always-on Laplace tail on candidate ideology, separate from intMod.
+	// Adds a moderate-tail component to every candidate draw on top of the
+	// Gaussian core, so chambers occasionally pull a clearly off-trend
+	// candidate even in safe districts.  Set to 0 to recover pure-Gaussian
+	// candidate ideologies.
+	candidateTailScale: 5,
 
 	// ---------------- HISTOGRAMS -----------------------------------------------
 	histograms: {

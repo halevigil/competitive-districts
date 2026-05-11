@@ -4,8 +4,8 @@
 		<meta charset="UTF-8" />
 		<title>Median Ideology Simulator</title>
 		<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-		<script src="config.js?v=19"></script>
-		<script src="model.js?v=19"></script>
+		<script src="config.js?v=20"></script>
+		<script src="model.js?v=20"></script>
 		<style>
 			:root {
 				--bg: #fafafa;
@@ -705,6 +705,13 @@
 						anchoredLinear(bD, cfg.sliders.dIntMod.value, im.varBreadth, im.varBreadthSlope ?? 0)),
 					varBreadthR: Math.max(0.5,
 						anchoredLinear(bR, cfg.sliders.rIntMod.value, im.varBreadth, im.varBreadthSlope ?? 0)),
+					// Tail-growth rates per party — floored at 0 so we never
+					// have a "negative tail" near the slider's amp-0 min.
+					tailGrowthD: Math.max(0,
+						anchoredLinear(bD, cfg.sliders.dIntMod.value, im.tailGrowth ?? 0, im.tailGrowthSlope ?? 0)),
+					tailGrowthR: Math.max(0,
+						anchoredLinear(bR, cfg.sliders.rIntMod.value, im.tailGrowth ?? 0, im.tailGrowthSlope ?? 0)),
+					candidateTailScale: cfg.candidateTailScale ?? 0,
 					...intentionalModOffsets(im.mode, im.K, im.L),
 				};
 			}

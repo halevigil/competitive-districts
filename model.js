@@ -22,6 +22,18 @@ function randn() {
 	return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
 }
 
+// Standard Laplace draw (mean 0, scale 1; variance = 2).  Heavier tails than
+// the Gaussian — useful for adding "moderate-tail" structure on top of the
+// normal candidate-ideology noise.  Stretches into long-shot candidates a
+// few times per chamber instead of essentially never.
+function laplaceSample() {
+	// Inverse-CDF method: u ~ Uniform(0, 1), x = -sign(u − 0.5)·log(1 − 2|u − 0.5|).
+	const u = Math.random() - 0.5;
+	return u >= 0
+		? -Math.log(Math.max(1 - 2 * u, 1e-300))
+		:  Math.log(Math.max(1 + 2 * u, 1e-300));
+}
+
 // Bates(3) — sum of three Uniform(-1, +1) draws.  Unit variance, bell-shaped
 // near 0 like a Gaussian, but with bounded support [-3, +3] (zero density
 // beyond), so the tails are thinner than randn().
@@ -581,6 +593,15 @@ function simulateOne(
 	const noiseType = p.noiseType;
 	const batesN = p.batesN;
 	const tukeyLambda = p.tukeyLambda;
+	// Candidate-ideology tail: always-on Laplace scale plus a per-party
+	// stretch-territory growth term.  The growth is 0 at d_i = medianLean
+	// and grows linearly with how far d_i sits on the OTHER party's side
+	// of the median — i.e. D candidates fan out in R-leaning districts,
+	// R candidates fan out in D-leaning districts.  Slope is configured
+	// per party (tied to its intMod slider in readParams).
+	const tailBase = p.candidateTailScale;
+	const tailGrowthD = p.tailGrowthD;
+	const tailGrowthR = p.tailGrowthR;
 	// When v == 0 the +v bell equals the base bell, so the two-bell sum
 	// (swing + competitive) collapses to twice the base bell — we fold the
 	// factor of 2 into the scale once outside the loop.
@@ -626,8 +647,15 @@ function simulateOne(
 			const bellVar_R = Math.exp(-(aVR * aVR) / varBreadthRSq);
 			const sigmaD_eff = sigmaD + varAmpD * bellVar_D;
 			const sigmaR_eff = sigmaR + varAmpR * bellVar_R;
-			const cD = meanScaleD * bellD_D + muD + sigmaD_eff * randn();
-			const cR = -meanScaleR * bellD_R + muR + sigmaR_eff * randn();
+			// Stretch territory grows linearly forever — D's grow tail when
+			// they're in an R-leaning district (di > medianLean), R's grow
+			// tail when they're in a D-leaning district (di < medianLean).
+			const stretchD = di > medianLean ? di - medianLean : 0;
+			const stretchR = di < medianLean ? medianLean - di : 0;
+			const tailScaleD = tailBase + tailGrowthD * stretchD;
+			const tailScaleR = tailBase + tailGrowthR * stretchR;
+			const cD = meanScaleD * bellD_D + muD + sigmaD_eff * randn() + tailScaleD * laplaceSample();
+			const cR = -meanScaleR * bellD_R + muR + sigmaR_eff * randn() + tailScaleR * laplaceSample();
 			// sigmaN is the σ of the additive election-noise term: a unit-variance
 			// shape (Bates or Tukey) scaled by sigmaN and added to the score.
 			const noise =
@@ -694,10 +722,15 @@ function simulateOne(
 			const bellVar_R = Math.exp(-(aVR * aVR) / varBreadthRSq);
 			const sigmaD_eff = sigmaD + varAmpD * bellVar_D;
 			const sigmaR_eff = sigmaR + varAmpR * bellVar_R;
+			// Stretch territory grows linearly forever (see fast-path comment).
+			const stretchD = di > medianLean ? di - medianLean : 0;
+			const stretchR = di < medianLean ? medianLean - di : 0;
+			const tailScaleD = tailBase + tailGrowthD * stretchD;
+			const tailScaleR = tailBase + tailGrowthR * stretchR;
 			const cD =
-				meanAmpD * (bellD_D + bellDV_D) + muD + sigmaD_eff * randn();
+				meanAmpD * (bellD_D + bellDV_D) + muD + sigmaD_eff * randn() + tailScaleD * laplaceSample();
 			const cR =
-				-meanAmpR * (bellD_R + bellDV_R) + muR + sigmaR_eff * randn();
+				-meanAmpR * (bellD_R + bellDV_R) + muR + sigmaR_eff * randn() + tailScaleR * laplaceSample();
 			// sigmaN is the σ of the additive election-noise term (see fast-path
 			// comment above).
 			const noise =
