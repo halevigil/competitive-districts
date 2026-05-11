@@ -4,8 +4,8 @@
 		<meta charset="UTF-8" />
 		<title>Median Ideology Simulator</title>
 		<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-		<script src="config.js?v=36"></script>
-		<script src="model.js?v=36"></script>
+		<script src="config.js?v=37"></script>
+		<script src="model.js?v=37"></script>
 		<style>
 			:root {
 				--bg: #fafafa;
@@ -658,21 +658,35 @@
 					return parseFloat(document.getElementById(id).value);
 				};
 				const cfg = window.CONFIG;
-				const bDSafe = num("dIntModSafe"); // own-side safe-district mean pull
-				const bRSafe = num("rIntModSafe");
-				const bDS = num("dIntModSwing"); // pulls candidates toward median in swing
-				const bRS = num("rIntModSwing");
-				const bDO = num("dIntModOpp");   // widens tail in opp-party territory
-				const bRO = num("rIntModOpp");
+				// Three sliders per party.
+				const bDSafe  = num("dIntModSafe");
+				const bRSafe  = num("rIntModSafe");
+				const bDSwing = num("dIntModSwing");
+				const bRSwing = num("rIntModSwing");
+				const bDOpp   = num("dIntModOpp");
+				const bROpp   = num("rIntModOpp");
 				const cmD = cfg.candidateMean.D,
 					cmR = cfg.candidateMean.R;
 				const im = cfg.intentionalMod;
-				const safeDefD  = cfg.sliders.dIntModSafe.value;
-				const safeDefR  = cfg.sliders.rIntModSafe.value;
-				const swingDefD = cfg.sliders.dIntModSwing.value;
-				const swingDefR = cfg.sliders.rIntModSwing.value;
-				const oppDefD   = cfg.sliders.dIntModOpp.value;
-				const oppDefR   = cfg.sliders.rIntModOpp.value;
+				const safeDef  = cfg.sliders.dIntModSafe.value;
+				const swingDef = cfg.sliders.dIntModSwing.value;
+				const oppDef   = cfg.sliders.dIntModOpp.value;
+				// Helper: each slider-block has { meanAmp, meanAmpSlope,
+				// varAmp, varAmpSlope, tailAmp, tailAmpSlope }.  Resolve to
+				// effective per-party amps via anchoredLinear + floor at 0.
+				const resolveBlock = (block, bD, bR, def) => {
+					const bk = block || {};
+					const a = (b, val, slope) =>
+						Math.max(0, anchoredLinear(b, def, val ?? 0, slope ?? 0));
+					return {
+						meanD: a(bD, bk.meanAmp, bk.meanAmpSlope),
+						meanR: a(bR, bk.meanAmp, bk.meanAmpSlope),
+						varD:  a(bD, bk.varAmp,  bk.varAmpSlope),
+						varR:  a(bR, bk.varAmp,  bk.varAmpSlope),
+						tailD: a(bD, bk.tailAmp, bk.tailAmpSlope),
+						tailR: a(bR, bk.tailAmp, bk.tailAmpSlope),
+					};
+				};
 				return {
 					m: CONST.m,
 					nsim: CONST.nsim,
@@ -702,55 +716,27 @@
 					muR: cmR.mu,
 					sigmaR: cmR.sigma,
 					wMod: num("qualImp"),
-					// Swing-zone amps (mean pull + variance bump) and their
-					// bell widths are all driven by the SWING slider — wherever
-					// candidates strategically moderate, the mean and variance
-					// of the candidate distribution shift together.  Slider
-					// min is auto-derived so amps stay ≥ 0 across the range.
-					meanAmpD: im.mode === "offsetK"
-						? anchoredLinear(bDS, swingDefD, im.meanAmp, im.meanAmpSlope)
-						: 0,
-					meanAmpR: im.mode === "offsetK"
-						? anchoredLinear(bRS, swingDefR, im.meanAmp, im.meanAmpSlope)
-						: 0,
-					varAmpD: im.mode === "offsetK"
-						? anchoredLinear(bDS, swingDefD, im.varAmp, im.varAmpSlope)
-						: 0,
-					varAmpR: im.mode === "offsetK"
-						? anchoredLinear(bRS, swingDefR, im.varAmp, im.varAmpSlope)
-						: 0,
-					meanBreadthD: Math.max(0.5,
-						anchoredLinear(bDS, swingDefD, im.meanBreadth, im.meanBreadthSlope ?? 0)),
-					meanBreadthR: Math.max(0.5,
-						anchoredLinear(bRS, swingDefR, im.meanBreadth, im.meanBreadthSlope ?? 0)),
-					varBreadthD: Math.max(0.5,
-						anchoredLinear(bDS, swingDefD, im.varBreadth, im.varBreadthSlope ?? 0)),
-					varBreadthR: Math.max(0.5,
-						anchoredLinear(bRS, swingDefR, im.varBreadth, im.varBreadthSlope ?? 0)),
-					// Opposite-party tail growth: driven by the OPP slider.
-					// Floored at 0 near its amp-0 min.
-					tailGrowthD: Math.max(0,
-						anchoredLinear(bDO, oppDefD, im.tailGrowth ?? 0, im.tailGrowthSlope ?? 0)),
-					tailGrowthR: Math.max(0,
-						anchoredLinear(bRO, oppDefR, im.tailGrowth ?? 0, im.tailGrowthSlope ?? 0)),
-					tailGrowthSaturation: im.tailGrowthSaturation ?? Infinity,
-					// Same-party safe-district mean-pull amp: driven by the
-					// SAFE slider.  Floored at 0 near its amp-0 min.
-					safeAmpD: Math.max(0,
-						anchoredLinear(bDSafe, safeDefD, im.safeAmp ?? 0, im.safeAmpSlope ?? 0)),
-					safeAmpR: Math.max(0,
-						anchoredLinear(bRSafe, safeDefR, im.safeAmp ?? 0, im.safeAmpSlope ?? 0)),
-					safeAmpSaturation: im.safeAmpSaturation ?? Infinity,
-					// Per-party meanAmp-tail factor uses the SWING slider since
-					// it scales the meanAmp's contribution to the tail at its
-					// swing-zone bell.  Floored at 0.
-					meanAmpTailFactorD: Math.max(0,
-						anchoredLinear(bDS, swingDefD, im.meanAmpTailFactor ?? 0, im.meanAmpTailFactorSlope ?? 0)),
-					meanAmpTailFactorR: Math.max(0,
-						anchoredLinear(bRS, swingDefR, im.meanAmpTailFactor ?? 0, im.meanAmpTailFactorSlope ?? 0)),
+					// Three slider blocks, each producing per-party mean / var
+					// / tail amps via anchoredLinear (floored at 0).
+					safe:  resolveBlock(im.safe,  bDSafe,  bRSafe,  safeDef),
+					swing: Object.assign(
+						resolveBlock(im.swing, bDSwing, bRSwing, swingDef),
+						{
+							// Swing bell geometry.  Per-party breadth scales
+							// with each side's intMod-swing slider.
+							offset: im.swingOffset ?? 0,
+							breadthD: Math.max(0.5,
+								anchoredLinear(bDSwing, swingDef, im.swingBreadth ?? 6, im.swingBreadthSlope ?? 0)),
+							breadthR: Math.max(0.5,
+								anchoredLinear(bRSwing, swingDef, im.swingBreadth ?? 6, im.swingBreadthSlope ?? 0)),
+						}
+					),
+					opp: Object.assign(
+						resolveBlock(im.opp,   bDOpp,   bROpp,   oppDef),
+						{ saturation: im.oppSaturation ?? 20 }
+					),
 					candidateTailScale: cfg.candidateTailScale ?? 0,
 					waveWeight: im.waveWeight ?? 0,
-					...intentionalModOffsets(im.mode, im.K, im.L),
 				};
 			}
 
@@ -1333,13 +1319,24 @@
 					delete window.CONFIG.sliders[shared];
 				}
 
-				// Each intMod slider auto-derives its own (min, max).  Min is
-				// the slider value where the driving amp(s) hit 0; max is
-				// `default + slider.max` (max counted as slope units above).
-				// Skip a zero-crossing if its slope is ≤ 0 — no "amp = 0"
-				// lower bound from a constant or shrinking amp.  Fall back
-				// to 0 if no constraint is active.
+				// Each intMod slider auto-derives its (min, max).  Min is the
+				// max zero-crossing across the slider's three amps (mean /
+				// var / tail) — i.e. the largest slider value at which any
+				// amp would go negative.  Skip an amp's zero-crossing if
+				// its slope is ≤ 0.  Fall back to 0 if no amp constrains.
 				const im_ = window.CONFIG.intentionalMod;
+				const blockZeros = (block, def) => {
+					const out = [];
+					if (!block) return out;
+					for (const [amp, slope] of [
+						[block.meanAmp, block.meanAmpSlope],
+						[block.varAmp,  block.varAmpSlope],
+						[block.tailAmp, block.tailAmpSlope],
+					]) {
+						if ((slope ?? 0) > 0) out.push(def - (amp ?? 0) / slope);
+					}
+					return out;
+				};
 				const setSliderRange = (sliderIdsLR, zeroCrossings) => {
 					const cfg = window.CONFIG.sliders[sliderIdsLR[0]];
 					const def = cfg.value;
@@ -1352,32 +1349,12 @@
 						window.CONFIG.sliders[id].value = def;
 					}
 				};
-				const swingDef = window.CONFIG.sliders.dIntModSwing.value;
-				setSliderRange(
-					["dIntModSwing", "rIntModSwing"],
-					[
-						im_.meanAmpSlope > 0 ? swingDef - im_.meanAmp / im_.meanAmpSlope : -Infinity,
-						im_.varAmpSlope  > 0 ? swingDef - im_.varAmp  / im_.varAmpSlope  : -Infinity,
-					]
-				);
-				const oppDef = window.CONFIG.sliders.dIntModOpp.value;
-				setSliderRange(
-					["dIntModOpp", "rIntModOpp"],
-					[
-						(im_.tailGrowthSlope ?? 0) > 0
-							? oppDef - (im_.tailGrowth ?? 0) / im_.tailGrowthSlope
-							: -Infinity,
-					]
-				);
-				const safeDef = window.CONFIG.sliders.dIntModSafe.value;
-				setSliderRange(
-					["dIntModSafe", "rIntModSafe"],
-					[
-						(im_.safeAmpSlope ?? 0) > 0
-							? safeDef - (im_.safeAmp ?? 0) / im_.safeAmpSlope
-							: -Infinity,
-					]
-				);
+				const safeDef0  = window.CONFIG.sliders.dIntModSafe.value;
+				const swingDef0 = window.CONFIG.sliders.dIntModSwing.value;
+				const oppDef0   = window.CONFIG.sliders.dIntModOpp.value;
+				setSliderRange(["dIntModSafe",  "rIntModSafe"],  blockZeros(im_.safe,  safeDef0));
+				setSliderRange(["dIntModSwing", "rIntModSwing"], blockZeros(im_.swing, swingDef0));
+				setSliderRange(["dIntModOpp",   "rIntModOpp"],   blockZeros(im_.opp,   oppDef0));
 
 				// Apply slider attributes (min/max/step/default) from CONFIG so the
 				// numbers in config.js are the single source of truth.

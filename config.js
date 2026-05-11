@@ -142,106 +142,54 @@ window.CONFIG = {
 		],
 	},
 
-	// ---------------- INTENTIONAL-MODERATION SHAPE -----------------------------
-	// The intentional-moderation reward and the variance-bump term each use a
-	// Gaussian "bell" shape centred on a district-partisanship offset:
-	//     bell(d, off, w) = exp( -(d - off)^2 / w^2 )
-	// `w` is the Gaussian's half-decay distance — at |d - off| = w the bell
-	// drops to e⁻¹ ≈ 0.37 (it's the bell's σ).  Larger w → broader peak.
-	// The mean-moderation and variance-bump bells get their own widths
-	// (`meanBreadth`, `varBreadth`) so the two effects can be tuned
-	// independently — e.g. a sharp mean pull near d = K combined with a
-	// broader heterogeneity bump out at d = L.
-	//
-	//   'centered': peaks at d = 0 (50/50 district).  Original behaviour —
-	//               candidates moderate most when their district is balanced.
-	//               Variance bump disabled.
-	//
-	//   'offsetK':  Mean-position peak at d = ±K toward the other party
-	//               (Democrats: +K, Republicans: -K).  Captures the intuition
-	//               that a party tries hardest to moderate when stretching to
-	//               win territory that leans the other way.
-	//
-	//               Plus a candidate-σ bump at d = ±L (typically L > K) of
-	//               amplitude `varAmp`.  Models heterogeneity in deeper
-	//               stretch territory: some try harder, some give up.
-	// `meanAmp` and `varAmp` are the per-party amplitudes AT the slider
-	// default (set in CONFIG.sliders.intMod.value).  `meanAmpSlope` and
-	// `varAmpSlope` are the slopes — how much each amp changes per slider
-	// unit away from default.  index.html auto-derives the slider's min
-	// (where amp = 0) and max (default + intMod.max slope units above):
-	//     ampD    = meanAmp + meanAmpSlope · (bD - sliderDefault)
-	//     ampR    = meanAmp + meanAmpSlope · (bR - sliderDefault)
-	//     varAmpD = varAmp  + varAmpSlope  · (bD - sliderDefault)
-	//     varAmpR = varAmp  + varAmpSlope  · (bR - sliderDefault)
-	// And in the simulator:
-	//     cD adds +ampD · bell(d, +K, meanBreadth)
-	//     cR adds −ampR · bell(d, −K, meanBreadth)
-	//     σ_D_eff(d) = σ_D + varAmpD · bell(d, +L, varBreadth)
-	//     σ_R_eff(d) = σ_R + varAmpR · bell(d, −L, varBreadth)
-	// (`varAmp` adds to σ — one standard deviation — directly.)
+	// ---------------- INTENTIONAL MODERATION -----------------------------------
+	// Three sliders per party (safe / swing / opp); each one symmetrically
+	// produces all three moderation effects:
+	//   - meanAmp:  pulls cD up (toward 0) and cR down (toward 0).
+	//   - varAmp:   adds to the Gaussian-core σ of cD / cR.
+	//   - tailAmp:  adds to the Laplace-tail scale of cD / cR.
+	// Each effect is a per-party amp times a SHAPE function in d_i:
+	//   - safe:  shape ≡ 1 (uniform across all districts).
+	//   - swing: shape = bell(d_i − swingOffsetX, swingBreadth),
+	//            a Gaussian bell at medianLean ± swingOffset.  swingOffset = 0
+	//            puts it at the median; positive K shifts it toward the
+	//            OPPOSITE party's side ("D moderates hardest reaching into R
+	//            territory" / vice versa).
+	//   - opp:   shape = min(stretch / oppSaturation, 1), a saturating linear
+	//            ramp where stretch is how far d_i sits on the OTHER party's
+	//            side of the median.
+	// Each amp is anchored-linear in its slider:
+	//   amp(slider) = amp + ampSlope · (slider − sliderDefault)
+	// floored at 0 in readParams so slider-min positions disable the effect.
 	intentionalMod: {
-		mode: "offsetK",
-		K: 0,
-		L: 0,
-		// How much of the popular-vote shift `v` feeds into where candidates
-		// strategically moderate.  Bell centres land at d_i + waveWeight·v − modOffset,
-		// so 0 ignores the wave entirely (intMod anchored on the district's own
-		// lean), 1 treats moderation as fully wave-adjusted, and intermediate
-		// values blend the two.  Applies to both the mean bell and the
-		// variance-bump bell, and to the meanAmp-driven tail term.
+		// Where intMod sees the district: blend of d_i and d_i + v.
+		// 0 ignores the wave (intMod anchored on raw district lean),
+		// 1 treats it as fully wave-adjusted.
 		waveWeight: 0,
-		meanAmp: 6, // mean-moderation pull AT slider default
-		varAmp: 6, // candidate-σ bump amplitude AT slider default
-		// Slopes are tied to `intMod.max` so the slider's auto-derived "amp = 0"
-		// min sits the same distance below default as the slider max is above.
-		// With max = 1: slope = meanAmp / max = 3, giving slider range [0, 2]
-		// with default at 1 (midpoint), amp range [0, 6].
-		meanAmpSlope: 9, // d(meanAmp) / d(slider)
-		varAmpSlope: 9, // d(varAmp)  / d(slider)
-		// Bell half-decay distances at slider default.  meanBreadthSlope /
-		// varBreadthSlope let the bells widen as the intMod slider goes up
-		// (parties moderate more aggressively AND across a wider swing
-		// zone).  Set the slope to 0 to keep breadth fixed.
-		meanBreadth: 6, // mean-bell half-decay distance at slider default
-		varBreadth: 6, // σ-bell half-decay distance at slider default
-		meanBreadthSlope: 0, // d(meanBreadth) / d(slider)
-		varBreadthSlope: 0, // d(varBreadth)  / d(slider)
-		// Candidate-ideology tail growth in stretch territory.  Adds a
-		// Laplace-distributed component to cD / cR whose scale is 0 at
-		// d_i = medianLean and grows linearly with stretch distance as d_i
-		// moves toward the OTHER party's side, up to a configurable cap.
-		// Captures "some try hard, some give up" heterogeneity in deep-
-		// stretch districts.  Per-party scaling is driven by each party's
-		// intMod slider via anchoredLinear, just like the other amps.
-		tailGrowth: 0.3, // Laplace-scale growth per % stretch, at slider default
-		tailGrowthSlope: 0.3, // d(tailGrowth) / d(slider)
-		// Saturation: stretch distance (in % points) beyond which the linear
-		// growth stops.  Effective stretch = min(actual stretch, saturation).
-		// Set to Infinity to keep the original "grows forever" behaviour.
-		tailGrowthSaturation: 20,
-		// On top of the stretch-territory growth above, meanAmp also widens
-		// the tail at its bell — wherever the moderation pull is strong, the
-		// candidates also fan out more.  Per-party factor follows the same
-		// anchored-linear pattern as meanAmp/meanAmpSlope:
-		//     factor_X = meanAmpTailFactor + meanAmpTailFactorSlope · (bX − sliderDefault)
-		// `meanAmpTailFactor` is the scale AT slider default;
-		// `meanAmpTailFactorSlope` is how it changes with the intMod
-		// slider.  Floored at 0 in readParams so we never get a negative
-		// tail-factor; 0 across both knobs disables the contribution.
-		meanAmpTailFactor: 0,
-		meanAmpTailFactorSlope: 0,
-		// Same-party safe-district pull toward the centre.  Models primary-
-		// from-the-centre / "no reason to be too extreme even when safe"
-		// pressure.  Pull grows linearly with how far d_i sits on the OWN
-		// party's side of the median, capped at safeAmpSaturation:
-		//   pullD = +safeAmp_D · min(medianLean − di, safeAmpSaturation)  (di < medianLean)
-		//   pullR = −safeAmp_R · min(di − medianLean, safeAmpSaturation)  (di > medianLean)
-		// safeAmp_X comes from anchoredLinear(intModSafe slider, default,
-		// safeAmp, safeAmpSlope), floored at 0 in readParams.
-		safeAmp: 0,
-		safeAmpSlope: 0,
-		safeAmpSaturation: 20,
+		// Swing bell geometry (shared by mean / var / tail effects).
+		swingOffset: 0,           // K — bell peak distance from medianLean
+		swingBreadth: 6,          // bell half-decay distance (% points)
+		swingBreadthSlope: 0,     // d(breadth) / d(intModSwing slider)
+		// Opp ramp saturation: stretch distance (% points) at which the
+		// linear "deeper-into-opp-territory" effect plateaus.
+		oppSaturation: 20,
+		// Per-slider amps and slopes.  Defaults below match the prior
+		// behaviour (swing has all three; opp has tail only; safe is off).
+		safe: {
+			meanAmp: 0, meanAmpSlope: 0,
+			varAmp:  0, varAmpSlope:  0,
+			tailAmp: 0, tailAmpSlope: 0,
+		},
+		swing: {
+			meanAmp: 6, meanAmpSlope: 9,
+			varAmp:  6, varAmpSlope:  9,
+			tailAmp: 0, tailAmpSlope: 0,
+		},
+		opp: {
+			meanAmp: 0, meanAmpSlope: 0,
+			varAmp:  0, varAmpSlope:  0,
+			tailAmp: 6, tailAmpSlope: 6,
+		},
 	},
 
 	// Always-on Laplace tail on candidate ideology, separate from intMod.

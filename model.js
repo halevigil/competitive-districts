@@ -567,63 +567,31 @@ function simulateOne(
 		sigmaR = p.sigmaR;
 	const wMod = p.wMod,
 		sigmaN = p.sigmaN;
-	// Per-party intentional-moderation amplitudes — already anchored at the
-	// slider default by `readParams`, so the inner loop doesn't multiply them
-	// by the slider value or any extra ratio factor.
-	const meanAmpD = p.meanAmpD,
-		meanAmpR = p.meanAmpR;
-	const varAmpD = p.varAmpD,
-		varAmpR = p.varAmpR;
-	// K and L offsets are anchored at the MEDIAN DISTRICT'S lean, not at 0.
-	// The pool is sorted, so its midpoint is the median.  D moderates most
-	// at (median + K), R at (median - K); same shift for the σ-bump L.
-	// For symmetric pools the median ≈ 0 and this collapses to the old
-	// configured-K-from-zero behaviour.
+	// Intentional moderation: three sliders per party (safe / swing / opp),
+	// each with three effects (mean / var / tail).  Per-party effective amps
+	// are pre-anchored in readParams and arrive as scalars.
+	const safe = p.safe;   // { meanD, meanR, varD, varR, tailD, tailR }
+	const swing = p.swing; // { ...same shape, plus swingOffset and per-party breadth }
+	const opp = p.opp;     // { ...same shape, plus saturation }
+	// Median lean shifts the SWING bell centre and the OPP stretch origin so
+	// the geometry "moves with" the chamber — see analyticDistrictPool.
 	const medianLean = d[(N - 1) >> 1];
-	const modOffsetD = medianLean + p.modOffsetD;
-	const modOffsetR = medianLean + p.modOffsetR;
-	const varOffsetD = medianLean + p.varOffsetD;
-	const varOffsetR = medianLean + p.varOffsetR;
-	// Per-party squared breadths so each party's bell width scales with its
-	// own intMod slider.
-	const meanBreadthDSq = p.meanBreadthD * p.meanBreadthD;
-	const meanBreadthRSq = p.meanBreadthR * p.meanBreadthR;
-	const varBreadthDSq  = p.varBreadthD  * p.varBreadthD;
-	const varBreadthRSq  = p.varBreadthR  * p.varBreadthR;
+	// Swing bell offsets: D moderates hardest at medianLean + swingOffset
+	// (the R-leaning side); R at medianLean - swingOffset.
+	const swingOffsetD = medianLean + swing.offset;
+	const swingOffsetR = medianLean - swing.offset;
+	const swingBreadthDSq = swing.breadthD * swing.breadthD;
+	const swingBreadthRSq = swing.breadthR * swing.breadthR;
+	// Opp saturation: stretch distance (% points) at which the linear ramp
+	// plateaus.  Reciprocal pre-computed so the inner loop multiplies by
+	// invSat instead of dividing.
+	const oppSaturation = opp.saturation || 1;
+	const invOppSat = 1 / oppSaturation;
+	const tailBase = p.candidateTailScale;
 	const noiseType = p.noiseType;
 	const batesN = p.batesN;
 	const tukeyLambda = p.tukeyLambda;
-	// Candidate-ideology tail: always-on Laplace scale plus a per-party
-	// stretch-territory growth term.  The growth is 0 at d_i = medianLean
-	// and grows linearly with how far d_i sits on the OTHER party's side
-	// of the median — i.e. D candidates fan out in R-leaning districts,
-	// R candidates fan out in D-leaning districts.  Slope is configured
-	// per party (tied to its intMod slider in readParams).
-	const tailBase = p.candidateTailScale;
-	const tailGrowthD = p.tailGrowthD;
-	const tailGrowthR = p.tailGrowthR;
-	// Cap on the stretch distance fed into the tail-growth term — once
-	// d_i is `tailGrowthSaturation` % points past the median on the other
-	// party's side, growth stops.  Infinity disables the cap.
-	const tailGrowthSaturation = p.tailGrowthSaturation ?? Infinity;
-	// Same-party safe-district mean pull: in OWN-side safe territory,
-	// pull candidates toward the centre by safeAmp · own-side-stretch,
-	// capped at safeAmpSaturation.  Each party adds the pull on its own
-	// side (D in di < medianLean, R in di > medianLean).
-	const safeAmpD = p.safeAmpD ?? 0;
-	const safeAmpR = p.safeAmpR ?? 0;
-	const safeAmpSaturation = p.safeAmpSaturation ?? Infinity;
-	// Scales how much meanAmp's bell adds to the tail.  Per-party (driven by
-	// each side's intMod slider via anchoredLinear in readParams).  0 = mean
-	// pull doesn't touch the tail; 1 = one unit of Laplace scale per unit of
-	// meanAmp at the bell's peak.
-	const meanAmpTailFactorD = p.meanAmpTailFactorD ?? 0;
-	const meanAmpTailFactorR = p.meanAmpTailFactorR ?? 0;
-	// Intentional moderation anchors on d_i + waveWeight·v.  waveWeight = 0
-	// recovers the pure-district-lean anchor (intMod ignores the wave);
-	// waveWeight = 1 makes intMod fully wave-adjusted; values in between
-	// blend.  v already enters the z-score directly for who-wins-each-
-	// district; this knob is just about WHERE candidates moderate.
+	// Intentional moderation anchors on d_i + waveWeight·v (blend).
 	const waveWeight = p.waveWeight ?? 0;
 	const vShift = waveWeight * v;
 	const vIsZero = v === 0;
@@ -653,45 +621,31 @@ function simulateOne(
 	const mgNBins = marginTracker ? marginTracker.nBins : 0;
 	let mismatches = 0; // R in D-lean district, or D in R-lean district (di ≠ 0)
 	if (vIsZero) {
-		// Fast path — only 2 mean bells per district instead of 4.
+		// Fast path — no v-shift on the swing bell when v = 0.
 		for (let i = 0; i < N; i++) {
 			const di = d[i];
-			const aD = di - modOffsetD;
-			const aR = di - modOffsetR;
-			const bellD_D = Math.exp(-(aD * aD) / meanBreadthDSq);
-			const bellD_R = Math.exp(-(aR * aR) / meanBreadthRSq);
-			const aVD = di - varOffsetD;
-			const aVR = di - varOffsetR;
-			const bellVar_D = Math.exp(-(aVD * aVD) / varBreadthDSq);
-			const bellVar_R = Math.exp(-(aVR * aVR) / varBreadthRSq);
-			const sigmaD_eff = sigmaD + varAmpD * bellVar_D;
-			const sigmaR_eff = sigmaR + varAmpR * bellVar_R;
-			// Stretch territory grows linearly forever — D's grow tail when
-			// they're in an R-leaning district (di > medianLean), R's grow
-			// tail when they're in a D-leaning district (di < medianLean).
-			// On top of that, meanAmp (the intentional-moderation pull) ALSO
-			// widens the tail at its bell, so wherever the moderation push is
-			// strong the candidates also fan out more — "some try hard, some
-			// don't" heterogeneity at the same locations where the pull happens.
-			const stretchD = di > medianLean
-				? Math.min(di - medianLean, tailGrowthSaturation)
+			// Swing bell (peaks at medianLean ± swingOffset).
+			const aD = di - swingOffsetD;
+			const aR = di - swingOffsetR;
+			const swingD = Math.exp(-(aD * aD) / swingBreadthDSq);
+			const swingR = Math.exp(-(aR * aR) / swingBreadthRSq);
+			// Opp ramp: saturating linear in own-opposite-side stretch.
+			const oppD = di > medianLean
+				? Math.min((di - medianLean) * invOppSat, 1)
 				: 0;
-			const stretchR = di < medianLean
-				? Math.min(medianLean - di, tailGrowthSaturation)
+			const oppR = di < medianLean
+				? Math.min((medianLean - di) * invOppSat, 1)
 				: 0;
-			// Own-side safe stretch: D's safe territory is di < medianLean,
-			// R's is di > medianLean.  Pull toward 0 grows linearly with
-			// own-side distance, capped at safeAmpSaturation.
-			const safeStretchD = di < medianLean
-				? Math.min(medianLean - di, safeAmpSaturation)
-				: 0;
-			const safeStretchR = di > medianLean
-				? Math.min(di - medianLean, safeAmpSaturation)
-				: 0;
-			const tailScaleD = tailBase + tailGrowthD * stretchD + meanAmpTailFactorD * meanAmpD * bellD_D;
-			const tailScaleR = tailBase + tailGrowthR * stretchR + meanAmpTailFactorR * meanAmpR * bellD_R;
-			const cD = meanAmpD * bellD_D + safeAmpD * safeStretchD + muD + sigmaD_eff * randn() + tailScaleD * laplaceSample();
-			const cR = -meanAmpR * bellD_R - safeAmpR * safeStretchR + muR + sigmaR_eff * randn() + tailScaleR * laplaceSample();
+			// Per-party effective moderation contributions: safe (uniform)
+			// + swing (bell) + opp (saturating ramp), one sum per effect.
+			const meanPullD = safe.meanD + swing.meanD * swingD + opp.meanD * oppD;
+			const meanPullR = safe.meanR + swing.meanR * swingR + opp.meanR * oppR;
+			const varBumpD  = safe.varD  + swing.varD  * swingD + opp.varD  * oppD;
+			const varBumpR  = safe.varR  + swing.varR  * swingR + opp.varR  * oppR;
+			const tailBumpD = safe.tailD + swing.tailD * swingD + opp.tailD * oppD;
+			const tailBumpR = safe.tailR + swing.tailR * swingR + opp.tailR * oppR;
+			const cD = muD + meanPullD + (sigmaD + varBumpD) * randn() + (tailBase + tailBumpD) * laplaceSample();
+			const cR = muR - meanPullR + (sigmaR + varBumpR) * randn() + (tailBase + tailBumpR) * laplaceSample();
 			// sigmaN is the σ of the additive election-noise term: a unit-variance
 			// shape (Bates or Tukey) scaled by sigmaN and added to the score.
 			const noise =
@@ -743,45 +697,27 @@ function simulateOne(
 	} else
 		for (let i = 0; i < N; i++) {
 			const di = d[i];
-			// Bell-center "effective district" — d_i + waveWeight·v.  At
-			// waveWeight=0 this is just d_i (intMod ignores the wave); at 1
-			// it's d_i + v (intMod fully wave-adjusted); intermediate values
-			// blend.  Stretch territory below uses the raw d_i — "is this
-			// district really hostile to me" doesn't depend on the wave.
+			// Swing bell anchors on d_i + waveWeight·v.  Opp ramp anchors on
+			// raw d_i (district hostility, not wave-adjusted).
 			const diEff = di + vShift;
-			const aD = diEff - modOffsetD;
-			const aR = diEff - modOffsetR;
-			const bellD_D = Math.exp(-(aD * aD) / meanBreadthDSq);
-			const bellD_R = Math.exp(-(aR * aR) / meanBreadthRSq);
-			// Variance-bump bells use the same wave-blended anchor.
-			const aVD = diEff - varOffsetD;
-			const aVR = diEff - varOffsetR;
-			const bellVar_D = Math.exp(-(aVD * aVD) / varBreadthDSq);
-			const bellVar_R = Math.exp(-(aVR * aVR) / varBreadthRSq);
-			const sigmaD_eff = sigmaD + varAmpD * bellVar_D;
-			const sigmaR_eff = sigmaR + varAmpR * bellVar_R;
-			// Stretch territory grows linearly forever, plus meanAmp adds a
-			// tail bump at the same bell where it pulls the mean.  Anchored
-			// at d_i alone (not d_i + v) — see header comment.
-			const stretchD = di > medianLean
-				? Math.min(di - medianLean, tailGrowthSaturation)
+			const aD = diEff - swingOffsetD;
+			const aR = diEff - swingOffsetR;
+			const swingD = Math.exp(-(aD * aD) / swingBreadthDSq);
+			const swingR = Math.exp(-(aR * aR) / swingBreadthRSq);
+			const oppD = di > medianLean
+				? Math.min((di - medianLean) * invOppSat, 1)
 				: 0;
-			const stretchR = di < medianLean
-				? Math.min(medianLean - di, tailGrowthSaturation)
+			const oppR = di < medianLean
+				? Math.min((medianLean - di) * invOppSat, 1)
 				: 0;
-			// Own-side safe stretch (see fast-path comment).
-			const safeStretchD = di < medianLean
-				? Math.min(medianLean - di, safeAmpSaturation)
-				: 0;
-			const safeStretchR = di > medianLean
-				? Math.min(di - medianLean, safeAmpSaturation)
-				: 0;
-			const tailScaleD = tailBase + tailGrowthD * stretchD + meanAmpTailFactorD * meanAmpD * bellD_D;
-			const tailScaleR = tailBase + tailGrowthR * stretchR + meanAmpTailFactorR * meanAmpR * bellD_R;
-			const cD =
-				meanAmpD * bellD_D + safeAmpD * safeStretchD + muD + sigmaD_eff * randn() + tailScaleD * laplaceSample();
-			const cR =
-				-meanAmpR * bellD_R - safeAmpR * safeStretchR + muR + sigmaR_eff * randn() + tailScaleR * laplaceSample();
+			const meanPullD = safe.meanD + swing.meanD * swingD + opp.meanD * oppD;
+			const meanPullR = safe.meanR + swing.meanR * swingR + opp.meanR * oppR;
+			const varBumpD  = safe.varD  + swing.varD  * swingD + opp.varD  * oppD;
+			const varBumpR  = safe.varR  + swing.varR  * swingR + opp.varR  * oppR;
+			const tailBumpD = safe.tailD + swing.tailD * swingD + opp.tailD * oppD;
+			const tailBumpR = safe.tailR + swing.tailR * swingR + opp.tailR * oppR;
+			const cD = muD + meanPullD + (sigmaD + varBumpD) * randn() + (tailBase + tailBumpD) * laplaceSample();
+			const cR = muR - meanPullR + (sigmaR + varBumpR) * randn() + (tailBase + tailBumpR) * laplaceSample();
 			// sigmaN is the σ of the additive election-noise term (see fast-path
 			// comment above).
 			const noise =
