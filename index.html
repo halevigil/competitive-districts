@@ -4,8 +4,8 @@
 		<meta charset="UTF-8" />
 		<title>Median Ideology Simulator</title>
 		<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-		<script src="config.js?v=39"></script>
-		<script src="model.js?v=39"></script>
+		<script src="config.js?v=40"></script>
+		<script src="model.js?v=40"></script>
 		<style>
 			:root {
 				--bg: #fafafa;
@@ -670,20 +670,22 @@
 				const safeDef  = cfg.sliders.dIntModSafe.value;
 				const swingDef = cfg.sliders.dIntModSwing.value;
 				const oppDef   = cfg.sliders.dIntModOpp.value;
-				// Helper: each slider-block has { meanAmp, meanAmpSlope,
-				// varAmp, varAmpSlope, tailAmp, tailAmpSlope }.  Resolve to
-				// effective per-party amps via anchoredLinear + floor at 0.
+				// Helper: each slider-block has { mean, meanSlope, var,
+				// varSlope, tail, tailSlope } — three quantities added
+				// directly to the candidate-ideology mean / σ / Laplace-tail
+				// scale respectively (no separate amplitude factor).  Resolve
+				// to effective per-party values via anchoredLinear + floor at 0.
 				const resolveBlock = (block, bD, bR, def) => {
 					const bk = block || {};
 					const a = (b, val, slope) =>
 						Math.max(0, anchoredLinear(b, def, val ?? 0, slope ?? 0));
 					return {
-						meanD: a(bD, bk.meanAmp, bk.meanAmpSlope),
-						meanR: a(bR, bk.meanAmp, bk.meanAmpSlope),
-						varD:  a(bD, bk.varAmp,  bk.varAmpSlope),
-						varR:  a(bR, bk.varAmp,  bk.varAmpSlope),
-						tailD: a(bD, bk.tailAmp, bk.tailAmpSlope),
-						tailR: a(bR, bk.tailAmp, bk.tailAmpSlope),
+						meanD: a(bD, bk.mean, bk.meanSlope),
+						meanR: a(bR, bk.mean, bk.meanSlope),
+						varD:  a(bD, bk.var,  bk.varSlope),
+						varR:  a(bR, bk.var,  bk.varSlope),
+						tailD: a(bD, bk.tail, bk.tailSlope),
+						tailR: a(bR, bk.tail, bk.tailSlope),
 					};
 				};
 				return {
@@ -1319,20 +1321,21 @@
 				}
 
 				// Each intMod slider auto-derives its (min, max).  Min is the
-				// max zero-crossing across the slider's three amps (mean /
-				// var / tail) — i.e. the largest slider value at which any
-				// amp would go negative.  Skip an amp's zero-crossing if
-				// its slope is ≤ 0.  Fall back to 0 if no amp constrains.
+				// max zero-crossing across the slider-block's three added
+				// quantities (mean / var / tail) — i.e. the largest slider
+				// value at which any of them would go negative.  Skip a
+				// quantity's zero-crossing if its slope is ≤ 0.  Fall back
+				// to 0 if nothing constrains.
 				const im_ = window.CONFIG.intentionalMod;
 				const blockZeros = (block, def) => {
 					const out = [];
 					if (!block) return out;
-					for (const [amp, slope] of [
-						[block.meanAmp, block.meanAmpSlope],
-						[block.varAmp,  block.varAmpSlope],
-						[block.tailAmp, block.tailAmpSlope],
+					for (const [val, slope] of [
+						[block.mean, block.meanSlope],
+						[block.var,  block.varSlope],
+						[block.tail, block.tailSlope],
 					]) {
-						if ((slope ?? 0) > 0) out.push(def - (amp ?? 0) / slope);
+						if ((slope ?? 0) > 0) out.push(def - (val ?? 0) / slope);
 					}
 					return out;
 				};

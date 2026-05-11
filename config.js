@@ -34,15 +34,16 @@ window.CONFIG = {
 
 		// Intentional moderation is split into three sliders per party,
 		// one per district type.  Labels use district COLOUR (blue / red);
-		// the underlying mechanics are still per-party (same-party-safe vs
+		// the underlying mechanics are per-party (same-party-safe vs
 		// opposite-party-safe) so the pin pairs stay by party.
-		//   intModSafe:  same-party-safe pull (drives safeAmp).
-		//                For D this is "in blue districts", for R "in red".
-		//   intModSwing: swing-zone moderation (drives meanAmp, varAmp,
-		//                bell widths).
-		//   intModOpp:   opposite-party-safe tail growth (drives
-		//                tailGrowth).  For D this is "in red districts",
-		//                for R "in blue".
+		//   intModSafe:  same-party-safe moderation (uniform shape across
+		//                all districts).  For D this is "in blue districts",
+		//                for R "in red".
+		//   intModSwing: swing-zone moderation (bell shape around the
+		//                median).
+		//   intModOpp:   opposite-party-safe moderation (saturating ramp
+		//                into the other party's territory).  For D this
+		//                is "in red districts", for R "in blue".
 		intModSafe: { max: 3, step: 0.05, value: 1 },
 		intModSwing: { max: 3, step: 0.05, value: 1 },
 		intModOpp: { max: 3, step: 0.05, value: 1 },
@@ -87,11 +88,11 @@ window.CONFIG = {
 	// ---------------- CANDIDATE BASE DISTRIBUTION ------------------------------
 	// Before any moderation, candidate ideology is N(±magnitude, sigma)
 	// (D at −magnitude, R at +magnitude).  The "moderate the mean" effect
-	// is now expressed entirely through intentionalMod.safe.meanAmp — at
+	// is now expressed entirely through intentionalMod.safe.mean — at
 	// slider min it's 0 (candidates fully extreme), and pulling the safe
 	// slider up moves the effective mean toward 0.  Sigma is what remains
-	// as a base "spread" before intentionalMod.{safe,swing,opp}.varAmp
-	// bumps it.
+	// as a base "spread" before intentionalMod.{safe,swing,opp}.var bumps
+	// it.
 	candidateBase: {
 		magnitude: 100,
 		sigma: 6,
@@ -148,11 +149,14 @@ window.CONFIG = {
 
 	// ---------------- INTENTIONAL MODERATION -----------------------------------
 	// Three sliders per party (safe / swing / opp); each one symmetrically
-	// produces all three moderation effects:
-	//   - meanAmp:  pulls cD up (toward 0) and cR down (toward 0).
-	//   - varAmp:   adds to the Gaussian-core σ of cD / cR.
-	//   - tailAmp:  adds to the Laplace-tail scale of cD / cR.
-	// Each effect is a per-party amp times a SHAPE function in d_i:
+	// produces all three moderation effects.  Inside each slider-block
+	// the three quantities are added DIRECTLY (no separate amplitude
+	// factor — the slider drives them straight via anchoredLinear):
+	//   - mean: added to the candidate-ideology mean (pulls cD up toward
+	//     0, cR down toward 0).
+	//   - var:  added to the Gaussian-core σ of cD / cR.
+	//   - tail: added to the Laplace-tail scale of cD / cR.
+	// Each one is multiplied by the slider's SHAPE function in d_i:
 	//   - safe:  shape ≡ 1 (uniform across all districts).
 	//   - swing: shape = bell(d_i − swingOffsetX, swingBreadth),
 	//            a Gaussian bell at medianLean ± swingOffset.  swingOffset = 0
@@ -177,31 +181,40 @@ window.CONFIG = {
 		// Opp ramp saturation: stretch distance (% points) at which the
 		// linear "deeper-into-opp-territory" effect plateaus.
 		oppSaturation: 20,
-		// Per-slider amps and slopes.  Defaults below match the prior
-		// behaviour (swing has all three; opp has tail only; safe is off).
+		// Per-slider added quantities and their per-slider-unit slopes.
+		// Inside a slider-block:
+		//   mean / meanSlope — added directly to the candidate-ideology
+		//     mean (pulls cD up toward 0, cR down toward 0).
+		//   var  / varSlope  — added directly to the Gaussian-core σ of
+		//     cD / cR (it's a σ-add, not a variance-add, despite the name).
+		//   tail / tailSlope — added directly to the Laplace-tail scale
+		//     of cD / cR.
+		// The slider-block's shape function multiplies each of these at
+		// the district, so e.g. `swing.mean * bell(d_i)` is the swing
+		// slider's per-district contribution to the mean pull.
 		safe: {
-			meanAmp: 0,
-			meanAmpSlope: 1,
-			varAmp: 0,
-			varAmpSlope: 1,
-			tailAmp: 0,
-			tailAmpSlope: 1,
+			mean: 0,
+			meanSlope: 2,
+			var: 0,
+			varSlope: 2,
+			tail: 1,
+			tailSlope: 1,
 		},
 		swing: {
-			meanAmp: 6,
-			meanAmpSlope: 9,
-			varAmp: 6,
-			varAmpSlope: 9,
-			tailAmp: 0,
-			tailAmpSlope: 0,
+			mean: 6,
+			meanSlope: 9,
+			var: 6,
+			varSlope: 9,
+			tail: 0,
+			tailSlope: 0,
 		},
 		opp: {
-			meanAmp: 0,
-			meanAmpSlope: 0,
-			varAmp: 0,
-			varAmpSlope: 0,
-			tailAmp: 6,
-			tailAmpSlope: 6,
+			mean: 2,
+			meanSlope: 2,
+			var: 0,
+			varSlope: 0,
+			tail: 6,
+			tailSlope: 6,
 		},
 	},
 
@@ -252,15 +265,12 @@ window.CONFIG = {
 	// Named bundles of slider values — rendered as buttons under the Reset
 	// button.  Clicking applies all listed values, leaves any unlisted slider
 	// at its current setting, and re-runs the simulator.
-	// Preset slider values are MULTIPLIERS / direct slider values, not the
-	// underlying model amplitudes — they need to lie in each slider's
-	// [min, max] range or the browser will clamp them silently.  In
-	// particular, dIntMod / rIntMod max out at 1 by default, so values
-	// above 1 just snap to 1.
-	// Preset slider values must lie in each slider's auto-derived
-	// [min, max] range — for dIntMod / rIntMod that's
-	// [intMod.value − meanAmp/meanAmpSlope, intMod.value + intMod.max].
-	// Asymmetric values automatically uncheck the relevant pin checkbox.
+	// Preset values are raw slider positions; they need to lie in each
+	// slider's auto-derived [min, max] range or the browser will clamp
+	// them silently.  Each intMod slider's min is the largest zero-
+	// crossing across its three blocks (mean / var / tail); max is
+	// `default + slider.max`.  Asymmetric values automatically uncheck
+	// the relevant pin checkbox.
 	presets: {
 		"Approximate 2024 Election": {
 			v: 1.5, // R+1.5% national popular-vote margin

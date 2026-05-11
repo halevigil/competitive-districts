@@ -502,10 +502,9 @@ function anchoredLinear(currentValue, defaultValue, defaultMu, slope) {
 //                        also force the per-party amplitudes to 0.
 //   mode === 'offsetK':  D mean peaks at +K, R at −K;
 //                        D variance peaks at +L, R at −L.
-// (Per-party amplitudes are computed in readParams via anchoredLinear and
-// passed to simulateOne as meanAmpD / meanAmpR / varAmpD / varAmpR — see
-// the candidateMean coupling for the same anchored-default pattern.
-// `varAmp*` is added directly to σ (one standard deviation), not to σ².
+// (Per-party added quantities are computed in readParams via anchoredLinear
+// and passed to simulateOne in safe / swing / opp blocks.  The "var" field
+// is added directly to σ — one standard deviation — not to σ².
 function intentionalModOffsets(mode, K, L) {
 	const useOffset = mode === "offsetK";
 	return {
