@@ -4,8 +4,8 @@
 		<meta charset="UTF-8" />
 		<title>Median Ideology Simulator</title>
 		<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-		<script src="config.js?v=18"></script>
-		<script src="model.js?v=18"></script>
+		<script src="config.js?v=19"></script>
+		<script src="model.js?v=19"></script>
 		<style>
 			:root {
 				--bg: #fafafa;
@@ -681,7 +681,7 @@
 					// the configured `meanAmp` / `varAmp`; the slope is the
 					// configured `meanAmpSlope` / `varAmpSlope`.  Slider min
 					// and max are auto-derived in init() so amp ≥ 0 across
-					// the whole range.
+					// the whole range.  Same anchoring for the bell breadths.
 					meanAmpD: im.mode === "offsetK"
 						? anchoredLinear(bD, cfg.sliders.dIntMod.value, im.meanAmp, im.meanAmpSlope)
 						: 0,
@@ -694,13 +694,18 @@
 					varAmpR: im.mode === "offsetK"
 						? anchoredLinear(bR, cfg.sliders.rIntMod.value, im.varAmp, im.varAmpSlope)
 						: 0,
-					...intentionalModOffsets(
-						im.mode,
-						im.K,
-						im.L,
-						im.meanBreadth,
-						im.varBreadth
-					),
+					// Per-party bell breadths; floor at 0.5 so the squared
+					// denominator never underflows to 0 even if the slope
+					// drives breadth below 1.
+					meanBreadthD: Math.max(0.5,
+						anchoredLinear(bD, cfg.sliders.dIntMod.value, im.meanBreadth, im.meanBreadthSlope ?? 0)),
+					meanBreadthR: Math.max(0.5,
+						anchoredLinear(bR, cfg.sliders.rIntMod.value, im.meanBreadth, im.meanBreadthSlope ?? 0)),
+					varBreadthD: Math.max(0.5,
+						anchoredLinear(bD, cfg.sliders.dIntMod.value, im.varBreadth, im.varBreadthSlope ?? 0)),
+					varBreadthR: Math.max(0.5,
+						anchoredLinear(bR, cfg.sliders.rIntMod.value, im.varBreadth, im.varBreadthSlope ?? 0)),
+					...intentionalModOffsets(im.mode, im.K, im.L),
 				};
 			}
 

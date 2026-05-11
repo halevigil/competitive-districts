@@ -198,8 +198,14 @@ window.CONFIG = {
 		// with default at 1 (midpoint), amp range [0, 6].
 		meanAmpSlope: 3, // d(meanAmp) / d(slider)
 		varAmpSlope: 3, // d(varAmp)  / d(slider)
-		meanBreadth: 9, // mean-bell half-decay distance in % points
-		varBreadth: 6, // σ-bell half-decay distance in % points
+		// Bell half-decay distances at slider default.  meanBreadthSlope /
+		// varBreadthSlope let the bells widen as the intMod slider goes up
+		// (parties moderate more aggressively AND across a wider swing
+		// zone).  Set the slope to 0 to keep breadth fixed.
+		meanBreadth: 9, // mean-bell half-decay distance at slider default
+		varBreadth: 6, // σ-bell half-decay distance at slider default
+		meanBreadthSlope: 3, // d(meanBreadth) / d(slider)
+		varBreadthSlope: 3, // d(varBreadth)  / d(slider)
 	},
 
 	// ---------------- HISTOGRAMS -----------------------------------------------

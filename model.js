@@ -494,7 +494,7 @@ function anchoredLinear(currentValue, defaultValue, defaultMu, slope) {
 // passed to simulateOne as meanAmpD / meanAmpR / varAmpD / varAmpR — see
 // the candidateMean coupling for the same anchored-default pattern.
 // `varAmp*` is added directly to σ (one standard deviation), not to σ².
-function intentionalModOffsets(mode, K, L, meanBreadth, varBreadth) {
+function intentionalModOffsets(mode, K, L) {
 	const useOffset = mode === "offsetK";
 	return {
 		mode,
@@ -502,8 +502,6 @@ function intentionalModOffsets(mode, K, L, meanBreadth, varBreadth) {
 		modOffsetR: useOffset ? -K : 0,
 		varOffsetD: useOffset ? +L : 0,
 		varOffsetR: useOffset ? -L : 0,
-		meanBreadth,
-		varBreadth,
 	};
 }
 
@@ -574,8 +572,12 @@ function simulateOne(
 	const modOffsetR = medianLean + p.modOffsetR;
 	const varOffsetD = medianLean + p.varOffsetD;
 	const varOffsetR = medianLean + p.varOffsetR;
-	const meanBreadthSq = p.meanBreadth * p.meanBreadth;
-	const varBreadthSq = p.varBreadth * p.varBreadth;
+	// Per-party squared breadths so each party's bell width scales with its
+	// own intMod slider.
+	const meanBreadthDSq = p.meanBreadthD * p.meanBreadthD;
+	const meanBreadthRSq = p.meanBreadthR * p.meanBreadthR;
+	const varBreadthDSq  = p.varBreadthD  * p.varBreadthD;
+	const varBreadthRSq  = p.varBreadthR  * p.varBreadthR;
 	const noiseType = p.noiseType;
 	const batesN = p.batesN;
 	const tukeyLambda = p.tukeyLambda;
@@ -616,12 +618,12 @@ function simulateOne(
 			const di = d[i];
 			const aD = di - modOffsetD;
 			const aR = di - modOffsetR;
-			const bellD_D = Math.exp(-(aD * aD) / meanBreadthSq);
-			const bellD_R = Math.exp(-(aR * aR) / meanBreadthSq);
+			const bellD_D = Math.exp(-(aD * aD) / meanBreadthDSq);
+			const bellD_R = Math.exp(-(aR * aR) / meanBreadthRSq);
 			const aVD = di - varOffsetD;
 			const aVR = di - varOffsetR;
-			const bellVar_D = Math.exp(-(aVD * aVD) / varBreadthSq);
-			const bellVar_R = Math.exp(-(aVR * aVR) / varBreadthSq);
+			const bellVar_D = Math.exp(-(aVD * aVD) / varBreadthDSq);
+			const bellVar_R = Math.exp(-(aVR * aVR) / varBreadthRSq);
 			const sigmaD_eff = sigmaD + varAmpD * bellVar_D;
 			const sigmaR_eff = sigmaR + varAmpR * bellVar_R;
 			const cD = meanScaleD * bellD_D + muD + sigmaD_eff * randn();
@@ -681,15 +683,15 @@ function simulateOne(
 			const aR = di - modOffsetR;
 			const aDV = di + v - modOffsetD;
 			const aRV = di + v - modOffsetR;
-			const bellD_D = Math.exp(-(aD * aD) / meanBreadthSq);
-			const bellD_R = Math.exp(-(aR * aR) / meanBreadthSq);
-			const bellDV_D = Math.exp(-(aDV * aDV) / meanBreadthSq);
-			const bellDV_R = Math.exp(-(aRV * aRV) / meanBreadthSq);
+			const bellD_D = Math.exp(-(aD * aD) / meanBreadthDSq);
+			const bellD_R = Math.exp(-(aR * aR) / meanBreadthRSq);
+			const bellDV_D = Math.exp(-(aDV * aDV) / meanBreadthDSq);
+			const bellDV_R = Math.exp(-(aRV * aRV) / meanBreadthRSq);
 			// Variance-bump bells.
 			const aVD = di - varOffsetD;
 			const aVR = di - varOffsetR;
-			const bellVar_D = Math.exp(-(aVD * aVD) / varBreadthSq);
-			const bellVar_R = Math.exp(-(aVR * aVR) / varBreadthSq);
+			const bellVar_D = Math.exp(-(aVD * aVD) / varBreadthDSq);
+			const bellVar_R = Math.exp(-(aVR * aVR) / varBreadthRSq);
 			const sigmaD_eff = sigmaD + varAmpD * bellVar_D;
 			const sigmaR_eff = sigmaR + varAmpR * bellVar_R;
 			const cD =
