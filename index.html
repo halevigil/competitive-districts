@@ -4,8 +4,8 @@
 		<meta charset="UTF-8" />
 		<title>Median Ideology Simulator</title>
 		<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-		<script src="config.js?v=34"></script>
-		<script src="model.js?v=34"></script>
+		<script src="config.js?v=35"></script>
+		<script src="model.js?v=35"></script>
 		<style>
 			:root {
 				--bg: #fafafa;
@@ -435,54 +435,26 @@
 
 				<h3>Candidates</h3>
 				<div class="row">
-					<label>Democratic Candidate Ambient Moderation</label>
-					<input type="range" id="dAmbMod" />
-					<span class="hint"
-						>Higher → Democratic candidates tend to be more moderate
-						on average, and they vary more from district to
-						district.</span
-					>
-				</div>
-				<div class="row">
-					<label>Republican Candidate Ambient Moderation</label>
-					<input type="range" id="rAmbMod" />
-					<span class="hint"
-						>Higher → Republican candidates tend to be more moderate
-						on average, and they vary more from district to
-						district.</span
-					>
-				</div>
-				<div class="pin-row">
-					<label
-						><input
-							type="checkbox"
-							id="dAmbMod_rAmbMod_pin"
-							checked
-						/>
-						Move both sliders together</label
-					>
-				</div>
-				<div class="row">
-					<label>Democratic Moderation in Same-Party Safe Districts</label>
-					<input type="range" id="dIntModSafe" />
+					<label>Democratic Moderation in Blue Districts</label>
+					<input type="range" id="dIntModBlue" />
 					<span class="hint"
 						>Higher → Democrats moderate more even in safely-D
-						districts (primary-from-the-centre pressure).</span
+						(blue) districts (primary-from-the-centre pressure).</span
 					>
 				</div>
 				<div class="row">
-					<label>Republican Moderation in Same-Party Safe Districts</label>
-					<input type="range" id="rIntModSafe" />
+					<label>Republican Moderation in Blue Districts</label>
+					<input type="range" id="rIntModBlue" />
 					<span class="hint"
-						>Higher → Republicans moderate more even in safely-R
-						districts.</span
+						>Higher → wider candidate-ideology tail when Republicans
+						run in blue districts.</span
 					>
 				</div>
 				<div class="pin-row">
 					<label
 						><input
 							type="checkbox"
-							id="dIntModSafe_rIntModSafe_pin"
+							id="dIntModBlue_rIntModBlue_pin"
 							checked
 						/>
 						Move both sliders together</label
@@ -515,26 +487,26 @@
 					>
 				</div>
 				<div class="row">
-					<label>Democratic Moderation in Opposite-Party Safe Districts</label>
-					<input type="range" id="dIntModOpp" />
+					<label>Democratic Moderation in Red Districts</label>
+					<input type="range" id="dIntModRed" />
 					<span class="hint"
 						>Higher → wider candidate-ideology tail when Democrats
-						run in R-leaning districts (some try hard, some don't).</span
+						run in red districts (some try hard, some don't).</span
 					>
 				</div>
 				<div class="row">
-					<label>Republican Moderation in Opposite-Party Safe Districts</label>
-					<input type="range" id="rIntModOpp" />
+					<label>Republican Moderation in Red Districts</label>
+					<input type="range" id="rIntModRed" />
 					<span class="hint"
-						>Higher → wider candidate-ideology tail when Republicans
-						run in D-leaning districts.</span
+						>Higher → Republicans moderate more even in safely-R
+						(red) districts.</span
 					>
 				</div>
 				<div class="pin-row">
 					<label
 						><input
 							type="checkbox"
-							id="dIntModOpp_rIntModOpp_pin"
+							id="dIntModRed_rIntModRed_pin"
 							checked
 						/>
 						Move both sliders together</label
@@ -656,14 +628,12 @@
 				"v",
 				"rGerry",
 				"dGerry",
-				"dAmbMod",
-				"rAmbMod",
-				"dIntModSafe",
-				"rIntModSafe",
+				"dIntModBlue",
+				"rIntModBlue",
 				"dIntModSwing",
 				"rIntModSwing",
-				"dIntModOpp",
-				"rIntModOpp",
+				"dIntModRed",
+				"rIntModRed",
 				"qualImp",
 				"sigmaN",
 			];
@@ -673,10 +643,9 @@
 			// either slider snaps the other to the same value.
 			const pinnedPairs = [
 				{ d: "dGerry",  r: "rGerry",  pin: "dGerry_rGerry_pin"  },
-				{ d: "dAmbMod", r: "rAmbMod", pin: "dAmbMod_rAmbMod_pin" },
-				{ d: "dIntModSafe",  r: "rIntModSafe",  pin: "dIntModSafe_rIntModSafe_pin"   },
+				{ d: "dIntModBlue",  r: "rIntModBlue",  pin: "dIntModBlue_rIntModBlue_pin"   },
 				{ d: "dIntModSwing", r: "rIntModSwing", pin: "dIntModSwing_rIntModSwing_pin" },
-				{ d: "dIntModOpp",   r: "rIntModOpp",   pin: "dIntModOpp_rIntModOpp_pin"     },
+				{ d: "dIntModRed",   r: "rIntModRed",   pin: "dIntModRed_rIntModRed_pin"     },
 			];
 
 			function readParams() {
@@ -689,23 +658,24 @@
 					return parseFloat(document.getElementById(id).value);
 				};
 				const cfg = window.CONFIG;
-				const sD = num("dAmbMod");
-				const sR = num("rAmbMod");
-				const bDSafe = num("dIntModSafe"); // own-side safe-district mean pull
-				const bRSafe = num("rIntModSafe");
-				const bDS = num("dIntModSwing"); // pulls candidates toward median in swing
-				const bRS = num("rIntModSwing");
-				const bDO = num("dIntModOpp");   // widens tail in opp-party territory
-				const bRO = num("rIntModOpp");
+				// District-colour sliders.  D in blue = D's own-safe pull;
+				// R in blue = R's opp-tail growth.  D in red = D's opp-tail
+				// growth; R in red = R's own-safe pull.
+				const bDBlue  = num("dIntModBlue");
+				const bRBlue  = num("rIntModBlue");
+				const bDS     = num("dIntModSwing");
+				const bRS     = num("rIntModSwing");
+				const bDRed   = num("dIntModRed");
+				const bRRed   = num("rIntModRed");
 				const cmD = cfg.candidateMean.D,
 					cmR = cfg.candidateMean.R;
 				const im = cfg.intentionalMod;
-				const safeDefD  = cfg.sliders.dIntModSafe.value;
-				const safeDefR  = cfg.sliders.rIntModSafe.value;
+				const blueDefD  = cfg.sliders.dIntModBlue.value;
+				const blueDefR  = cfg.sliders.rIntModBlue.value;
 				const swingDefD = cfg.sliders.dIntModSwing.value;
 				const swingDefR = cfg.sliders.rIntModSwing.value;
-				const oppDefD   = cfg.sliders.dIntModOpp.value;
-				const oppDefR   = cfg.sliders.rIntModOpp.value;
+				const redDefD   = cfg.sliders.dIntModRed.value;
+				const redDefR   = cfg.sliders.rIntModRed.value;
 				return {
 					m: CONST.m,
 					nsim: CONST.nsim,
@@ -730,20 +700,10 @@
 					dGerry: num("dGerry"),
 					base: cfg.districtBase,
 					gerry: cfg.districtGerry,
-					muD: anchoredLinear(
-						sD,
-						cfg.sliders.dAmbMod.value,
-						cmD.defaultMu,
-						cmD.slope
-					),
-					sigmaD: sD,
-					muR: anchoredLinear(
-						sR,
-						cfg.sliders.rAmbMod.value,
-						cmR.defaultMu,
-						cmR.slope
-					),
-					sigmaR: sR,
+					muD: cmD.mu,
+					sigmaD: cmD.sigma,
+					muR: cmR.mu,
+					sigmaR: cmR.sigma,
 					wMod: num("qualImp"),
 					// Swing-zone amps (mean pull + variance bump) and their
 					// bell widths are all driven by the SWING slider — wherever
@@ -770,19 +730,19 @@
 						anchoredLinear(bDS, swingDefD, im.varBreadth, im.varBreadthSlope ?? 0)),
 					varBreadthR: Math.max(0.5,
 						anchoredLinear(bRS, swingDefR, im.varBreadth, im.varBreadthSlope ?? 0)),
-					// Opposite-party tail growth: driven by the OPP slider.
-					// Floored at 0 near its amp-0 min.
+					// D candidates in red districts ⇒ D's opp-tail growth.
+					// R candidates in blue districts ⇒ R's opp-tail growth.
 					tailGrowthD: Math.max(0,
-						anchoredLinear(bDO, oppDefD, im.tailGrowth ?? 0, im.tailGrowthSlope ?? 0)),
+						anchoredLinear(bDRed, redDefD, im.tailGrowth ?? 0, im.tailGrowthSlope ?? 0)),
 					tailGrowthR: Math.max(0,
-						anchoredLinear(bRO, oppDefR, im.tailGrowth ?? 0, im.tailGrowthSlope ?? 0)),
+						anchoredLinear(bRBlue, blueDefR, im.tailGrowth ?? 0, im.tailGrowthSlope ?? 0)),
 					tailGrowthSaturation: im.tailGrowthSaturation ?? Infinity,
-					// Same-party safe-district mean-pull amp: driven by the
-					// SAFE slider.  Floored at 0 near its amp-0 min.
+					// D in blue districts ⇒ D's own-safe pull.
+					// R in red districts ⇒ R's own-safe pull.
 					safeAmpD: Math.max(0,
-						anchoredLinear(bDSafe, safeDefD, im.safeAmp ?? 0, im.safeAmpSlope ?? 0)),
+						anchoredLinear(bDBlue, blueDefD, im.safeAmp ?? 0, im.safeAmpSlope ?? 0)),
 					safeAmpR: Math.max(0,
-						anchoredLinear(bRSafe, safeDefR, im.safeAmp ?? 0, im.safeAmpSlope ?? 0)),
+						anchoredLinear(bRRed, redDefR, im.safeAmp ?? 0, im.safeAmpSlope ?? 0)),
 					safeAmpSaturation: im.safeAmpSaturation ?? Infinity,
 					// Per-party meanAmp-tail factor uses the SWING slider since
 					// it scales the meanAmp's contribution to the tail at its
@@ -1363,10 +1323,9 @@
 				// override one side without affecting the other.
 				const sharedPairs = {
 					gerry: ["rGerry", "dGerry"],
-					ambMod: ["rAmbMod", "dAmbMod"],
-					intModSafe:  ["rIntModSafe",  "dIntModSafe"],
+					intModBlue:  ["rIntModBlue",  "dIntModBlue"],
 					intModSwing: ["rIntModSwing", "dIntModSwing"],
-					intModOpp:   ["rIntModOpp",   "dIntModOpp"],
+					intModRed:   ["rIntModRed",   "dIntModRed"],
 				};
 				for (const [shared, ids] of Object.entries(sharedPairs)) {
 					const block = window.CONFIG.sliders[shared];
@@ -1404,24 +1363,22 @@
 						im_.varAmpSlope  > 0 ? swingDef - im_.varAmp  / im_.varAmpSlope  : -Infinity,
 					]
 				);
-				const oppDef = window.CONFIG.sliders.dIntModOpp.value;
-				setSliderRange(
-					["dIntModOpp", "rIntModOpp"],
-					[
-						(im_.tailGrowthSlope ?? 0) > 0
-							? oppDef - (im_.tailGrowth ?? 0) / im_.tailGrowthSlope
-							: -Infinity,
-					]
-				);
-				const safeDef = window.CONFIG.sliders.dIntModSafe.value;
-				setSliderRange(
-					["dIntModSafe", "rIntModSafe"],
-					[
-						(im_.safeAmpSlope ?? 0) > 0
-							? safeDef - (im_.safeAmp ?? 0) / im_.safeAmpSlope
-							: -Infinity,
-					]
-				);
+				// Each district-colour slider drives DIFFERENT mechanics by
+				// party (D-side: safe pull; R-side: tail growth — or the
+				// reverse for the other colour).  Min must respect both so
+				// neither amp can go negative anywhere in the range.
+				const blueDef = window.CONFIG.sliders.dIntModBlue.value;
+				const redDef  = window.CONFIG.sliders.dIntModRed.value;
+				const colourZeros = (def) => [
+					(im_.safeAmpSlope ?? 0) > 0
+						? def - (im_.safeAmp ?? 0) / im_.safeAmpSlope
+						: -Infinity,
+					(im_.tailGrowthSlope ?? 0) > 0
+						? def - (im_.tailGrowth ?? 0) / im_.tailGrowthSlope
+						: -Infinity,
+				];
+				setSliderRange(["dIntModBlue", "rIntModBlue"], colourZeros(blueDef));
+				setSliderRange(["dIntModRed",  "rIntModRed"],  colourZeros(redDef));
 
 				// Apply slider attributes (min/max/step/default) from CONFIG so the
 				// numbers in config.js are the single source of truth.
