@@ -32,23 +32,20 @@ window.CONFIG = {
 		// `gerry` is shared by both rGerry and dGerry sliders — edit once.
 		gerry: { min: 0, max: 0.49, step: 0.01, value: 0.16 },
 
-		// Per-party moderation by district COLOUR — two pinned pairs:
-		//   intModBlue:  moderation in blue (D-leaning safe) districts.
-		//                D-side drives safeAmp (own-party safe pull).
-		//                R-side drives tailGrowth (opp-party tail widen).
-		//   intModRed:   moderation in red (R-leaning safe) districts.
-		//                D-side drives tailGrowth.
-		//                R-side drives safeAmp.
-		// And one pair for the swing zone:
-		//   intModSwing: pulls candidates toward the median IN SWING
-		//                districts — drives meanAmp, varAmp, and their bell
-		//                widths.
-		// Each slider's UI value sits at `value` by default; slider min is
-		// auto-derived in index.html as the slider value where the relevant
-		// amp = 0.  Shared by both d-side and r-side sliders.
-		intModBlue:  { max: 3, step: 0.05, value: 1 },
+		// Intentional moderation is split into three sliders per party,
+		// one per district type.  Labels use district COLOUR (blue / red);
+		// the underlying mechanics are still per-party (same-party-safe vs
+		// opposite-party-safe) so the pin pairs stay by party.
+		//   intModSafe:  same-party-safe pull (drives safeAmp).
+		//                For D this is "in blue districts", for R "in red".
+		//   intModSwing: swing-zone moderation (drives meanAmp, varAmp,
+		//                bell widths).
+		//   intModOpp:   opposite-party-safe tail growth (drives
+		//                tailGrowth).  For D this is "in red districts",
+		//                for R "in blue".
+		intModSafe:  { max: 3, step: 0.05, value: 1 },
 		intModSwing: { max: 3, step: 0.05, value: 1 },
-		intModRed:   { max: 3, step: 0.05, value: 1 },
+		intModOpp:   { max: 3, step: 0.05, value: 1 },
 
 		// How heavily voters punish ideologically extreme candidates relative
 		// to district partisanship.
@@ -310,15 +307,14 @@ window.CONFIG = {
 			dGerry: 0.15,
 			// Modest D-edge in intentional moderation (Slotkin, Gallego, etc.
 			// ran more aggressively moderate than their R counterparts).
-			// Each party's intMod is split by district COLOUR:
-			//   D in blue (own-safe), D in red (opp tail) — both 2.0
-			//   R in red (own-safe), R in blue (opp tail) — both 0.1
-			dIntModBlue:  2.0,
-			rIntModBlue:  0.1,
+			// Each party's intMod is split into three sliders: same-party
+			// safe pull, swing-zone pull, and opposite-party tail growth.
+			dIntModSafe:  2.0,
+			rIntModSafe:  0.1,
 			dIntModSwing: 2.0,
 			rIntModSwing: 0.1,
-			dIntModRed:   2.0,
-			rIntModRed:   0.1,
+			dIntModOpp:   2.0,
+			rIntModOpp:   0.1,
 			qualImp: 0.3,
 		},
 		// Demo of the gerry → less-extreme-median effect.
@@ -340,12 +336,12 @@ window.CONFIG = {
 			// intentional moderation is OFF.  qualImp at 0 — voters don't
 			// punish extreme candidates.  Isolates the pure
 			// "gerry shrinks majority size" mechanism.
-			dIntModBlue:  0,
-			rIntModBlue:  0,
+			dIntModSafe:  0,
+			rIntModSafe:  0,
 			dIntModSwing: 0,
 			rIntModSwing: 0,
-			dIntModRed:   0,
-			rIntModRed:   0,
+			dIntModOpp:   0,
+			rIntModOpp:   0,
 			qualImp: 0,
 			sigmaN: 5,
 		},
