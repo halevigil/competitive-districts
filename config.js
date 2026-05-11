@@ -190,7 +190,7 @@ window.CONFIG = {
 		mode: "offsetK",
 		K: 0,
 		L: 0,
-		meanAmp: 9, // mean-moderation pull AT slider default
+		meanAmp: 6, // mean-moderation pull AT slider default
 		varAmp: 0, // candidate-σ bump amplitude AT slider default
 		// Slopes are tied to `intMod.max` so the slider's auto-derived "amp = 0"
 		// min sits the same distance below default as the slider max is above.
@@ -204,7 +204,7 @@ window.CONFIG = {
 		// zone).  Set the slope to 0 to keep breadth fixed.
 		meanBreadth: 6, // mean-bell half-decay distance at slider default
 		varBreadth: 6, // σ-bell half-decay distance at slider default
-		meanBreadthSlope: 0, // d(meanBreadth) / d(slider)
+		meanBreadthSlope: 3, // d(meanBreadth) / d(slider)
 		varBreadthSlope: 3, // d(varBreadth)  / d(slider)
 		// Candidate-ideology tail growth in stretch territory.  Adds a
 		// Laplace-distributed component to cD / cR whose scale is 0 at
@@ -213,8 +213,8 @@ window.CONFIG = {
 		// heterogeneity in deep-stretch districts.  Per-party scaling is
 		// driven by each party's intMod slider via anchoredLinear, just
 		// like the other amps.
-		tailGrowth: 0.8, // Laplace-scale growth per % stretch, at slider default
-		tailGrowthSlope: 0.8, // d(tailGrowth) / d(slider)
+		tailGrowth: 0, // Laplace-scale growth per % stretch, at slider default
+		tailGrowthSlope: 0, // d(tailGrowth) / d(slider)
 		// On top of the stretch-territory growth above, meanAmp also widens
 		// the tail at its bell — wherever the moderation pull is strong, the
 		// candidates also fan out more.  Per-party factor follows the same
@@ -224,8 +224,8 @@ window.CONFIG = {
 		// `meanAmpTailFactorSlope` is how it changes with the intMod
 		// slider.  Floored at 0 in readParams so we never get a negative
 		// tail-factor; 0 across both knobs disables the contribution.
-		meanAmpTailFactor: 0,
-		meanAmpTailFactorSlope: 0.1,
+		meanAmpTailFactor: 0.5,
+		meanAmpTailFactorSlope: 0.5,
 	},
 
 	// Always-on Laplace tail on candidate ideology, separate from intMod.
@@ -233,7 +233,7 @@ window.CONFIG = {
 	// Gaussian core, so chambers occasionally pull a clearly off-trend
 	// candidate even in safe districts.  Set to 0 to recover pure-Gaussian
 	// candidate ideologies.
-	candidateTailScale: 0.25,
+	candidateTailScale: 0,
 
 	// ---------------- HISTOGRAMS -----------------------------------------------
 	histograms: {

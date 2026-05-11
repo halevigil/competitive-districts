@@ -608,12 +608,14 @@ function simulateOne(
 	// meanAmp at the bell's peak.
 	const meanAmpTailFactorD = p.meanAmpTailFactorD ?? 0;
 	const meanAmpTailFactorR = p.meanAmpTailFactorR ?? 0;
-	// When v == 0 the +v bell equals the base bell, so the two-bell sum
-	// (swing + competitive) collapses to twice the base bell — we fold the
-	// factor of 2 into the scale once outside the loop.
+	// Intentional moderation is anchored at d_i alone — the popular-vote
+	// shift v moves WHO WINS each district (via the z-score below) but
+	// doesn't move where candidates strategically moderate.  A single bell
+	// per party at modOffset (which already includes the median-lean shift),
+	// not a sum of two bells at d_i and d_i + v.  The v=0 fast path /
+	// v != 0 path now differ only in the z-score formula; the candidate
+	// computation is identical.
 	const vIsZero = v === 0;
-	const meanScaleD = vIsZero ? meanAmpD * 2 : meanAmpD;
-	const meanScaleR = vIsZero ? meanAmpR * 2 : meanAmpR;
 
 	// Hoist mismatch-tracker fields to locals so the per-district bumps are
 	// tight pointer-array writes (no property lookup in the hot loop).  In
@@ -664,8 +666,8 @@ function simulateOne(
 			const stretchR = di < medianLean ? medianLean - di : 0;
 			const tailScaleD = tailBase + tailGrowthD * stretchD + meanAmpTailFactorD * meanAmpD * bellD_D;
 			const tailScaleR = tailBase + tailGrowthR * stretchR + meanAmpTailFactorR * meanAmpR * bellD_R;
-			const cD = meanScaleD * bellD_D + muD + sigmaD_eff * randn() + tailScaleD * laplaceSample();
-			const cR = -meanScaleR * bellD_R + muR + sigmaR_eff * randn() + tailScaleR * laplaceSample();
+			const cD = meanAmpD * bellD_D + muD + sigmaD_eff * randn() + tailScaleD * laplaceSample();
+			const cR = -meanAmpR * bellD_R + muR + sigmaR_eff * randn() + tailScaleR * laplaceSample();
 			// sigmaN is the σ of the additive election-noise term: a unit-variance
 			// shape (Bates or Tukey) scaled by sigmaN and added to the score.
 			const noise =
@@ -719,12 +721,8 @@ function simulateOne(
 			const di = d[i];
 			const aD = di - modOffsetD;
 			const aR = di - modOffsetR;
-			const aDV = di + v - modOffsetD;
-			const aRV = di + v - modOffsetR;
 			const bellD_D = Math.exp(-(aD * aD) / meanBreadthDSq);
 			const bellD_R = Math.exp(-(aR * aR) / meanBreadthRSq);
-			const bellDV_D = Math.exp(-(aDV * aDV) / meanBreadthDSq);
-			const bellDV_R = Math.exp(-(aRV * aRV) / meanBreadthRSq);
 			// Variance-bump bells.
 			const aVD = di - varOffsetD;
 			const aVR = di - varOffsetR;
@@ -733,17 +731,16 @@ function simulateOne(
 			const sigmaD_eff = sigmaD + varAmpD * bellVar_D;
 			const sigmaR_eff = sigmaR + varAmpR * bellVar_R;
 			// Stretch territory grows linearly forever, plus meanAmp adds a
-			// tail bump at the same bell where it pulls the mean
-			// (see fast-path comment).  v != 0 splits the bell across both
-			// the swing and competitive offsets.
+			// tail bump at the same bell where it pulls the mean.  Anchored
+			// at d_i alone (not d_i + v) — see header comment.
 			const stretchD = di > medianLean ? di - medianLean : 0;
 			const stretchR = di < medianLean ? medianLean - di : 0;
-			const tailScaleD = tailBase + tailGrowthD * stretchD + meanAmpTailFactorD * meanAmpD * (bellD_D + bellDV_D);
-			const tailScaleR = tailBase + tailGrowthR * stretchR + meanAmpTailFactorR * meanAmpR * (bellD_R + bellDV_R);
+			const tailScaleD = tailBase + tailGrowthD * stretchD + meanAmpTailFactorD * meanAmpD * bellD_D;
+			const tailScaleR = tailBase + tailGrowthR * stretchR + meanAmpTailFactorR * meanAmpR * bellD_R;
 			const cD =
-				meanAmpD * (bellD_D + bellDV_D) + muD + sigmaD_eff * randn() + tailScaleD * laplaceSample();
+				meanAmpD * bellD_D + muD + sigmaD_eff * randn() + tailScaleD * laplaceSample();
 			const cR =
-				-meanAmpR * (bellD_R + bellDV_R) + muR + sigmaR_eff * randn() + tailScaleR * laplaceSample();
+				-meanAmpR * bellD_R + muR + sigmaR_eff * randn() + tailScaleR * laplaceSample();
 			// sigmaN is the σ of the additive election-noise term (see fast-path
 			// comment above).
 			const noise =
