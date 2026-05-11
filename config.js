@@ -143,9 +143,10 @@ window.CONFIG = {
 
 	// ---------------- INTENTIONAL MODERATION -----------------------------------
 	// Three sliders per party (safe / swing / opp); each one symmetrically
-	// produces all three moderation effects.  Inside each slider-block
-	// the three quantities are added DIRECTLY (no separate amplitude
-	// factor — the slider drives them straight via anchoredLinear):
+	// produces all three moderation effects.  Inside each slider-block the
+	// three quantities are added DIRECTLY (no amplitudes, no slopes — the
+	// slider scales them linearly from 0 at slider=0 to the configured
+	// value at slider=default, with no upper clamp):
 	//   - mean: added to the candidate-ideology mean (pulls cD up toward
 	//     0, cR down toward 0).
 	//   - var:  added to the Gaussian-core σ of cD / cR.
@@ -171,45 +172,24 @@ window.CONFIG = {
 		// Swing bell geometry (shared by mean / var / tail effects).
 		swingOffset: 0, // K — bell peak distance from medianLean
 		swingBreadth: 6, // bell half-decay distance (% points)
-		swingBreadthSlope: 0, // d(breadth) / d(intModSwing slider)
 		// Opp ramp saturation: stretch distance (% points) at which the
 		// linear "deeper-into-opp-territory" effect plateaus.
 		oppSaturation: 20,
-		// Per-slider added quantities and their per-slider-unit slopes.
-		// Inside a slider-block:
-		//   mean / meanSlope — added directly to the candidate-ideology
-		//     mean (pulls cD up toward 0, cR down toward 0).
-		//   var  / varSlope  — added directly to the Gaussian-core σ of
-		//     cD / cR (it's a σ-add, not a variance-add, despite the name).
-		//   tail / tailSlope — added directly to the Laplace-tail scale
-		//     of cD / cR.
-		// The slider-block's shape function multiplies each of these at
-		// the district, so e.g. `swing.mean * bell(d_i)` is the swing
-		// slider's per-district contribution to the mean pull.
-		safe: {
-			mean: 0,
-			meanSlope: 2,
-			var: 0,
-			varSlope: 2,
-			tail: 1,
-			tailSlope: 1,
-		},
-		swing: {
-			mean: 6,
-			meanSlope: 9,
-			var: 6,
-			varSlope: 9,
-			tail: 0,
-			tailSlope: 0,
-		},
-		opp: {
-			mean: 2,
-			meanSlope: 2,
-			var: 0,
-			varSlope: 0,
-			tail: 6,
-			tailSlope: 6,
-		},
+		// Per-block added quantities AT slider = default (slider value 1).
+		// Effective value scales linearly with slider position from the
+		// slider's [0, max] range:
+		//     effective = configValue · (slider / sliderDefault)
+		// e.g. at slider=0 the effective is 0; at slider=default it equals
+		// the configured value; at slider=3·default it's 3× the configured
+		// value.  Inside each block:
+		//   mean — added directly to the candidate-ideology mean (pulls
+		//     cD up toward 0, cR down toward 0).
+		//   var  — added directly to the Gaussian-core σ of cD / cR.
+		//   tail — added directly to the Laplace-tail scale of cD / cR.
+		// The block's shape function in d_i then multiplies each of these.
+		safe:  { mean: 0, var: 0, tail: 1 },
+		swing: { mean: 6, var: 6, tail: 0 },
+		opp:   { mean: 2, var: 0, tail: 6 },
 	},
 
 	// ---------------- HISTOGRAMS -----------------------------------------------

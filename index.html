@@ -4,8 +4,8 @@
 		<meta charset="UTF-8" />
 		<title>Median Ideology Simulator</title>
 		<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-		<script src="config.js?v=42"></script>
-		<script src="model.js?v=42"></script>
+		<script src="config.js?v=43"></script>
+		<script src="model.js?v=43"></script>
 		<style>
 			:root {
 				--bg: #fafafa;
@@ -670,22 +670,23 @@
 				const safeDef  = cfg.sliders.dIntModSafe.value;
 				const swingDef = cfg.sliders.dIntModSwing.value;
 				const oppDef   = cfg.sliders.dIntModOpp.value;
-				// Helper: each slider-block has { mean, meanSlope, var,
-				// varSlope, tail, tailSlope } — three quantities added
-				// directly to the candidate-ideology mean / σ / Laplace-tail
-				// scale respectively (no separate amplitude factor).  Resolve
-				// to effective per-party values via anchoredLinear + floor at 0.
+				// Each slider-block has { mean, var, tail } — three quantities
+				// added directly to the candidate-ideology mean / σ /
+				// Laplace-tail scale.  Effective per-party value scales
+				// linearly with slider position: configValue · (slider/def).
+				// Slider min = 0 → effective = 0; slider = default → effective
+				// = configured value.
 				const resolveBlock = (block, bD, bR, def) => {
 					const bk = block || {};
-					const a = (b, val, slope) =>
-						Math.max(0, anchoredLinear(b, def, val ?? 0, slope ?? 0));
+					const sD = bD / def;
+					const sR = bR / def;
 					return {
-						meanD: a(bD, bk.mean, bk.meanSlope),
-						meanR: a(bR, bk.mean, bk.meanSlope),
-						varD:  a(bD, bk.var,  bk.varSlope),
-						varR:  a(bR, bk.var,  bk.varSlope),
-						tailD: a(bD, bk.tail, bk.tailSlope),
-						tailR: a(bR, bk.tail, bk.tailSlope),
+						meanD: sD * (bk.mean ?? 0),
+						meanR: sR * (bk.mean ?? 0),
+						varD:  sD * (bk.var  ?? 0),
+						varR:  sR * (bk.var  ?? 0),
+						tailD: sD * (bk.tail ?? 0),
+						tailR: sR * (bk.tail ?? 0),
 					};
 				};
 				return {
@@ -715,19 +716,19 @@
 					muD: -magnitude,
 					muR: +magnitude,
 					wMod: num("qualImp"),
-					// Three slider blocks, each producing per-party mean / var
-					// / tail amps via anchoredLinear (floored at 0).
+					// Three slider blocks, each producing per-party
+					// mean / var / tail values linearly in the slider
+					// position (0 at slider=0, config value at slider=default).
 					safe:  resolveBlock(im.safe,  bDSafe,  bRSafe,  safeDef),
 					swing: Object.assign(
 						resolveBlock(im.swing, bDSwing, bRSwing, swingDef),
 						{
-							// Swing bell geometry.  Per-party breadth scales
-							// with each side's intMod-swing slider.
+							// Swing bell geometry — fixed across the slider
+							// range (the slider only scales the block's mean
+							// / var / tail).
 							offset: im.swingOffset ?? 0,
-							breadthD: Math.max(0.5,
-								anchoredLinear(bDSwing, swingDef, im.swingBreadth ?? 6, im.swingBreadthSlope ?? 0)),
-							breadthR: Math.max(0.5,
-								anchoredLinear(bRSwing, swingDef, im.swingBreadth ?? 6, im.swingBreadthSlope ?? 0)),
+							breadthD: Math.max(0.5, im.swingBreadth ?? 6),
+							breadthR: Math.max(0.5, im.swingBreadth ?? 6),
 						}
 					),
 					opp: Object.assign(
