@@ -4,8 +4,8 @@
 		<meta charset="UTF-8" />
 		<title>Median Ideology Simulator</title>
 		<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-		<script src="config.js?v=38"></script>
-		<script src="model.js?v=38"></script>
+		<script src="config.js?v=39"></script>
+		<script src="model.js?v=39"></script>
 		<style>
 			:root {
 				--bg: #fafafa;
@@ -665,8 +665,7 @@
 				const bRSwing = num("rIntModSwing");
 				const bDOpp   = num("dIntModOpp");
 				const bROpp   = num("rIntModOpp");
-				const cmD = cfg.candidateMean.D,
-					cmR = cfg.candidateMean.R;
+				const cb = cfg.candidateBase;
 				const im = cfg.intentionalMod;
 				const safeDef  = cfg.sliders.dIntModSafe.value;
 				const swingDef = cfg.sliders.dIntModSwing.value;
@@ -711,10 +710,10 @@
 					dGerry: num("dGerry"),
 					base: cfg.districtBase,
 					gerry: cfg.districtGerry,
-					muD: cmD.mu,
-					sigmaD: cmD.sigma,
-					muR: cmR.mu,
-					sigmaR: cmR.sigma,
+					muD: -cb.magnitude,
+					sigmaD: cb.sigma,
+					muR: +cb.magnitude,
+					sigmaR: cb.sigma,
 					wMod: num("qualImp"),
 					// Three slider blocks, each producing per-party mean / var
 					// / tail amps via anchoredLinear (floored at 0).

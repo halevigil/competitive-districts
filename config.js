@@ -84,13 +84,17 @@ window.CONFIG = {
 		tukey: { lambda: 0.14 },
 	},
 
-	// ---------------- CANDIDATE-IDEOLOGY MEAN + SPREAD -------------------------
-	// Per-party candidate ideology is N(mu, sigma) before any moderation
-	// terms are added.  The ambient-moderation slider that used to drive
-	// these has been removed; tune via this block instead.
-	candidateMean: {
-		D: { mu: -100, sigma: 6 },
-		R: { mu: 100, sigma: 6 },
+	// ---------------- CANDIDATE BASE DISTRIBUTION ------------------------------
+	// Before any moderation, candidate ideology is N(±magnitude, sigma)
+	// (D at −magnitude, R at +magnitude).  The "moderate the mean" effect
+	// is now expressed entirely through intentionalMod.safe.meanAmp — at
+	// slider min it's 0 (candidates fully extreme), and pulling the safe
+	// slider up moves the effective mean toward 0.  Sigma is what remains
+	// as a base "spread" before intentionalMod.{safe,swing,opp}.varAmp
+	// bumps it.
+	candidateBase: {
+		magnitude: 100,
+		sigma: 6,
 	},
 
 	// ---------------- DISTRICT DISTRIBUTION ------------------------------------
