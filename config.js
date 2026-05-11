@@ -200,22 +200,22 @@ window.CONFIG = {
 		// values blend the two.  Applies to both the mean bell and the
 		// variance-bump bell, and to the meanAmp-driven tail term.
 		waveWeight: 0,
-		meanAmp: 3, // mean-moderation pull AT slider default
-		varAmp: 3, // candidate-σ bump amplitude AT slider default
+		meanAmp: 6, // mean-moderation pull AT slider default
+		varAmp: 6, // candidate-σ bump amplitude AT slider default
 		// Slopes are tied to `intMod.max` so the slider's auto-derived "amp = 0"
 		// min sits the same distance below default as the slider max is above.
 		// With max = 1: slope = meanAmp / max = 3, giving slider range [0, 2]
 		// with default at 1 (midpoint), amp range [0, 6].
-		meanAmpSlope: 3, // d(meanAmp) / d(slider)
-		varAmpSlope: 3, // d(varAmp)  / d(slider)
+		meanAmpSlope: 12, // d(meanAmp) / d(slider)
+		varAmpSlope: 12, // d(varAmp)  / d(slider)
 		// Bell half-decay distances at slider default.  meanBreadthSlope /
 		// varBreadthSlope let the bells widen as the intMod slider goes up
 		// (parties moderate more aggressively AND across a wider swing
 		// zone).  Set the slope to 0 to keep breadth fixed.
-		meanBreadth: 6, // mean-bell half-decay distance at slider default
-		varBreadth: 6, // σ-bell half-decay distance at slider default
-		meanBreadthSlope: 3, // d(meanBreadth) / d(slider)
-		varBreadthSlope: 3, // d(varBreadth)  / d(slider)
+		meanBreadth: 4, // mean-bell half-decay distance at slider default
+		varBreadth: 4, // σ-bell half-decay distance at slider default
+		meanBreadthSlope: 0, // d(meanBreadth) / d(slider)
+		varBreadthSlope: 0, // d(varBreadth)  / d(slider)
 		// Candidate-ideology tail growth in stretch territory.  Adds a
 		// Laplace-distributed component to cD / cR whose scale is 0 at
 		// d_i = medianLean and grows linearly with stretch distance as d_i
@@ -223,12 +223,12 @@ window.CONFIG = {
 		// Captures "some try hard, some give up" heterogeneity in deep-
 		// stretch districts.  Per-party scaling is driven by each party's
 		// intMod slider via anchoredLinear, just like the other amps.
-		tailGrowth: 0.1, // Laplace-scale growth per % stretch, at slider default
-		tailGrowthSlope: 0, // d(tailGrowth) / d(slider)
+		tailGrowth: 0.4, // Laplace-scale growth per % stretch, at slider default
+		tailGrowthSlope: 0.4, // d(tailGrowth) / d(slider)
 		// Saturation: stretch distance (in % points) beyond which the linear
 		// growth stops.  Effective stretch = min(actual stretch, saturation).
 		// Set to Infinity to keep the original "grows forever" behaviour.
-		tailGrowthSaturation: 40,
+		tailGrowthSaturation: 20,
 		// On top of the stretch-territory growth above, meanAmp also widens
 		// the tail at its bell — wherever the moderation pull is strong, the
 		// candidates also fan out more.  Per-party factor follows the same
@@ -247,7 +247,7 @@ window.CONFIG = {
 	// Gaussian core, so chambers occasionally pull a clearly off-trend
 	// candidate even in safe districts.  Set to 0 to recover pure-Gaussian
 	// candidate ideologies.
-	candidateTailScale: 0.5,
+	candidateTailScale: 0,
 
 	// ---------------- HISTOGRAMS -----------------------------------------------
 	histograms: {

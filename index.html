@@ -4,8 +4,8 @@
 		<meta charset="UTF-8" />
 		<title>Median Ideology Simulator</title>
 		<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-		<script src="config.js?v=31"></script>
-		<script src="model.js?v=31"></script>
+		<script src="config.js?v=32"></script>
+		<script src="model.js?v=32"></script>
 		<style>
 			:root {
 				--bg: #fafafa;
@@ -1085,7 +1085,12 @@
 					const k = a.length;
 					return k % 2 ? a[(k - 1) >> 1] : (a[k / 2 - 1] + a[k / 2]) / 2;
 				};
-				const medianMed = medOfArray(sims.meds);
+				// Take |ideology| per sim, then median across sims — gives a
+				// scale of "how extreme is the median rep on average" that
+				// doesn't average D-majority and R-majority sims toward 0.
+				const medianAbsMed = medOfArray(
+					Array.from(sims.meds, (x) => Math.abs(x))
+				);
 				const medianMedD = medsD.length ? medOfFiniteArray(medsD) : NaN;
 				const medianMedR = medsR.length ? medOfFiniteArray(medsR) : NaN;
 				const median33 = medOfArray(sims.p33s);
@@ -1103,7 +1108,7 @@
     <div>Chance the median representative is a Republican: <span class="num">${(
 		pR * 100
 	).toFixed(1)}%</span> ${pR > 0.5 ? rPill : dPill}</div>
-    <div>Median ideology of median representative: <span class="num">${medianMed.toFixed(1)}</span>
+    <div>Median absolute ideology of median representative: <span class="num">${medianAbsMed.toFixed(1)}</span>
       &nbsp;|&nbsp; when median is D: <span class="num">${
 			Number.isFinite(medianMedD) ? medianMedD.toFixed(1) : "–"
 		}</span>
