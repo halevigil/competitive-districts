@@ -4,8 +4,8 @@
 		<meta charset="UTF-8" />
 		<title>Median Ideology Simulator</title>
 		<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-		<script src="config.js?v=30"></script>
-		<script src="model.js?v=30"></script>
+		<script src="config.js?v=31"></script>
+		<script src="model.js?v=31"></script>
 		<style>
 			:root {
 				--bg: #fafafa;
@@ -711,6 +711,11 @@
 						anchoredLinear(bD, cfg.sliders.dIntMod.value, im.tailGrowth ?? 0, im.tailGrowthSlope ?? 0)),
 					tailGrowthR: Math.max(0,
 						anchoredLinear(bR, cfg.sliders.rIntMod.value, im.tailGrowth ?? 0, im.tailGrowthSlope ?? 0)),
+					// Stretch saturation cap (in % points).  Effective stretch
+					// is clipped to this value so the tail-growth contribution
+					// stops increasing past it.  Defaults to Infinity → linear
+					// forever (the original behaviour).
+					tailGrowthSaturation: im.tailGrowthSaturation ?? Infinity,
 					// Per-party meanAmp-tail factor, anchored at slider default
 					// and floored at 0 so we never get a negative tail-factor
 					// near the slider's amp-0 min.

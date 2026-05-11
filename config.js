@@ -218,13 +218,17 @@ window.CONFIG = {
 		varBreadthSlope: 3, // d(varBreadth)  / d(slider)
 		// Candidate-ideology tail growth in stretch territory.  Adds a
 		// Laplace-distributed component to cD / cR whose scale is 0 at
-		// d_i = medianLean and grows linearly forever as d_i moves toward
-		// the OTHER party's side.  Captures "some try hard, some give up"
-		// heterogeneity in deep-stretch districts.  Per-party scaling is
-		// driven by each party's intMod slider via anchoredLinear, just
-		// like the other amps.
+		// d_i = medianLean and grows linearly with stretch distance as d_i
+		// moves toward the OTHER party's side, up to a configurable cap.
+		// Captures "some try hard, some give up" heterogeneity in deep-
+		// stretch districts.  Per-party scaling is driven by each party's
+		// intMod slider via anchoredLinear, just like the other amps.
 		tailGrowth: 0.1, // Laplace-scale growth per % stretch, at slider default
-		tailGrowthSlope: 0.1, // d(tailGrowth) / d(slider)
+		tailGrowthSlope: 0, // d(tailGrowth) / d(slider)
+		// Saturation: stretch distance (in % points) beyond which the linear
+		// growth stops.  Effective stretch = min(actual stretch, saturation).
+		// Set to Infinity to keep the original "grows forever" behaviour.
+		tailGrowthSaturation: 40,
 		// On top of the stretch-territory growth above, meanAmp also widens
 		// the tail at its bell — wherever the moderation pull is strong, the
 		// candidates also fan out more.  Per-party factor follows the same

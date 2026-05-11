@@ -602,6 +602,10 @@ function simulateOne(
 	const tailBase = p.candidateTailScale;
 	const tailGrowthD = p.tailGrowthD;
 	const tailGrowthR = p.tailGrowthR;
+	// Cap on the stretch distance fed into the tail-growth term — once
+	// d_i is `tailGrowthSaturation` % points past the median on the other
+	// party's side, growth stops.  Infinity disables the cap.
+	const tailGrowthSaturation = p.tailGrowthSaturation ?? Infinity;
 	// Scales how much meanAmp's bell adds to the tail.  Per-party (driven by
 	// each side's intMod slider via anchoredLinear in readParams).  0 = mean
 	// pull doesn't touch the tail; 1 = one unit of Laplace scale per unit of
@@ -662,8 +666,12 @@ function simulateOne(
 			// widens the tail at its bell, so wherever the moderation push is
 			// strong the candidates also fan out more — "some try hard, some
 			// don't" heterogeneity at the same locations where the pull happens.
-			const stretchD = di > medianLean ? di - medianLean : 0;
-			const stretchR = di < medianLean ? medianLean - di : 0;
+			const stretchD = di > medianLean
+				? Math.min(di - medianLean, tailGrowthSaturation)
+				: 0;
+			const stretchR = di < medianLean
+				? Math.min(medianLean - di, tailGrowthSaturation)
+				: 0;
 			const tailScaleD = tailBase + tailGrowthD * stretchD + meanAmpTailFactorD * meanAmpD * bellD_D;
 			const tailScaleR = tailBase + tailGrowthR * stretchR + meanAmpTailFactorR * meanAmpR * bellD_R;
 			const cD = meanAmpD * bellD_D + muD + sigmaD_eff * randn() + tailScaleD * laplaceSample();
@@ -739,8 +747,12 @@ function simulateOne(
 			// Stretch territory grows linearly forever, plus meanAmp adds a
 			// tail bump at the same bell where it pulls the mean.  Anchored
 			// at d_i alone (not d_i + v) — see header comment.
-			const stretchD = di > medianLean ? di - medianLean : 0;
-			const stretchR = di < medianLean ? medianLean - di : 0;
+			const stretchD = di > medianLean
+				? Math.min(di - medianLean, tailGrowthSaturation)
+				: 0;
+			const stretchR = di < medianLean
+				? Math.min(medianLean - di, tailGrowthSaturation)
+				: 0;
 			const tailScaleD = tailBase + tailGrowthD * stretchD + meanAmpTailFactorD * meanAmpD * bellD_D;
 			const tailScaleR = tailBase + tailGrowthR * stretchR + meanAmpTailFactorR * meanAmpR * bellD_R;
 			const cD =
