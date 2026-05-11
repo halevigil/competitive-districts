@@ -4,8 +4,8 @@
 		<meta charset="UTF-8" />
 		<title>Median Ideology Simulator</title>
 		<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-		<script src="config.js?v=41"></script>
-		<script src="model.js?v=41"></script>
+		<script src="config.js?v=42"></script>
+		<script src="model.js?v=42"></script>
 		<style>
 			:root {
 				--bg: #fafafa;
@@ -1317,43 +1317,22 @@
 					delete window.CONFIG.sliders[shared];
 				}
 
-				// Each intMod slider auto-derives its (min, max).  Min is the
-				// max zero-crossing across the slider-block's three added
-				// quantities (mean / var / tail) — i.e. the largest slider
-				// value at which any of them would go negative.  Skip a
-				// quantity's zero-crossing if its slope is ≤ 0.  Fall back
-				// to 0 if nothing constrains.
-				const im_ = window.CONFIG.intentionalMod;
-				const blockZeros = (block, def) => {
-					const out = [];
-					if (!block) return out;
-					for (const [val, slope] of [
-						[block.mean, block.meanSlope],
-						[block.var,  block.varSlope],
-						[block.tail, block.tailSlope],
-					]) {
-						if ((slope ?? 0) > 0) out.push(def - (val ?? 0) / slope);
-					}
-					return out;
-				};
-				const setSliderRange = (sliderIdsLR, zeroCrossings) => {
+				// Each intMod slider has a uniform [0, slider.max] range so
+				// the default value sits at the same relative track position
+				// (value / slider.max) across all three.  Per-amp negative
+				// excursions are floored at 0 in resolveBlock — no need to
+				// shrink the slider's min away from 0.
+				const setIntModRange = (sliderIdsLR) => {
 					const cfg = window.CONFIG.sliders[sliderIdsLR[0]];
-					const def = cfg.value;
-					let minVal = Math.max(...zeroCrossings, -Infinity);
-					if (!isFinite(minVal)) minVal = 0;
-					const maxVal = def + cfg.max;
 					for (const id of sliderIdsLR) {
-						window.CONFIG.sliders[id].min   = minVal;
-						window.CONFIG.sliders[id].max   = maxVal;
-						window.CONFIG.sliders[id].value = def;
+						window.CONFIG.sliders[id].min   = 0;
+						window.CONFIG.sliders[id].max   = cfg.max;
+						window.CONFIG.sliders[id].value = cfg.value;
 					}
 				};
-				const safeDef0  = window.CONFIG.sliders.dIntModSafe.value;
-				const swingDef0 = window.CONFIG.sliders.dIntModSwing.value;
-				const oppDef0   = window.CONFIG.sliders.dIntModOpp.value;
-				setSliderRange(["dIntModSafe",  "rIntModSafe"],  blockZeros(im_.safe,  safeDef0));
-				setSliderRange(["dIntModSwing", "rIntModSwing"], blockZeros(im_.swing, swingDef0));
-				setSliderRange(["dIntModOpp",   "rIntModOpp"],   blockZeros(im_.opp,   oppDef0));
+				setIntModRange(["dIntModSafe",  "rIntModSafe"]);
+				setIntModRange(["dIntModSwing", "rIntModSwing"]);
+				setIntModRange(["dIntModOpp",   "rIntModOpp"]);
 
 				// Apply slider attributes (min/max/step/default) from CONFIG so the
 				// numbers in config.js are the single source of truth.
