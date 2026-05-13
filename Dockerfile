@@ -14,7 +14,7 @@ RUN rm -rf ./*
 
 # Copy site assets.
 COPY index.html historical.html plots.html ./
-COPY config.js historical_config.js model.js ./
+COPY config.js model.js ./
 COPY data ./data
 
 EXPOSE 8080

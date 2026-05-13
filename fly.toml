@@ -8,7 +8,7 @@
 # Pick a unique app name when you run `fly launch` — the value below is a
 # placeholder that you'll get prompted to change.
 
-app = "median-ideology-simulator"
+app = "competitive-districts"
 primary_region = "iad"
 
 [build]
