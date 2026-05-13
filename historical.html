@@ -61,6 +61,9 @@
   Democratic, red = Republican).  <b>Right:</b> distribution of per-district
   House election margins (R% − D%) for that cycle.  Bin width is shared
   with the simulator (<code>CONFIG.histograms.district.binSize</code>).
+  The "median lean" tag in each title is the chamber-pivot district's
+  lean <i>relative to the popular vote</i> (national presidential margin
+  for pres years; the PVI rows are already in this form).
 </div>
 
 <div id="charts" class="grid"><div class="loading full">Loading data…</div></div>
@@ -113,6 +116,18 @@ const DISTRICT_CYCLE_FOR = {
 const PRES_YEARS    = new Set([2008, 2012, 2016, 2020, 2024]);
 const MIDTERM_YEARS = new Set([2010, 2014, 2018, 2022]);
 const YEARS = [2008, 2010, 2012, 2014, 2016, 2018, 2020, 2022, 2024];
+
+// National popular vote margin (R% - D%) for each presidential election,
+// kept in sync with build-historical.py's table.  Used to express the
+// median-district lean *relative to the popular vote*, so the numbers
+// read as "how much more R the median district is than the country" —
+// directly comparable to the simulator's median-lean output (where v=0
+// already means "tied with the popular vote").  PVI rows are already
+// relative to a weighted prior-pres average, so we only shift pres-year
+// medians.
+const NATIONAL_PRES_MARGIN = {
+  2008: -7.27, 2012: -3.86, 2016: -2.10, 2020: -4.45, 2024: +1.48,
+};
 
 // Bin width comes from the same place the simulator reads it from, so the
 // two pages always render at the same resolution.
@@ -325,11 +340,17 @@ function renderMarginYearChart(divId, year, stats, yMax) {
 function renderYearChart(divId, year, stats, yMax) {
   const { centres, ranges, dCounts, rCounts, leans, nD, nR, isMidterm } = stats;
   const leanLabel = isMidterm ? 'PVI (2-to-1)' : 'Presidential margin';
-  const med = medianOfNumbers(leans || []);
+  // Shift pres-year medians to be relative to the national popular vote
+  // (PVI rows are already relative to their weighted prior-pres average,
+  // so no shift needed there).  The result is directly comparable to the
+  // simulator's median lean, which is reported relative to v.
+  const medRaw = medianOfNumbers(leans || []);
+  const nat = NATIONAL_PRES_MARGIN[year];
+  const medRel = isMidterm ? medRaw : (medRaw == null ? null : medRaw - nat);
   const titleParts = [
     `<b>${year}</b>`,
     `D-won ${nD}, R-won ${nR}`,
-    `median lean ${formatLean(med)}`,
+    `median lean ${formatLean(medRel)} vs nat'l`,
   ];
   Plotly.newPlot(divId, [
     {
