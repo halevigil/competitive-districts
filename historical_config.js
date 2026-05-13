@@ -14,5 +14,5 @@ window.HISTORICAL_CONFIG = {
 	//   binSize: 2  → finest available, ~100 bars per chart
 	//   binSize: 5  → matches the simulator's default district histogram
 	//   binSize: 10 → coarser, easier to see distribution shape
-	binSize: 2,
+	binSize: 4,
 };

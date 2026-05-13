@@ -31,7 +31,7 @@ function laplaceSample() {
 	const u = Math.random() - 0.5;
 	return u >= 0
 		? -Math.log(Math.max(1 - 2 * u, 1e-300))
-		:  Math.log(Math.max(1 + 2 * u, 1e-300));
+		: Math.log(Math.max(1 + 2 * u, 1e-300));
 }
 
 // Bates(3) — sum of three Uniform(-1, +1) draws.  Unit variance, bell-shaped
@@ -561,14 +561,16 @@ function simulateOne(
 	// Hoist all `p.X` reads out of the inner loop so V8 keeps the constants
 	// in registers / locals instead of re-walking the params object N times.
 	const v = p.v;
-	const muD = p.muD, muR = p.muR;
-	const wMod = p.wMod, sigmaN = p.sigmaN;
+	const muD = p.muD,
+		muR = p.muR;
+	const wMod = p.wMod,
+		sigmaN = p.sqrtSigmaN ** 2;
 	// Intentional moderation: three sliders per party (safe / swing / opp),
 	// each with three effects (mean / var / tail).  Per-party effective amps
 	// are pre-anchored in readParams and arrive as scalars.
-	const safe = p.safe;   // { meanD, meanR, varD, varR, tailD, tailR }
+	const safe = p.safe; // { meanD, meanR, varD, varR, tailD, tailR }
 	const swing = p.swing; // { ...same shape, plus swingOffset and per-party breadth }
-	const opp = p.opp;     // { ...same shape, plus saturation }
+	const opp = p.opp; // { ...same shape, plus saturation }
 	// Median lean shifts the SWING bell centre and the OPP stretch origin so
 	// the geometry "moves with" the chamber — see analyticDistrictPool.
 	const medianLean = d[(N - 1) >> 1];
@@ -625,22 +627,36 @@ function simulateOne(
 			const swingD = Math.exp(-(aD * aD) / swingBreadthDSq);
 			const swingR = Math.exp(-(aR * aR) / swingBreadthRSq);
 			// Opp ramp: saturating linear in own-opposite-side stretch.
-			const oppD = di > medianLean
-				? Math.min((di - medianLean) * invOppSat, 1)
-				: 0;
-			const oppR = di < medianLean
-				? Math.min((medianLean - di) * invOppSat, 1)
-				: 0;
+			const oppD =
+				di > medianLean
+					? Math.min((di - medianLean) * invOppSat, 1)
+					: 0;
+			const oppR =
+				di < medianLean
+					? Math.min((medianLean - di) * invOppSat, 1)
+					: 0;
 			// Per-party effective moderation contributions: safe (uniform)
 			// + swing (bell) + opp (saturating ramp), one sum per effect.
-			const meanPullD = safe.meanD + swing.meanD * swingD + opp.meanD * oppD;
-			const meanPullR = safe.meanR + swing.meanR * swingR + opp.meanR * oppR;
-			const varBumpD  = safe.varD  + swing.varD  * swingD + opp.varD  * oppD;
-			const varBumpR  = safe.varR  + swing.varR  * swingR + opp.varR  * oppR;
-			const tailBumpD = safe.tailD + swing.tailD * swingD + opp.tailD * oppD;
-			const tailBumpR = safe.tailR + swing.tailR * swingR + opp.tailR * oppR;
-			const cD = muD + meanPullD + varBumpD * randn() + tailBumpD * laplaceSample();
-			const cR = muR - meanPullR + varBumpR * randn() + tailBumpR * laplaceSample();
+			const meanPullD =
+				safe.meanD + swing.meanD * swingD + opp.meanD * oppD;
+			const meanPullR =
+				safe.meanR + swing.meanR * swingR + opp.meanR * oppR;
+			const varBumpD = safe.varD + swing.varD * swingD + opp.varD * oppD;
+			const varBumpR = safe.varR + swing.varR * swingR + opp.varR * oppR;
+			const tailBumpD =
+				safe.tailD + swing.tailD * swingD + opp.tailD * oppD;
+			const tailBumpR =
+				safe.tailR + swing.tailR * swingR + opp.tailR * oppR;
+			const cD =
+				muD +
+				meanPullD +
+				varBumpD * randn() +
+				tailBumpD * laplaceSample();
+			const cR =
+				muR -
+				meanPullR +
+				varBumpR * randn() +
+				tailBumpR * laplaceSample();
 			// sigmaN is the σ of the additive election-noise term: a unit-variance
 			// shape (Bates or Tukey) scaled by sigmaN and added to the score.
 			const noise =
@@ -699,21 +715,35 @@ function simulateOne(
 			const aR = diEff - swingOffsetR;
 			const swingD = Math.exp(-(aD * aD) / swingBreadthDSq);
 			const swingR = Math.exp(-(aR * aR) / swingBreadthRSq);
-			const oppD = di > medianLean
-				? Math.min((di - medianLean) * invOppSat, 1)
-				: 0;
-			const oppR = di < medianLean
-				? Math.min((medianLean - di) * invOppSat, 1)
-				: 0;
-			const meanPullD = safe.meanD + swing.meanD * swingD + opp.meanD * oppD;
-			const meanPullR = safe.meanR + swing.meanR * swingR + opp.meanR * oppR;
-			const varBumpD  = safe.varD  + swing.varD  * swingD + opp.varD  * oppD;
-			const varBumpR  = safe.varR  + swing.varR  * swingR + opp.varR  * oppR;
-			const tailBumpD = safe.tailD + swing.tailD * swingD + opp.tailD * oppD;
-			const tailBumpR = safe.tailR + swing.tailR * swingR + opp.tailR * oppR;
-			const cD = muD + meanPullD + varBumpD * randn() + tailBumpD * laplaceSample();
-			const cR = muR - meanPullR + varBumpR * randn() + tailBumpR * laplaceSample();
-			// sigmaN is the σ of the additive election-noise term (see fast-path
+			const oppD =
+				di > medianLean
+					? Math.min((di - medianLean) * invOppSat, 1)
+					: 0;
+			const oppR =
+				di < medianLean
+					? Math.min((medianLean - di) * invOppSat, 1)
+					: 0;
+			const meanPullD =
+				safe.meanD + swing.meanD * swingD + opp.meanD * oppD;
+			const meanPullR =
+				safe.meanR + swing.meanR * swingR + opp.meanR * oppR;
+			const varBumpD = safe.varD + swing.varD * swingD + opp.varD * oppD;
+			const varBumpR = safe.varR + swing.varR * swingR + opp.varR * oppR;
+			const tailBumpD =
+				safe.tailD + swing.tailD * swingD + opp.tailD * oppD;
+			const tailBumpR =
+				safe.tailR + swing.tailR * swingR + opp.tailR * oppR;
+			const cD =
+				muD +
+				meanPullD +
+				varBumpD * randn() +
+				tailBumpD * laplaceSample();
+			const cR =
+				muR -
+				meanPullR +
+				varBumpR * randn() +
+				tailBumpR * laplaceSample();
+			// 'sigmaN' is the σ of the additive election-noise term (see fast-path
 			// comment above).
 			const noise =
 				sigmaN > 0
@@ -794,7 +824,8 @@ function simulateOne(
 		// sort each.  N is small enough that two extra sorts are cheap.
 		const dSorted = new Float64Array(dSeats);
 		const rSorted = new Float64Array(rSeats);
-		let di = 0, ri = 0;
+		let di = 0,
+			ri = 0;
 		for (let i = 0; i < N; i++) {
 			if (partyVals[i]) rSorted[ri++] = rVals[i];
 			else dSorted[di++] = rVals[i];
@@ -902,7 +933,7 @@ function runSimulations(
 		poolD = districtPool.slice();
 		poolR = districtPool.slice();
 		poolD[m] = -TIEBREAK_EPS; // D takes the boundary seat
-		poolR[m] =  TIEBREAK_EPS; // R takes the boundary seat
+		poolR[m] = TIEBREAK_EPS; // R takes the boundary seat
 	} else {
 		poolD = districtPool;
 		poolR = districtPool;

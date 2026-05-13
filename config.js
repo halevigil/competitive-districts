@@ -14,7 +14,7 @@ window.CONFIG = {
 	// Standard HTML range-input attributes for each user-facing knob.
 	sliders: {
 		// Popular Vote (Republican wave +, Democratic wave -)
-		v: { min: -10, max: 10, step: 0.5, value: 0 },
+		v: { min: -10, max: 10, step: 0.1, value: 0 },
 
 		// Per-party gerrymandering weights — absolute mass each party's packed
 		// component contributes to the chamber pool.  Pool density is
@@ -30,7 +30,7 @@ window.CONFIG = {
 		// home, so runSimulations runs half its sims with the boundary seat
 		// nudged toward D and half toward R; otherwise the tiebreak is off.
 		// `gerry` is shared by both rGerry and dGerry sliders — edit once.
-		gerry: { min: 0, max: 0.49, step: 0.01, value: 0.16 },
+		gerry: { min: 0, max: 0.49, step: 0.001, value: 0.16 },
 
 		// Intentional moderation is split into three sliders per party,
 		// one per district type.  Labels use district COLOUR (blue / red);
@@ -50,13 +50,13 @@ window.CONFIG = {
 
 		// How heavily voters punish ideologically extreme candidates relative
 		// to district partisanship.
-		qualImp: { min: 0, max: 0.9, step: 0.05, value: 0.2 },
+		qualImp: { min: 0, max: 0.6, step: 0.05, value: 0.2 },
 
-		// Election noise σ — scales an additive unit-variance noise term that
+		// Election noise sqrt(σ) — squaren scales an additive unit-variance noise term that
 		// gets added to the score (di − wMod·(cD+cR)) before the hard cutoff
 		// at z = 0.  Larger values smear the cutoff out; 0 makes the election
 		// fully deterministic given the candidate draws.
-		sigmaN: { min: 0, max: 4, step: 0.1, value: 1 },
+		sqrtSigmaN: { min: 0, max: 3, step: 0.1, value: 1 },
 	},
 
 	// ---------------- SIMULATION CONSTANTS -------------------------------------
@@ -171,7 +171,7 @@ window.CONFIG = {
 		waveWeight: 0,
 		// Swing bell geometry (shared by mean / var / tail effects).
 		swingOffset: 0, // K — bell peak distance from medianLean
-		swingBreadth: 8, // bell half-decay distance (% points)
+		swingBreadth: 12, // bell half-decay distance (% points)
 		// Opp ramp saturation: stretch distance (% points) at which the
 		// linear "deeper-into-opp-territory" effect plateaus.
 		oppSaturation: 20,
@@ -208,7 +208,7 @@ window.CONFIG = {
 		// District-partisanship histogram (bottom chart): bin width in
 		// percentage points across the fixed [-100%, 100%] range.
 		district: {
-			binSize: 2,
+			binSize: 4,
 		},
 		// Per-party rep-ideology histograms (in "see more plots"):
 		// bin width and x-axis range, in ideology units (% points).  The

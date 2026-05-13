@@ -1,20 +1,53 @@
 #!/usr/bin/env python3
 # =============================================================================
-# Build clean per-district House + Presidential CSVs for historical.html.
+# Build clean per-district House + Presidential / PVI CSVs for historical.html.
 # Reads:
-#   - 538-house-raw.csv                              (1976-2024 House results)
+#   - 538-house-raw.csv                              (House results)
 #   - downballot-2024-pres-by-cd.csv                 (2020 & 2024 pres in 2024-cycle districts)
 #   - dailykos-2008-2020-pres-by-cd-2020-cycle.csv   (2008/2012/2016/2020 pres in 2020-cycle districts)
 # Writes:
 #   - house-winners.csv         (cycle, state, district, winner_party)
+#   - house-margins.csv         (cycle, state, district, margin, winner_party)
 #   - pres-by-cd.csv            (cycle, district_cycle, state, district, margin)
+#   - pvi-by-cd.csv             (cycle, district_cycle, state, district, pvi)
 #
 # Run from this directory:    python3 build-historical.py
 # =============================================================================
 import csv
 from collections import defaultdict
 
-YEARS = (2008, 2012, 2016, 2020, 2024)
+# Presidential years use the per-district presidential margin as the lean
+# axis on historical.html; midterm years use a Cook-PVI-style metric
+# computed below from the two most recent presidential cycles.
+PRES_YEARS    = (2008, 2012, 2016, 2020, 2024)
+MIDTERM_YEARS = (2010, 2014, 2018, 2022)
+YEARS         = tuple(sorted(PRES_YEARS + MIDTERM_YEARS))
+
+# National two-party presidential margin per cycle (R% − D%, percentage
+# points).  Used as the "anchor" in the PVI calculation:
+#     PVI(district, year) = (2·R1 + R2) / 3   −   (2·N1 + N2) / 3
+# where R1 / R2 are the district's last-two presidential margins (most
+# recent weighted 2×) and N1 / N2 are the national margins for those
+# same years.  Cook uses a 3-to-1 weighting these days; we use 2-to-1
+# (matches Cook's older methodology and reads cleaner here).
+NATIONAL_PRES_MARGIN = {
+    2008:  -7.27,  # Obama beat McCain by 7.27 pp
+    2012:  -3.86,  # Obama beat Romney by 3.86 pp
+    2016:  -2.10,  # Clinton beat Trump by 2.10 pp in popular vote
+    2020:  -4.45,  # Biden beat Trump by 4.45 pp
+    2024:  +1.48,  # Trump beat Harris by 1.48 pp
+}
+
+# Per-midterm: (district_cycle, [(year, weight), …]).  Weights default
+# to 2 for the most recent pres cycle and 1 for the previous one.  Where
+# only one cycle is available in the right district lines, we fall back
+# to single-cycle (the 2-to-1 collapses to 1-to-0).
+PVI_BACKING = {
+    2010: ("2020", [(2008, 1)]),                  # no 2004 data; single-cycle
+    2014: ("2020", [(2012, 2), (2008, 1)]),
+    2018: ("2020", [(2016, 2), (2012, 1)]),
+    2022: ("2024", [(2020, 1)]),                  # no 2016 in 2024-cycle lines
+}
 
 # -----------------------------------------------------------------------------
 # House winners — per district per year, picking the candidate with the most
@@ -156,9 +189,11 @@ for row in rdr[2:]:
 
 # --- Downballot 2024 sheet (in 2024-cycle districts) ---
 # Top three rows are headers.  Layout (post-headers):
-#   row[0] = "AK-AL"
-#   row[6], row[7], row[8] = 2024 Harris %, Trump %, Margin
-#   row[12], row[13], row[14] = 2020 Biden %, Trump %, Margin
+#   row[0]  = "AK-AL"
+#   row[3]/[4]   = 2024 Harris / Trump raw votes
+#   row[6]/[7]   = 2024 Harris % / Trump %
+#   row[10]/[11] = 2020 Biden / Trump raw votes
+#   row[13]/[14] = 2020 Biden % / Trump %
 with open("downballot-2024-pres-by-cd.csv", newline="") as f:
     rdr = list(csv.reader(f))
 for row in rdr[3:]:
@@ -167,7 +202,7 @@ for row in rdr[3:]:
     state, district = split_cd(row[0])
     pairs = [
         (2024, 6, 7),
-        (2020, 12, 13),
+        (2020, 13, 14),
     ]
     for cycle, di, ri in pairs:
         try:
@@ -185,3 +220,43 @@ with open("pres-by-cd.csv", "w", newline="") as f:
     for r in sorted(pres_out):
         w.writerow(r)
 print(f"pres-by-cd.csv written ({len(pres_out)} rows)")
+
+# -----------------------------------------------------------------------------
+# PVI per district per midterm year (Cook-style, 2-to-1 weighted):
+#   PVI = Σ(w·district_margin) / Σw  −  Σ(w·national_margin) / Σw
+# over the backing presidential cycles in PVI_BACKING.  Most recent
+# cycle gets weight 2, the previous gets weight 1.  Reported in
+# (R% − D%) percentage-point units, same axis as pres-by-cd.margin —
+# positive = R-leaning vs the country, negative = D-leaning.
+# -----------------------------------------------------------------------------
+# Index pres_out by (cycle, district_cycle) → {(state, district): margin}.
+pres_by_cycle = defaultdict(dict)
+for cycle, district_cycle, state, district, margin in pres_out:
+    pres_by_cycle[(cycle, district_cycle)][(state, district)] = margin
+
+pvi_out = []
+for midterm, (district_cycle, weighted_years) in PVI_BACKING.items():
+    total_w = sum(w for (_, w) in weighted_years)
+    nat_weighted = sum(NATIONAL_PRES_MARGIN[y] * w for (y, w) in weighted_years)
+    nat_avg = nat_weighted / total_w
+    # Districts present in EVERY backing pres cycle (intersection).
+    district_sets = [
+        set(pres_by_cycle[(py, district_cycle)].keys())
+        for (py, _) in weighted_years
+    ]
+    common = set.intersection(*district_sets) if district_sets else set()
+    for (state, district) in sorted(common):
+        district_weighted = sum(
+            pres_by_cycle[(py, district_cycle)][(state, district)] * w
+            for (py, w) in weighted_years
+        )
+        district_avg = district_weighted / total_w
+        pvi = round(district_avg - nat_avg, 2)
+        pvi_out.append([midterm, district_cycle, state, district, pvi])
+
+with open("pvi-by-cd.csv", "w", newline="") as f:
+    w = csv.writer(f)
+    w.writerow(["cycle", "district_cycle", "state", "district", "pvi"])
+    for r in pvi_out:
+        w.writerow(r)
+print(f"pvi-by-cd.csv written ({len(pvi_out)} rows)")

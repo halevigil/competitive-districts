@@ -54,14 +54,13 @@
 
 <h1>Historical House Seats and Election Margins, 2008–2024</h1>
 <div class="subtitle">
-  Each row is one presidential cycle.  <b>Left:</b> US House seats binned by
-  the district's presidential margin (R% − D%), coloured by who actually won
-  the House race (blue = Democratic, red = Republican).  <b>Right:</b>
-  distribution of per-district House election margins (R% − D% in the House
-  race itself) for that cycle.  Bin width is configurable in
-  <code>historical_config.js</code>.  Same visual style as the simulator's
-  per-party seats-by-partisanship and election-margins charts so you can
-  compare against the model's output.
+  Each row is one US House election cycle.  <b>Left:</b> seats binned by
+  the district's partisan lean (presidential margin for presidential years;
+  Cook-style PVI with 2-to-1 weighting on the two prior presidential cycles
+  for midterm years), coloured by who actually won the House race (blue =
+  Democratic, red = Republican).  <b>Right:</b> distribution of per-district
+  House election margins (R% − D%) for that cycle.  Bin width is
+  configurable in <code>historical_config.js</code>.
 </div>
 
 <div id="charts" class="grid"><div class="loading full">Loading data…</div></div>
@@ -98,10 +97,17 @@
 // District-cycle to use for each presidential year, matching the data we have.
 // 2024 election was held in 2024-cycle districts; everything earlier is in
 // the 2020-cycle (post-2010 redistricting) sheet from Daily Kos.
+// Which redistricting cycle's lines the election was held in.  Used to
+// pick the matching presidential-margin row (presidential years) or PVI
+// row (midterm years).
 const DISTRICT_CYCLE_FOR = {
-  2008: '2020', 2012: '2020', 2016: '2020', 2020: '2020', 2024: '2024',
+  2008: '2020', 2010: '2020', 2012: '2020', 2014: '2020',
+  2016: '2020', 2018: '2020', 2020: '2020',
+  2022: '2024', 2024: '2024',
 };
-const YEARS = [2008, 2012, 2016, 2020, 2024];
+const PRES_YEARS    = new Set([2008, 2012, 2016, 2020, 2024]);
+const MIDTERM_YEARS = new Set([2010, 2014, 2018, 2022]);
+const YEARS = [2008, 2010, 2012, 2014, 2016, 2018, 2020, 2022, 2024];
 
 const binSize = Math.max(2,
   (window.HISTORICAL_CONFIG && window.HISTORICAL_CONFIG.binSize) || 2);
@@ -138,15 +144,17 @@ function parseCsv(text) {
 }
 
 async function loadAll() {
-  const [houseText, presText, marginText] = await Promise.all([
+  const [houseText, presText, marginText, pviText] = await Promise.all([
     fetch('data/house-winners.csv').then(r => r.text()),
     fetch('data/pres-by-cd.csv').then(r => r.text()),
     fetch('data/house-margins.csv').then(r => r.text()),
+    fetch('data/pvi-by-cd.csv').then(r => r.text()),
   ]);
   return {
     house: parseCsv(houseText),
     pres:  parseCsv(presText),
     margins: parseCsv(marginText),
+    pvi:   parseCsv(pviText),
   };
 }
 
@@ -159,10 +167,11 @@ function indexHouse(rows) {
   return m;
 }
 
-// For one year, pair each district's presidential margin (in the configured
-// district cycle) with the House winner that same year, then bin by margin
-// and split into D-won / R-won counts.
-function buildYear(year, presRows, houseIdx) {
+// For one year, pair each district's "partisan lean" with the House winner
+// that year and bin by lean, splitting into D-won / R-won counts.  Lean is
+// presidential margin for presidential years and Cook-PVI (2-to-1 weighted)
+// for midterm years; both are in (R% − D%) percentage-point units.
+function buildYear(year, leanRows, leanField, houseIdx) {
   const wantedCycle = DISTRICT_CYCLE_FOR[year];
   const lo = -100, hi = 100;
   const nBins = Math.ceil((hi - lo) / binSize);
@@ -170,11 +179,11 @@ function buildYear(year, presRows, houseIdx) {
   const rCounts = new Array(nBins).fill(0);
   let nMatched = 0, nUnmatched = 0;
   let nR = 0, nD = 0;
-  for (const p of presRows) {
+  for (const p of leanRows) {
     if (+p.cycle !== year || p.district_cycle !== wantedCycle) continue;
     const winner = houseIdx.get(year + '|' + p.state + '|' + p.district);
     if (!winner || (winner !== 'D' && winner !== 'R')) { nUnmatched++; continue; }
-    const m = parseFloat(p.margin);
+    const m = parseFloat(p[leanField]);
     let idx = Math.floor((m - lo) / binSize);
     if (idx < 0) idx = 0; else if (idx >= nBins) idx = nBins - 1;
     if (winner === 'D') { dCounts[idx]++; nD++; }
@@ -261,7 +270,8 @@ function renderMarginYearChart(divId, year, stats, yMax) {
 }
 
 function renderYearChart(divId, year, stats, yMax) {
-  const { centres, ranges, dCounts, rCounts, nD, nR, nMatched } = stats;
+  const { centres, ranges, dCounts, rCounts, nD, nR, isMidterm } = stats;
+  const leanLabel = isMidterm ? 'PVI (2-to-1)' : 'Presidential margin';
   const titleParts = [
     `<b>${year}</b>`,
     `D-won ${nD}, R-won ${nR}`,
@@ -272,7 +282,7 @@ function renderYearChart(divId, year, stats, yMax) {
       marker: { color: 'rgba(31,119,180,0.85)', line: { width: 0 } },
       width: binSize, customdata: ranges,
       hovertemplate:
-        'pres margin: %{customdata[0]:.0f}% to %{customdata[1]:.0f}%<br>' +
+        leanLabel + ': %{customdata[0]:.0f}% to %{customdata[1]:.0f}%<br>' +
         'D-won seats: %{y}<extra></extra>',
     },
     {
@@ -280,13 +290,13 @@ function renderYearChart(divId, year, stats, yMax) {
       marker: { color: 'rgba(214,39,40,0.85)', line: { width: 0 } },
       width: binSize, customdata: ranges,
       hovertemplate:
-        'pres margin: %{customdata[0]:.0f}% to %{customdata[1]:.0f}%<br>' +
+        leanLabel + ': %{customdata[0]:.0f}% to %{customdata[1]:.0f}%<br>' +
         'R-won seats: %{y}<extra></extra>',
     },
   ], {
     title: { text: titleParts.join(' &nbsp;·&nbsp; '), font: { size: 13 }, x: 0.04, xanchor: 'left' },
     xaxis: {
-      title: { text: 'Presidential margin %  (← Democratic · Republican →)', standoff: 4, font: { size: 11 } },
+      title: { text: leanLabel + ' %  (← Democratic · Republican →)', standoff: 4, font: { size: 11 } },
       ticksuffix: '%', range: [-100, 100], zeroline: true, zerolinecolor: '#333', zerolinewidth: 1,
     },
     yaxis: { title: { text: 'Seats', font: { size: 11 } }, range: [0, yMax] },
@@ -413,7 +423,13 @@ function renderSimulatorRun(yMax, mMax) {
   let yMax = 0;
   let mMax = 0;
   for (const y of YEARS) {
-    yearStats[y]   = buildYear(y, data.pres, houseIdx);
+    // Presidential years bin by pres margin; midterm years bin by Cook-
+    // style PVI (computed from the two prior pres cycles, 2-to-1 weighted).
+    const isMidterm = MIDTERM_YEARS.has(y);
+    yearStats[y]   = isMidterm
+      ? buildYear(y, data.pvi, 'pvi', houseIdx)
+      : buildYear(y, data.pres, 'margin', houseIdx);
+    yearStats[y].isMidterm = isMidterm;
     marginStats[y] = buildMarginYear(y, data.margins);
     for (const v of yearStats[y].dCounts) if (v > yMax) yMax = v;
     for (const v of yearStats[y].rCounts) if (v > yMax) yMax = v;

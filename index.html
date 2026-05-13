@@ -386,7 +386,9 @@
 			representative's ideology distribution change. Values are in
 			percentage points. Each simulation = 1000 election runs.
 			&nbsp;·&nbsp;
-			<a href="historical.html">Compare against historical House results, 2008–2024 →</a>
+			<a href="historical.html"
+				>Compare against historical House results, 2008–2024 →</a
+			>
 		</div>
 
 		<div class="container">
@@ -428,7 +430,11 @@
 				</div>
 				<div class="pin-row">
 					<label
-						><input type="checkbox" id="dGerry_rGerry_pin" checked />
+						><input
+							type="checkbox"
+							id="dGerry_rGerry_pin"
+							checked
+						/>
 						Move both sliders together</label
 					>
 				</div>
@@ -438,8 +444,8 @@
 					<label>Democratic Ambient Moderation</label>
 					<input type="range" id="dIntModSafe" />
 					<span class="hint"
-						>Higher → Democrats run more moderate candidates
-						across all districts.</span
+						>Higher → Democrats run more moderate candidates across
+						all districts.</span
 					>
 				</div>
 				<div class="row">
@@ -490,8 +496,8 @@
 					<label>Democratic Moderation in Red Districts</label>
 					<input type="range" id="dIntModOpp" />
 					<span class="hint"
-						>Higher → Democrats run more moderate candidates in
-						red districts.</span
+						>Higher → Democrats run more moderate candidates in red
+						districts.</span
 					>
 				</div>
 				<div class="row">
@@ -525,11 +531,11 @@
 				</div>
 				<div class="row">
 					<label>Election Noise</label>
-					<input type="range" id="sigmaN" />
+					<input type="range" id="sqrtSigmaN" />
 					<span class="hint"
 						>Lower → election outcomes track district partisanship
-						and candidate ideology more deterministically.  Higher
-						→ more random per-district swings.</span
+						and candidate ideology more deterministically. Higher →
+						more random per-district swings.</span
 					>
 				</div>
 
@@ -572,20 +578,18 @@
 					1st: histogram of the median representative's ideology
 					across 1000 simulations, colored by party (blue = Democrat,
 					red = Republican).<br />
-					2nd: one example chamber — each district's partisanship
-					vs the elected representative's ideology. The black star
-					marks the median rep.<br />
-					3rd: histogram of district partisanship across the
-					chamber, with each bar split by who won the seat — blue =
-					average D-won seats, red = average R-won seats (averaged
-					over the 1000 simulations).  Total bar height = total
-					districts in that partisanship range.  Mismatches show
-					up as red bars in D-leaning bins or blue bars in
-					R-leaning bins.<br />
-					4th: distribution of final Republican seats across the
-					1000 simulations.  Bars are red when R holds a majority
-					and blue when D does, split at the chamber's
-					majority threshold.
+					2nd: one example chamber — each district's partisanship vs
+					the elected representative's ideology. The black star marks
+					the median rep.<br />
+					3rd: histogram of district partisanship across the chamber,
+					with each bar split by who won the seat — blue = average
+					D-won seats, red = average R-won seats (averaged over the
+					1000 simulations). Total bar height = total districts in
+					that partisanship range. Mismatches show up as red bars in
+					D-leaning bins or blue bars in R-leaning bins.<br />
+					4th: distribution of final Republican seats across the 1000
+					simulations. Bars are red when R holds a majority and blue
+					when D does, split at the chamber's majority threshold.
 				</div>
 
 				<details class="morePlots" id="morePlots">
@@ -635,17 +639,29 @@
 				"dIntModOpp",
 				"rIntModOpp",
 				"qualImp",
-				"sigmaN",
+				"sqrtSigmaN",
 			];
 
 			// Pairs of sliders that share a "move both together" pin checkbox.
 			// Each entry: { d, r, pin }.  When the pin is checked, dragging
 			// either slider snaps the other to the same value.
 			const pinnedPairs = [
-				{ d: "dGerry",  r: "rGerry",  pin: "dGerry_rGerry_pin"  },
-				{ d: "dIntModSafe",  r: "rIntModSafe",  pin: "dIntModSafe_rIntModSafe_pin"   },
-				{ d: "dIntModSwing", r: "rIntModSwing", pin: "dIntModSwing_rIntModSwing_pin" },
-				{ d: "dIntModOpp",   r: "rIntModOpp",   pin: "dIntModOpp_rIntModOpp_pin"     },
+				{ d: "dGerry", r: "rGerry", pin: "dGerry_rGerry_pin" },
+				{
+					d: "dIntModSafe",
+					r: "rIntModSafe",
+					pin: "dIntModSafe_rIntModSafe_pin",
+				},
+				{
+					d: "dIntModSwing",
+					r: "rIntModSwing",
+					pin: "dIntModSwing_rIntModSwing_pin",
+				},
+				{
+					d: "dIntModOpp",
+					r: "rIntModOpp",
+					pin: "dIntModOpp_rIntModOpp_pin",
+				},
 			];
 
 			function readParams() {
@@ -659,17 +675,17 @@
 				};
 				const cfg = window.CONFIG;
 				// Three sliders per party.
-				const bDSafe  = num("dIntModSafe");
-				const bRSafe  = num("rIntModSafe");
+				const bDSafe = num("dIntModSafe");
+				const bRSafe = num("rIntModSafe");
 				const bDSwing = num("dIntModSwing");
 				const bRSwing = num("rIntModSwing");
-				const bDOpp   = num("dIntModOpp");
-				const bROpp   = num("rIntModOpp");
+				const bDOpp = num("dIntModOpp");
+				const bROpp = num("rIntModOpp");
 				const im = cfg.intentionalMod;
 				const magnitude = cfg.candidateMagnitude ?? 100;
-				const safeDef  = cfg.sliders.dIntModSafe.value;
+				const safeDef = cfg.sliders.dIntModSafe.value;
 				const swingDef = cfg.sliders.dIntModSwing.value;
-				const oppDef   = cfg.sliders.dIntModOpp.value;
+				const oppDef = cfg.sliders.dIntModOpp.value;
 				// Each slider-block has { mean, var, tail } — three quantities
 				// added directly to the candidate-ideology mean / σ /
 				// Laplace-tail scale.  Effective per-party value scales
@@ -683,8 +699,8 @@
 					return {
 						meanD: sD * (bk.mean ?? 0),
 						meanR: sR * (bk.mean ?? 0),
-						varD:  sD * (bk.var  ?? 0),
-						varR:  sR * (bk.var  ?? 0),
+						varD: sD * (bk.var ?? 0),
+						varR: sR * (bk.var ?? 0),
 						tailD: sD * (bk.tail ?? 0),
 						tailR: sR * (bk.tail ?? 0),
 					};
@@ -694,14 +710,14 @@
 					nsim: CONST.nsim,
 					v: num("v"),
 					epsPct: CONST.epsPct,
-					// sigmaN is now slider-controlled (see CONFIG.sliders.sigmaN);
+					// sqrtSigmaN is now slider-controlled (see CONFIG.sliders.sqrtSigmaN);
 					// fall back to the constant for any older config that
 					// doesn't expose the slider.
-					sigmaN: document.getElementById("sigmaN")
-						? num("sigmaN")
-						: CONST.sigmaN,
+					sqrtSigmaN: document.getElementById("sqrtSigmaN")
+						? num("sqrtSigmaN")
+						: CONST.sqrtSigmaN,
 					noiseType: CONST.noiseType ?? "bates",
-					// sigmaN above is the noise scale; bates/tukey below set
+					// sqrtSigmaN above is the noise scale; bates/tukey below set
 					// the SHAPE of the unit-variance draw that gets multiplied
 					// by sigmaN inside the inner loop.
 					batesN: CONST.bates?.N ?? 3,
@@ -719,7 +735,7 @@
 					// Three slider blocks, each producing per-party
 					// mean / var / tail values linearly in the slider
 					// position (0 at slider=0, config value at slider=default).
-					safe:  resolveBlock(im.safe,  bDSafe,  bRSafe,  safeDef),
+					safe: resolveBlock(im.safe, bDSafe, bRSafe, safeDef),
 					swing: Object.assign(
 						resolveBlock(im.swing, bDSwing, bRSwing, swingDef),
 						{
@@ -732,7 +748,7 @@
 						}
 					),
 					opp: Object.assign(
-						resolveBlock(im.opp,   bDOpp,   bROpp,   oppDef),
+						resolveBlock(im.opp, bDOpp, bROpp, oppDef),
 						{ saturation: im.oppSaturation ?? 20 }
 					),
 					waveWeight: im.waveWeight ?? 0,
@@ -1016,7 +1032,9 @@
 
 			function renderStats(sims, p) {
 				const n = sims.meds.length;
-				let pR = 0, cntR = 0, cntD = 0;
+				let pR = 0,
+					cntR = 0,
+					cntD = 0;
 				const medsR = [];
 				const medsD = [];
 				for (let i = 0; i < n; i++) {
@@ -1037,13 +1055,17 @@
 				// when each individual sim is far from balanced; mismatches
 				// have a long right tail when noise / qualImp let extreme
 				// candidates flip safe seats.
-				const sortedSeats = Array.from(sims.seats).sort((a, b) => a - b);
+				const sortedSeats = Array.from(sims.seats).sort(
+					(a, b) => a - b
+				);
 				const medianSeats =
 					n % 2
 						? sortedSeats[(n - 1) >> 1]
 						: (sortedSeats[n / 2 - 1] + sortedSeats[n / 2]) / 2;
 				const medianRShare = medianSeats / N;
-				const sortedMis = Array.from(sims.mismatches).sort((a, b) => a - b);
+				const sortedMis = Array.from(sims.mismatches).sort(
+					(a, b) => a - b
+				);
 				const medianMismatch =
 					n % 2
 						? sortedMis[(n - 1) >> 1]
@@ -1087,13 +1109,19 @@
 				// are filtered before taking the median.
 				const medOfArray = (arr) => {
 					const a = Array.from(arr).sort((x, y) => x - y);
-					return n % 2 ? a[(n - 1) >> 1] : (a[n / 2 - 1] + a[n / 2]) / 2;
+					return n % 2
+						? a[(n - 1) >> 1]
+						: (a[n / 2 - 1] + a[n / 2]) / 2;
 				};
 				const medOfFiniteArray = (arr) => {
-					const a = Array.from(arr).filter(Number.isFinite).sort((x, y) => x - y);
+					const a = Array.from(arr)
+						.filter(Number.isFinite)
+						.sort((x, y) => x - y);
 					if (!a.length) return NaN;
 					const k = a.length;
-					return k % 2 ? a[(k - 1) >> 1] : (a[k / 2 - 1] + a[k / 2]) / 2;
+					return k % 2
+						? a[(k - 1) >> 1]
+						: (a[k / 2 - 1] + a[k / 2]) / 2;
 				};
 				// Take |ideology| per sim, then median across sims — gives a
 				// scale of "how extreme is the median rep on average" that
@@ -1118,21 +1146,27 @@
     <div>Chance the median representative is a Republican: <span class="num">${(
 		pR * 100
 	).toFixed(1)}%</span> ${pR > 0.5 ? rPill : dPill}</div>
-    <div>Median absolute ideology of median representative: <span class="num">${medianAbsMed.toFixed(1)}</span>
+    <div>Median absolute ideology of median representative: <span class="num">${medianAbsMed.toFixed(
+		1
+	)}</span>
       &nbsp;|&nbsp; when median is D: <span class="num">${
 			Number.isFinite(medianMedD) ? medianMedD.toFixed(1) : "–"
 		}</span>
       &nbsp;|&nbsp; when median is R: <span class="num">${
 			Number.isFinite(medianMedR) ? medianMedR.toFixed(1) : "–"
 		}</span></div>
-    <div>Median ideology of 33rd-percentile representative: <span class="num">${median33.toFixed(1)}</span>
-      &nbsp;|&nbsp; Median ideology of 67th-percentile representative: <span class="num">${median67.toFixed(1)}</span></div>
+    <div>Median ideology of 33rd-percentile representative: <span class="num">${median33.toFixed(
+		1
+	)}</span>
+      &nbsp;|&nbsp; Median ideology of 67th-percentile representative: <span class="num">${median67.toFixed(
+			1
+		)}</span></div>
     <div>Median ideology of median Democratic representative: <span class="num">${
 		Number.isFinite(medianDMed) ? medianDMed.toFixed(1) : "–"
 	}</span>
       &nbsp;|&nbsp; Median ideology of median Republican representative: <span class="num">${
-		Number.isFinite(medianRMed) ? medianRMed.toFixed(1) : "–"
-	}</span>
+			Number.isFinite(medianRMed) ? medianRMed.toFixed(1) : "–"
+		}</span>
       <span style="color:var(--muted);font-size:11px">(Hastert-rule pivot)</span></div>
     <div>Median Republican seat share: <span class="num">${(
 		medianRShare * 100
@@ -1170,8 +1204,8 @@
 					// are the single tunable knobs for this view.
 					{
 						binSize: window.CONFIG.histograms.repIdeology.binSize,
-						lo:      window.CONFIG.histograms.repIdeology.lo,
-						hi:      window.CONFIG.histograms.repIdeology.hi,
+						lo: window.CONFIG.histograms.repIdeology.lo,
+						hi: window.CONFIG.histograms.repIdeology.hi,
 					},
 					// Per-district margin bins — same grid as the historical
 					// House-margin chart so the two read as parallel views.
@@ -1226,7 +1260,9 @@
 							})
 						);
 					}
-				} catch (_) { /* private mode / quota — ignore */ }
+				} catch (_) {
+					/* private mode / quota — ignore */
+				}
 				// If see-more-plots is currently visible, refresh its charts
 				// using the freshly cached sims.
 				if (document.getElementById("morePlots")?.open) {
@@ -1305,9 +1341,9 @@
 				// override one side without affecting the other.
 				const sharedPairs = {
 					gerry: ["rGerry", "dGerry"],
-					intModSafe:  ["rIntModSafe",  "dIntModSafe"],
+					intModSafe: ["rIntModSafe", "dIntModSafe"],
 					intModSwing: ["rIntModSwing", "dIntModSwing"],
-					intModOpp:   ["rIntModOpp",   "dIntModOpp"],
+					intModOpp: ["rIntModOpp", "dIntModOpp"],
 				};
 				for (const [shared, ids] of Object.entries(sharedPairs)) {
 					const block = window.CONFIG.sliders[shared];
@@ -1326,14 +1362,14 @@
 				const setIntModRange = (sliderIdsLR) => {
 					const cfg = window.CONFIG.sliders[sliderIdsLR[0]];
 					for (const id of sliderIdsLR) {
-						window.CONFIG.sliders[id].min   = 0;
-						window.CONFIG.sliders[id].max   = cfg.max;
+						window.CONFIG.sliders[id].min = 0;
+						window.CONFIG.sliders[id].max = cfg.max;
 						window.CONFIG.sliders[id].value = cfg.value;
 					}
 				};
-				setIntModRange(["dIntModSafe",  "rIntModSafe"]);
+				setIntModRange(["dIntModSafe", "rIntModSafe"]);
 				setIntModRange(["dIntModSwing", "rIntModSwing"]);
-				setIntModRange(["dIntModOpp",   "rIntModOpp"]);
+				setIntModRange(["dIntModOpp", "rIntModOpp"]);
 
 				// Apply slider attributes (min/max/step/default) from CONFIG so the
 				// numbers in config.js are the single source of truth.
@@ -1457,7 +1493,13 @@
 					let dsLast = parseFloat(ds.value);
 					let rsLast = parseFloat(rs.value);
 					let syncing = false; // re-entry guard
-					const shift = (src, dst, getLast, setLast, setOtherLast) => {
+					const shift = (
+						src,
+						dst,
+						getLast,
+						setLast,
+						setOtherLast
+					) => {
 						const newVal = parseFloat(src.value);
 						if (syncing || !pin.checked) {
 							setLast(newVal);
@@ -1478,7 +1520,9 @@
 						);
 						syncing = true;
 						dst.value = target;
-						dst.dispatchEvent(new Event("input", { bubbles: true }));
+						dst.dispatchEvent(
+							new Event("input", { bubbles: true })
+						);
 						syncing = false;
 						setOtherLast(parseFloat(dst.value));
 					};
@@ -1536,8 +1580,14 @@
 							for (const pair of pinnedPairs) {
 								const hasD = pair.d in values;
 								const hasR = pair.r in values;
-								if (hasD && hasR && values[pair.d] !== values[pair.r]) {
-									const pin = document.getElementById(pair.pin);
+								if (
+									hasD &&
+									hasR &&
+									values[pair.d] !== values[pair.r]
+								) {
+									const pin = document.getElementById(
+										pair.pin
+									);
 									if (pin) pin.checked = false;
 								}
 							}
@@ -1548,7 +1598,9 @@
 								const range = document.getElementById(id);
 								if (!range) continue;
 								range.value = v;
-								const numEl = document.getElementById(id + "_v");
+								const numEl = document.getElementById(
+									id + "_v"
+								);
 								if (numEl && numEl.tagName === "INPUT") {
 									numEl.value = formatVal(id, parseFloat(v));
 								}
@@ -1606,7 +1658,10 @@
 					renderExampleChamber(params, cell.id, i);
 				}
 				if (sims.electedBins) {
-					renderElectedIdeologyChart("morePlotsIdeologyChart", sims.electedBins);
+					renderElectedIdeologyChart(
+						"morePlotsIdeologyChart",
+						sims.electedBins
+					);
 				}
 				if (sims.marginBins) {
 					renderDistrictMarginsChart(
@@ -1724,26 +1779,47 @@
 					divId,
 					[
 						{
-							x: centres, y: avgD, type: "bar", name: "Democratic",
-							marker: { color: "rgba(31,119,180,0.85)", line: { width: 0 } },
-							width: binSize, customdata: ranges,
+							x: centres,
+							y: avgD,
+							type: "bar",
+							name: "Democratic",
+							marker: {
+								color: "rgba(31,119,180,0.85)",
+								line: { width: 0 },
+							},
+							width: binSize,
+							customdata: ranges,
 							hovertemplate:
 								"ideology: %{customdata[0]:.0f} to %{customdata[1]:.0f}<br>" +
 								"avg D reps: %{y:.2f}<extra></extra>",
 						},
 						{
-							x: centres, y: avgR, type: "bar", name: "Republican",
-							marker: { color: "rgba(214,39,40,0.85)", line: { width: 0 } },
-							width: binSize, customdata: ranges,
+							x: centres,
+							y: avgR,
+							type: "bar",
+							name: "Republican",
+							marker: {
+								color: "rgba(214,39,40,0.85)",
+								line: { width: 0 },
+							},
+							width: binSize,
+							customdata: ranges,
 							hovertemplate:
 								"ideology: %{customdata[0]:.0f} to %{customdata[1]:.0f}<br>" +
 								"avg R reps: %{y:.2f}<extra></extra>",
 						},
 					],
 					{
-						title: { text: "Distribution of Rep Ideology", font: { size: 13 } },
+						title: {
+							text: "Distribution of Rep Ideology",
+							font: { size: 13 },
+						},
 						xaxis: {
-							title: { text: "Rep Ideology  (← Liberal · Conservative →)", standoff: 4, font: { size: 11 } },
+							title: {
+								text: "Rep Ideology  (← Liberal · Conservative →)",
+								standoff: 4,
+								font: { size: 11 },
+							},
 							range: [xLo, xHi],
 							zeroline: true,
 							zerolinecolor: "#333",
@@ -1753,13 +1829,21 @@
 							showticklabels: false,
 							ticks: "",
 						},
-						yaxis: { title: { text: "Avg reps per chamber", font: { size: 11 } } },
+						yaxis: {
+							title: {
+								text: "Avg reps per chamber",
+								font: { size: 11 },
+							},
+						},
 						margin: { l: 60, r: 14, t: 38, b: 50 },
 						barmode: "stack",
 						bargap: 0.05,
 						legend: {
 							orientation: "h",
-							x: 0.5, xanchor: "center", y: -0.18, yanchor: "top",
+							x: 0.5,
+							xanchor: "center",
+							y: -0.18,
+							yanchor: "top",
 						},
 						plot_bgcolor: "#fff",
 					},
@@ -1869,33 +1953,65 @@
 					divId,
 					[
 						{
-							x: centres, y: avgD, type: "bar", name: "D-won",
-							marker: { color: "rgba(31,119,180,0.85)", line: { width: 0 } },
-							width: binSize, customdata: ranges,
+							x: centres,
+							y: avgD,
+							type: "bar",
+							name: "D-won",
+							marker: {
+								color: "rgba(31,119,180,0.85)",
+								line: { width: 0 },
+							},
+							width: binSize,
+							customdata: ranges,
 							hovertemplate:
 								"margin: %{customdata[0]:.0f} to %{customdata[1]:.0f}<br>" +
 								"avg D-won seats: %{y:.2f}<extra></extra>",
 						},
 						{
-							x: centres, y: avgR, type: "bar", name: "R-won",
-							marker: { color: "rgba(214,39,40,0.85)", line: { width: 0 } },
-							width: binSize, customdata: ranges,
+							x: centres,
+							y: avgR,
+							type: "bar",
+							name: "R-won",
+							marker: {
+								color: "rgba(214,39,40,0.85)",
+								line: { width: 0 },
+							},
+							width: binSize,
+							customdata: ranges,
 							hovertemplate:
 								"margin: %{customdata[0]:.0f} to %{customdata[1]:.0f}<br>" +
 								"avg R-won seats: %{y:.2f}<extra></extra>",
 						},
 					],
 					{
-						title: { text: "Distribution of Per-District Election Margins", font: { size: 13 } },
+						title: {
+							text: "Distribution of Per-District Election Margins",
+							font: { size: 13 },
+						},
 						xaxis: {
-							title: { text: "Election margin  (← Democratic · Republican →)", standoff: 4 },
+							title: {
+								text: "Election margin  (← Democratic · Republican →)",
+								standoff: 4,
+							},
 							range: [-100, 100],
 							// Pin tick labels so the axis numbers are always
 							// visible regardless of plot width.
 							tickmode: "array",
 							tickvals: [-100, -75, -50, -25, 0, 25, 50, 75, 100],
-							ticktext: ["−100", "−75", "−50", "−25", "0", "+25", "+50", "+75", "+100"],
-							zeroline: true, zerolinecolor: '#333', zerolinewidth: 1,
+							ticktext: [
+								"−100",
+								"−75",
+								"−50",
+								"−25",
+								"0",
+								"+25",
+								"+50",
+								"+75",
+								"+100",
+							],
+							zeroline: true,
+							zerolinecolor: "#333",
+							zerolinewidth: 1,
 						},
 						yaxis: { title: "Avg seats per chamber" },
 						margin: { l: 60, r: 20, t: 50, b: 60 },
@@ -1903,7 +2019,10 @@
 						bargap: 0.05,
 						legend: {
 							orientation: "h",
-							x: 0.5, xanchor: "center", y: -0.22, yanchor: "top",
+							x: 0.5,
+							xanchor: "center",
+							y: -0.22,
+							yanchor: "top",
 						},
 					},
 					{ displayModeBar: false, responsive: true }
