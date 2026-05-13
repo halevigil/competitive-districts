@@ -163,6 +163,29 @@ async function loadAll() {
   };
 }
 
+// Median bin centre, weighting each bin by total seats in it.  Used to label
+// each year's chart with the partisanship of the median (chamber-pivot)
+// district — i.e. the lean at which half of all seats are more-D and half
+// are more-R.  Histogram-based, so accuracy is ±(binSize/2).
+function medianBinCentre(centres, dCounts, rCounts) {
+  let total = 0;
+  for (let i = 0; i < dCounts.length; i++) total += dCounts[i] + rCounts[i];
+  if (!total) return null;
+  const half = total / 2;
+  let cum = 0;
+  for (let i = 0; i < dCounts.length; i++) {
+    cum += dCounts[i] + rCounts[i];
+    if (cum >= half) return centres[i];
+  }
+  return centres[centres.length - 1];
+}
+
+function formatLean(m) {
+  if (m == null || !isFinite(m)) return '—';
+  if (Math.abs(m) < 0.5) return 'EVEN';
+  return (m > 0 ? 'R+' : 'D+') + Math.abs(m).toFixed(0);
+}
+
 // Index: (cycle, state, district) → winner_party
 function indexHouse(rows) {
   const m = new Map();
@@ -277,9 +300,11 @@ function renderMarginYearChart(divId, year, stats, yMax) {
 function renderYearChart(divId, year, stats, yMax) {
   const { centres, ranges, dCounts, rCounts, nD, nR, isMidterm } = stats;
   const leanLabel = isMidterm ? 'PVI (2-to-1)' : 'Presidential margin';
+  const med = medianBinCentre(centres, dCounts, rCounts);
   const titleParts = [
     `<b>${year}</b>`,
     `D-won ${nD}, R-won ${nR}`,
+    `median ${formatLean(med)}`,
   ];
   Plotly.newPlot(divId, [
     {
@@ -337,9 +362,11 @@ function renderSimulatorRun(yMax, mMax) {
   } = saved;
   const totalD = avgDWins.reduce((a,b) => a + b, 0);
   const totalR = avgRWins.reduce((a,b) => a + b, 0);
+  const simMed = medianBinCentre(centres, avgDWins, avgRWins);
   const titleParts = [
     `<b>Simulator (current run)</b>`,
     `D-won ${totalD.toFixed(0)}, R-won ${totalR.toFixed(0)}`,
+    `median ${formatLean(simMed)}`,
     `rGerry ${rGerry?.toFixed?.(2) ?? '—'}, dGerry ${dGerry?.toFixed?.(2) ?? '—'}, v ${v ?? 0}`,
   ];
   Plotly.newPlot('simRunChart', [
