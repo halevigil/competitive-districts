@@ -163,27 +163,43 @@ async function loadAll() {
   };
 }
 
-// Median bin centre, weighting each bin by total seats in it.  Used to label
-// each year's chart with the partisanship of the median (chamber-pivot)
-// district — i.e. the lean at which half of all seats are more-D and half
-// are more-R.  Histogram-based, so accuracy is ±(binSize/2).
-function medianBinCentre(centres, dCounts, rCounts) {
+// True median of a list of numeric leans.  Used to label each year's chart
+// with the presidential-lean (or PVI, for midterms) of the chamber-pivot
+// district — i.e. sort districts by lean and take the middle one.  No
+// binning, so resolution is the underlying data's resolution.
+function medianOfNumbers(arr) {
+  if (!arr.length) return null;
+  const s = [...arr].sort((a, b) => a - b);
+  const n = s.length;
+  if (n % 2) return s[(n - 1) / 2];
+  return (s[n / 2 - 1] + s[n / 2]) / 2;
+}
+
+// Linear-interpolated median from a binned histogram.  Used for the
+// simulator-run panel, which only has access to per-bin averages from
+// localStorage rather than raw per-district leans.  Resolution is roughly
+// (binSize / counts-in-median-bin), much better than the bin centre.
+function medianFromBins(centres, dCounts, rCounts, binSize) {
   let total = 0;
   for (let i = 0; i < dCounts.length; i++) total += dCounts[i] + rCounts[i];
   if (!total) return null;
   const half = total / 2;
   let cum = 0;
   for (let i = 0; i < dCounts.length; i++) {
-    cum += dCounts[i] + rCounts[i];
-    if (cum >= half) return centres[i];
+    const c = dCounts[i] + rCounts[i];
+    if (cum + c >= half && c > 0) {
+      const frac = (half - cum) / c;
+      return centres[i] - binSize / 2 + frac * binSize;
+    }
+    cum += c;
   }
   return centres[centres.length - 1];
 }
 
 function formatLean(m) {
   if (m == null || !isFinite(m)) return '—';
-  if (Math.abs(m) < 0.5) return 'EVEN';
-  return (m > 0 ? 'R+' : 'D+') + Math.abs(m).toFixed(0);
+  if (Math.abs(m) < 0.05) return 'EVEN';
+  return (m > 0 ? 'R+' : 'D+') + Math.abs(m).toFixed(1);
 }
 
 // Index: (cycle, state, district) → winner_party
@@ -205,6 +221,9 @@ function buildYear(year, leanRows, leanField, houseIdx) {
   const nBins = Math.ceil((hi - lo) / binSize);
   const dCounts = new Array(nBins).fill(0);
   const rCounts = new Array(nBins).fill(0);
+  // Raw lean values for every matched district, so we can compute a true
+  // (non-binned) median for the chart title.
+  const leans = [];
   let nMatched = 0, nUnmatched = 0;
   let nR = 0, nD = 0;
   for (const p of leanRows) {
@@ -212,6 +231,8 @@ function buildYear(year, leanRows, leanField, houseIdx) {
     const winner = houseIdx.get(year + '|' + p.state + '|' + p.district);
     if (!winner || (winner !== 'D' && winner !== 'R')) { nUnmatched++; continue; }
     const m = parseFloat(p[leanField]);
+    if (!isFinite(m)) { nUnmatched++; continue; }
+    leans.push(m);
     let idx = Math.floor((m - lo) / binSize);
     if (idx < 0) idx = 0; else if (idx >= nBins) idx = nBins - 1;
     if (winner === 'D') { dCounts[idx]++; nD++; }
@@ -226,7 +247,7 @@ function buildYear(year, leanRows, leanField, houseIdx) {
     centres[i] = (a + b) / 2;
     ranges[i]  = [a, b];
   }
-  return { centres, ranges, dCounts, rCounts, nMatched, nUnmatched, nD, nR };
+  return { centres, ranges, dCounts, rCounts, leans, nMatched, nUnmatched, nD, nR };
 }
 
 // Per-district House election-margin distribution for one cycle.  Same bin
@@ -298,9 +319,9 @@ function renderMarginYearChart(divId, year, stats, yMax) {
 }
 
 function renderYearChart(divId, year, stats, yMax) {
-  const { centres, ranges, dCounts, rCounts, nD, nR, isMidterm } = stats;
+  const { centres, ranges, dCounts, rCounts, leans, nD, nR, isMidterm } = stats;
   const leanLabel = isMidterm ? 'PVI (2-to-1)' : 'Presidential margin';
-  const med = medianBinCentre(centres, dCounts, rCounts);
+  const med = medianOfNumbers(leans || []);
   const titleParts = [
     `<b>${year}</b>`,
     `D-won ${nD}, R-won ${nR}`,
@@ -362,7 +383,7 @@ function renderSimulatorRun(yMax, mMax) {
   } = saved;
   const totalD = avgDWins.reduce((a,b) => a + b, 0);
   const totalR = avgRWins.reduce((a,b) => a + b, 0);
-  const simMed = medianBinCentre(centres, avgDWins, avgRWins);
+  const simMed = medianFromBins(centres, avgDWins, avgRWins, binSize);
   const titleParts = [
     `<b>Simulator (current run)</b>`,
     `D-won ${totalD.toFixed(0)}, R-won ${totalR.toFixed(0)}`,
