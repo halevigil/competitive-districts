@@ -1,0 +1,29 @@
+# Auto-deploy to Fly.io on every push to main.
+#
+# Setup once:
+#   1. Create the Fly app: `fly launch` (uses this repo's fly.toml).
+#   2. Mint a deploy token: `fly tokens create deploy -x 8760h -a <app-name>`
+#   3. Add it to GitHub repo secrets as FLY_API_TOKEN
+#      (Settings → Secrets and variables → Actions → New repository secret).
+#
+# After that, every push to main rebuilds the Dockerfile on Fly's remote
+# builder and rolls out to the app named in fly.toml.
+
+name: Fly Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    name: Deploy app
+    runs-on: ubuntu-latest
+    # Serialise deploys so two quick pushes don't race each other.
+    concurrency: deploy-group
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
