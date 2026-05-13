@@ -11,5 +11,8 @@ fly.toml
 # raw inputs do not.
 data/538-house-raw.csv
 data/dailykos-2008-2020-pres-by-cd-2020-cycle.csv
+data/dailykos-2000-2008-pres-by-cd-2008-cycle.csv
+data/dailykos-2008-2012-pres-by-cd-2020-cycle.csv
+data/dailykos-2020-pres-by-cd-2022-cycle.csv
 data/downballot-2024-pres-by-cd.csv
 data/build-historical.py

@@ -31,6 +31,8 @@ YEARS         = tuple(sorted(PRES_YEARS + MIDTERM_YEARS))
 # same years.  Cook uses a 3-to-1 weighting these days; we use 2-to-1
 # (matches Cook's older methodology and reads cleaner here).
 NATIONAL_PRES_MARGIN = {
+    2000:  -0.51,  # Gore beat Bush by 0.51 pp in popular vote (lost EC)
+    2004:  +2.46,  # Bush beat Kerry by 2.46 pp
     2008:  -7.27,  # Obama beat McCain by 7.27 pp
     2012:  -3.86,  # Obama beat Romney by 3.86 pp
     2016:  -2.10,  # Clinton beat Trump by 2.10 pp in popular vote
@@ -43,10 +45,10 @@ NATIONAL_PRES_MARGIN = {
 # only one cycle is available in the right district lines, we fall back
 # to single-cycle (the 2-to-1 collapses to 1-to-0).
 PVI_BACKING = {
-    2010: ("2020", [(2008, 1)]),                  # no 2004 data; single-cycle
-    2014: ("2020", [(2012, 2), (2008, 1)]),
+    2010: ("2008", [(2008, 2), (2004, 1)]),       # 2002-cycle lines
+    2014: ("2020", [(2012, 2), (2008, 1)]),       # 2012-cycle lines
     2018: ("2020", [(2016, 2), (2012, 1)]),
-    2022: ("2024", [(2020, 1)]),                  # no 2016 in 2024-cycle lines
+    2022: ("2022", [(2020, 1)]),                  # no 2016 in 2022-cycle lines
 }
 
 # -----------------------------------------------------------------------------
@@ -133,12 +135,17 @@ with open("house-margins.csv", "w", newline="") as f:
 print("house-margins.csv written")
 
 # -----------------------------------------------------------------------------
-# Presidential margin per CD, from the two Daily Kos / Downballot sheets.
+# Presidential margin per CD, from several Daily Kos / Downballot sheets.
 # Output schema:
-#   cycle           — election year (e.g. 2024)
-#   district_cycle  — which redistricting cycle's district lines were used
-#                     ("2020" = post-2010 lines, "2024" = post-2020 lines).
-#                     Lets the renderer match cycles up.
+#   cycle           — presidential election year (e.g. 2024)
+#   district_cycle  — which redistricting cycle's district lines were used:
+#                       "2008" = 2002-cycle lines (2002–2010 elections)
+#                       "2020" = 2012-cycle lines (2012–2020 elections)
+#                       "2022" = 2022-cycle lines (2022 election as drawn)
+#                       "2024" = 2024-cycle lines (2024 election; minor
+#                                differences from 2022-cycle in NC, NY, AL, LA)
+#                     Lets the renderer match district lines up with the
+#                     election year that used them.
 #   state, district — e.g. CA, 12
 #   margin          — R% - D%, in percentage points
 # -----------------------------------------------------------------------------
@@ -214,12 +221,84 @@ for row in rdr[3:]:
             continue
         pres_out.append([cycle, "2024", state, district, round(r - d, 2)])
 
+# --- Daily Kos 2000/2004/2008 in 2002-cycle (2002-2010) districts ---
+#   row[0]: CD ("AL-01", "AK-AL")
+#   row[3]/[4]: 2008 D% / R%
+#   row[5]/[6]: 2004 D% / R%
+#   row[7]/[8]: 2000 D% / R%
+with open("dailykos-2000-2008-pres-by-cd-2008-cycle.csv", newline="") as f:
+    rdr = list(csv.reader(f))
+for row in rdr[2:]:  # skip the 2 header rows
+    if not row or not row[0] or "-" not in row[0]:
+        continue
+    state, district = split_cd(row[0])
+    pairs = [(2008, 3, 4), (2004, 5, 6), (2000, 7, 8)]
+    for cycle, di, ri in pairs:
+        try:
+            d = parse_pct(row[di])
+            r = parse_pct(row[ri])
+        except (ValueError, IndexError):
+            continue
+        if d is None or r is None:
+            continue
+        pres_out.append([cycle, "2008", state, district, round(r - d, 2)])
+
+# --- Daily Kos 2008/2012 in 2012-cycle districts — full 435-district
+#     coverage of 2008 (better than the 2008/12/16/20 sheet we already
+#     parse above, which is missing ~109 districts for 2008).  When
+#     both sheets have an entry for the same (year, district, cycle),
+#     the entry that lands LATER in pres_out wins because we use a
+#     dict-based index downstream.
+with open("dailykos-2008-2012-pres-by-cd-2020-cycle.csv", newline="") as f:
+    rdr = list(csv.reader(f))
+for row in rdr[2:]:
+    if not row or not row[0] or "-" not in row[0]:
+        continue
+    state, district = split_cd(row[0])
+    pairs = [(2012, 3, 4), (2008, 5, 6)]
+    for cycle, di, ri in pairs:
+        try:
+            d = parse_pct(row[di])
+            r = parse_pct(row[ri])
+        except (ValueError, IndexError):
+            continue
+        if d is None or r is None:
+            continue
+        pres_out.append([cycle, "2020", state, district, round(r - d, 2)])
+
+# --- Daily Kos 2020 in 2022-cycle (post-2020 redistricting, as used in
+#     2022 elections) districts.  Schema: District, Incumbent, Party,
+#     Biden, Trump, Margin.  Margin is precomputed but we re-derive
+#     from D% / R% to match our R−D convention.
+with open("dailykos-2020-pres-by-cd-2022-cycle.csv", newline="") as f:
+    rdr = list(csv.reader(f))
+for row in rdr[1:]:  # only one header row in this sheet
+    if not row or not row[0] or "-" not in row[0]:
+        continue
+    state, district = split_cd(row[0])
+    try:
+        d = parse_pct(row[3])
+        r = parse_pct(row[4])
+    except (ValueError, IndexError):
+        continue
+    if d is None or r is None:
+        continue
+    pres_out.append([2020, "2022", state, district, round(r - d, 2)])
+
+# Deduplicate by (cycle, district_cycle, state, district) — the new
+# 2008-in-2020-cycle sheet has full 435-district coverage and should
+# win over the older sheet's partial 2008 entries.  Last write wins.
+pres_dedup = {}
+for row in pres_out:
+    key = (row[0], row[1], row[2], row[3])
+    pres_dedup[key] = row
+
 with open("pres-by-cd.csv", "w", newline="") as f:
     w = csv.writer(f)
     w.writerow(["cycle", "district_cycle", "state", "district", "margin"])
-    for r in sorted(pres_out):
+    for r in sorted(pres_dedup.values()):
         w.writerow(r)
-print(f"pres-by-cd.csv written ({len(pres_out)} rows)")
+print(f"pres-by-cd.csv written ({len(pres_dedup)} rows)")
 
 # -----------------------------------------------------------------------------
 # PVI per district per midterm year (Cook-style, 2-to-1 weighted):
@@ -236,22 +315,30 @@ for cycle, district_cycle, state, district, margin in pres_out:
 
 pvi_out = []
 for midterm, (district_cycle, weighted_years) in PVI_BACKING.items():
-    total_w = sum(w for (_, w) in weighted_years)
-    nat_weighted = sum(NATIONAL_PRES_MARGIN[y] * w for (y, w) in weighted_years)
-    nat_avg = nat_weighted / total_w
-    # Districts present in EVERY backing pres cycle (intersection).
-    district_sets = [
-        set(pres_by_cycle[(py, district_cycle)].keys())
-        for (py, _) in weighted_years
-    ]
-    common = set.intersection(*district_sets) if district_sets else set()
-    for (state, district) in sorted(common):
+    # Districts present in ANY backing pres cycle for this district_cycle.
+    # For each one, take the weighted average over whichever pres years
+    # actually have data — falling back to single-cycle if a district
+    # only has data in one of the cycles (e.g. 2008 is missing from many
+    # post-2010-redistricted lines in the Daily Kos sheet).  Recompute
+    # the matching national-avg using the SAME subset of cycles so the
+    # district-vs-country comparison stays valid.
+    all_districts = set()
+    for (py, _) in weighted_years:
+        all_districts |= set(pres_by_cycle[(py, district_cycle)].keys())
+    for (state, district) in sorted(all_districts):
+        present = [
+            (py, w) for (py, w) in weighted_years
+            if (state, district) in pres_by_cycle[(py, district_cycle)]
+        ]
+        if not present:
+            continue
+        total_w = sum(w for (_, w) in present)
         district_weighted = sum(
             pres_by_cycle[(py, district_cycle)][(state, district)] * w
-            for (py, w) in weighted_years
+            for (py, w) in present
         )
-        district_avg = district_weighted / total_w
-        pvi = round(district_avg - nat_avg, 2)
+        nat_weighted = sum(NATIONAL_PRES_MARGIN[py] * w for (py, w) in present)
+        pvi = round(district_weighted / total_w - nat_weighted / total_w, 2)
         pvi_out.append([midterm, district_cycle, state, district, pvi])
 
 with open("pvi-by-cd.csv", "w", newline="") as f:

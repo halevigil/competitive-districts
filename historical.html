@@ -101,9 +101,14 @@
 // pick the matching presidential-margin row (presidential years) or PVI
 // row (midterm years).
 const DISTRICT_CYCLE_FOR = {
-  2008: '2020', 2010: '2020', 2012: '2020', 2014: '2020',
-  2016: '2020', 2018: '2020', 2020: '2020',
-  2022: '2024', 2024: '2024',
+  // 2002-cycle lines (used 2002-2010 elections)
+  2008: '2008', 2010: '2008',
+  // 2012-cycle lines (used 2012-2020 elections)
+  2012: '2020', 2014: '2020', 2016: '2020', 2018: '2020', 2020: '2020',
+  // 2022-cycle lines (used 2022 election as drawn)
+  2022: '2022',
+  // 2024-cycle lines (minor differences from 2022 in NC/NY/AL/LA)
+  2024: '2024',
 };
 const PRES_YEARS    = new Set([2008, 2012, 2016, 2020, 2024]);
 const MIDTERM_YEARS = new Set([2010, 2014, 2018, 2022]);
