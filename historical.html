@@ -350,7 +350,7 @@ function renderYearChart(divId, year, stats, yMax) {
   const titleParts = [
     `<b>${year}</b>`,
     `D-won ${nD}, R-won ${nR}`,
-    `median lean ${formatLean(medRel)} vs nat'l`,
+    `median lean ${formatLean(medRel)}`,
   ];
   Plotly.newPlot(divId, [
     {
