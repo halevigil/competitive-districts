@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <title>Historical District Partisanship — 2008–2024</title>
 <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-<script src="historical_config.js"></script>
+<script src="config.js"></script>
 <style>
   :root {
     --bg: #fafafa;
@@ -59,8 +59,8 @@
   Cook-style PVI with 2-to-1 weighting on the two prior presidential cycles
   for midterm years), coloured by who actually won the House race (blue =
   Democratic, red = Republican).  <b>Right:</b> distribution of per-district
-  House election margins (R% − D%) for that cycle.  Bin width is
-  configurable in <code>historical_config.js</code>.
+  House election margins (R% − D%) for that cycle.  Bin width is shared
+  with the simulator (<code>CONFIG.histograms.district.binSize</code>).
 </div>
 
 <div id="charts" class="grid"><div class="loading full">Loading data…</div></div>
@@ -114,8 +114,12 @@ const PRES_YEARS    = new Set([2008, 2012, 2016, 2020, 2024]);
 const MIDTERM_YEARS = new Set([2010, 2014, 2018, 2022]);
 const YEARS = [2008, 2010, 2012, 2014, 2016, 2018, 2020, 2022, 2024];
 
+// Bin width comes from the same place the simulator reads it from, so the
+// two pages always render at the same resolution.
 const binSize = Math.max(2,
-  (window.HISTORICAL_CONFIG && window.HISTORICAL_CONFIG.binSize) || 2);
+  (window.CONFIG && window.CONFIG.histograms
+    && window.CONFIG.histograms.district
+    && window.CONFIG.histograms.district.binSize) || 4);
 
 // ---------------------------------------------------------------------------
 // Tiny CSV parser — handles double-quoted fields with embedded commas.  Good
@@ -325,7 +329,7 @@ function renderYearChart(divId, year, stats, yMax) {
   const titleParts = [
     `<b>${year}</b>`,
     `D-won ${nD}, R-won ${nR}`,
-    `median ${formatLean(med)}`,
+    `median lean ${formatLean(med)}`,
   ];
   Plotly.newPlot(divId, [
     {
@@ -387,7 +391,7 @@ function renderSimulatorRun(yMax, mMax) {
   const titleParts = [
     `<b>Simulator (current run)</b>`,
     `D-won ${totalD.toFixed(0)}, R-won ${totalR.toFixed(0)}`,
-    `median ${formatLean(simMed)}`,
+    `median lean ${formatLean(simMed)}`,
     `rGerry ${rGerry?.toFixed?.(2) ?? '—'}, dGerry ${dGerry?.toFixed?.(2) ?? '—'}, v ${v ?? 0}`,
   ];
   Plotly.newPlot('simRunChart', [
