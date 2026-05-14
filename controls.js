@@ -367,12 +367,58 @@
 		runNow();
 	}
 
+	// localStorage key for the raw slider positions (NOT the simulator
+	// run data, which lives under `simulator_current_run`).  Persisting
+	// the slider values themselves lets the simulator and historical
+	// pages share state — drag a slider on one page, navigate to the
+	// other, and the same value is already in place.
+	const SLIDER_STATE_KEY = "simulator_slider_state";
+
+	function restoreSliderState() {
+		let saved;
+		try {
+			saved = JSON.parse(localStorage.getItem(SLIDER_STATE_KEY) || "null");
+		} catch (_) {
+			return;
+		}
+		if (!saved || typeof saved !== "object") return;
+		for (const id of SLIDER_IDS) {
+			const v = saved[id];
+			if (typeof v !== "number" || !isFinite(v)) continue;
+			const r = document.getElementById(id);
+			if (!r) continue;
+			// Clamp into the slider's current [min, max] in case CONFIG
+			// has tightened the bounds since the value was cached.
+			const lo = parseFloat(r.min),
+				hi = parseFloat(r.max);
+			r.value = String(Math.max(lo, Math.min(hi, v)));
+		}
+	}
+
+	function saveSliderState() {
+		try {
+			const state = {};
+			for (const id of SLIDER_IDS) {
+				const r = document.getElementById(id);
+				if (r) state[id] = parseFloat(r.value);
+			}
+			localStorage.setItem(SLIDER_STATE_KEY, JSON.stringify(state));
+		} catch (_) {
+			/* private mode / quota — ignore */
+		}
+	}
+
 	// Main entry point.  `opts.onRun(params)` is invoked debounced ~120ms
 	// after a slider changes, plus once synchronously at the end of bind()
 	// so the host page renders its initial state.
 	function bind(opts) {
 		opts = opts || {};
 		applySliderAttributes();
+		// Restore slider positions from a prior session/page BEFORE we
+		// wire up listeners or compute --val fills.  Sliders' defaultValue
+		// stays as the CONFIG default so "Reset to defaults" still goes
+		// back to the canonical starting state.
+		restoreSliderState();
 
 		let pendingTimer = null;
 		const runNow = () => {
@@ -380,6 +426,7 @@
 				clearTimeout(pendingTimer);
 				pendingTimer = null;
 			}
+			saveSliderState();
 			if (opts.onRun) opts.onRun(readParams());
 		};
 		const scheduleRun = () => {
@@ -399,6 +446,7 @@
 				: (C?.sliderDebounceMs ?? 80);
 			pendingTimer = setTimeout(() => {
 				pendingTimer = null;
+				saveSliderState();
 				if (opts.onRun) opts.onRun(readParams());
 			}, ms);
 		};
@@ -434,5 +482,10 @@
 		formatVal,
 		updateVoteDisplay,
 		bind,
+		// Exposed so index.html (which doesn't use bind() because its
+		// inline run() does much more than the historical page) can
+		// participate in the same cross-page slider-state persistence.
+		restoreSliderState,
+		saveSliderState,
 	};
 })();

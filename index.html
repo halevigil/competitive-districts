@@ -6,6 +6,12 @@
 		<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
 		<script src="config.js?v=45"></script>
 		<script src="model.js?v=45"></script>
+		<!-- controls.js exposes restoreSliderState / saveSliderState so the
+		     simulator and the historical page can share slider positions
+		     via localStorage.  The simulator doesn't use CONTROLS.bind()
+		     itself (its inline run() does considerably more than the
+		     historical page's onRun); just the two persistence helpers. -->
+		<script src="controls.js?v=45"></script>
 		<style>
 			:root {
 				--bg: #fafafa;
@@ -1191,6 +1197,15 @@
 			let lastParams = null;
 			function run() {
 				const p = readParams();
+				// Cache slider positions so the historical page (and the
+				// next reload of this page) starts from where the user
+				// left off.  Doing it in run() — instead of scheduleRun
+				// — captures every path that triggers a render: slider
+				// drags, the Reset button, preset clicks, and the initial
+				// render at the end of init().
+				if (window.CONTROLS && CONTROLS.saveSliderState) {
+					CONTROLS.saveSliderState();
+				}
 				const t0 = performance.now();
 				// Bin spec for the mismatch chart in see-more-plots — gathered
 				// during the main run as a byproduct.
@@ -1395,6 +1410,12 @@
 					r.step = attrs.step;
 					r.value = attrs.value;
 					r.defaultValue = attrs.value; // so resetDefaults() restores from CONFIG
+				}
+				// Restore any slider positions cached by a prior page load
+				// (either page).  defaultValue stays at CONFIG so reset still
+				// goes back to the canonical starting state.
+				if (window.CONTROLS && CONTROLS.restoreSliderState) {
+					CONTROLS.restoreSliderState();
 				}
 				for (const id of sliderIds) {
 					const range = document.getElementById(id);
