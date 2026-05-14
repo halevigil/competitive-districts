@@ -1206,8 +1206,10 @@
 				document.getElementById("stats").innerHTML = `
     <div><b>${n} simulations · ${N} districts</b></div>
     <div>Partisanship of median district: <span class="num">${
-		medianDistPart >= 0 ? "+" : ""
-	}${medianDistPart.toFixed(1)}%</span></div>
+		Math.abs(medianDistPart) < 0.05
+			? "EVEN"
+			: (medianDistPart >= 0 ? "R+" : "D+") + Math.abs(medianDistPart).toFixed(1)
+	}</span></div>
     <div>Chance the median representative is a Republican: <span class="num">${(
 		pR * 100
 	).toFixed(1)}%</span> ${pR > 0.5 ? rPill : dPill}</div>
