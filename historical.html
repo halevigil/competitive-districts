@@ -265,6 +265,17 @@
   </div>
 </div>
 
+<!-- Per-district predicted-vs-actual scatter for the selected year.
+     One dot per House election district: x = simulator's expected vote
+     margin (using the current sliders + that district's lean), y = the
+     district's actual margin in the YYYY election.  Uncontested races
+     (|margin| = 100 in the source CSV) are filtered out — they would
+     pull the regression toward the axis edges in a way that has nothing
+     to do with model fit. -->
+<div id="scatterRow" class="yearRow" style="display: none; margin-top: 12px;">
+  <div class="panel"><div id="scatterChart" class="chart" style="height: 420px;"></div></div>
+</div>
+
 <h2>Pick a cycle to compare</h2>
 <div id="picker" class="pickerGrid"><div class="loading" style="grid-column: 1 / -1;">Loading data…</div></div>
 
@@ -455,6 +466,45 @@ function indexHouse(rows) {
   return m;
 }
 
+// Index: (cycle, state, district) → { margin, winner_party } from
+// house-margins.csv.  Margin is (R% − D%) in percentage points; ±100 means
+// "uncontested" (one of the major parties got literally zero votes), which
+// the predicted-vs-actual scatter filters out.
+function indexMargins(rows) {
+  const m = new Map();
+  for (const r of rows) {
+    const margin = parseFloat(r.margin);
+    if (!isFinite(margin)) continue;
+    m.set(r.cycle + '|' + r.state + '|' + r.district,
+          { margin, winner_party: r.winner_party });
+  }
+  return m;
+}
+
+// Pearson regression of y on x.  Returns slope, intercept, r² (coefficient
+// of determination), and the residual range so the caller can draw a line
+// across the full x extent.  Used by renderScatter on the historical page.
+function linearRegression(xs, ys) {
+  const n = xs.length;
+  if (n < 2) return null;
+  let sx = 0, sy = 0;
+  for (let i = 0; i < n; i++) { sx += xs[i]; sy += ys[i]; }
+  const mx = sx / n, my = sy / n;
+  let sxx = 0, sxy = 0, syy = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = xs[i] - mx, dy = ys[i] - my;
+    sxx += dx * dx;
+    sxy += dx * dy;
+    syy += dy * dy;
+  }
+  if (sxx === 0) return null;
+  const slope = sxy / sxx;
+  const intercept = my - slope * mx;
+  // r² = (Σ(x−x̄)(y−ȳ))² / (Σ(x−x̄)² · Σ(y−ȳ)²)
+  const r2 = syy === 0 ? 1 : (sxy * sxy) / (sxx * syy);
+  return { slope, intercept, r2, n };
+}
+
 // For one year, pair each district's "partisan lean" with the House winner
 // that year and bin by lean, splitting into D-won / R-won counts.  Lean is
 // presidential margin for presidential years and Cook-PVI (2-to-1 weighted)
@@ -472,6 +522,11 @@ function buildYear(year, leanRows, leanField, houseIdx) {
   // (non-binned) median for the chart title.
   const leans = [];
   const allLeans = [];
+  // Parallel arrays to allLeans, so the predicted-vs-actual scatter on
+  // the historical page can map sorted-pool indices back to specific
+  // (state, district) keys after the simulator runs.
+  const allStates = [];
+  const allDistricts = [];
   let nMatched = 0, nUnmatched = 0;
   let nR = 0, nD = 0;
   for (const p of leanRows) {
@@ -479,6 +534,8 @@ function buildYear(year, leanRows, leanField, houseIdx) {
     const m = parseFloat(p[leanField]);
     if (!isFinite(m)) continue;
     allLeans.push(m);
+    allStates.push(p.state);
+    allDistricts.push(p.district);
     const winner = houseIdx.get(year + '|' + p.state + '|' + p.district);
     if (!winner || (winner !== 'D' && winner !== 'R')) { nUnmatched++; continue; }
     leans.push(m);
@@ -496,7 +553,8 @@ function buildYear(year, leanRows, leanField, houseIdx) {
     centres[i] = (a + b) / 2;
     ranges[i]  = [a, b];
   }
-  return { centres, ranges, dCounts, rCounts, leans, allLeans, nMatched, nUnmatched, nD, nR };
+  return { centres, ranges, dCounts, rCounts, leans, allLeans,
+           allStates, allDistricts, nMatched, nUnmatched, nD, nR };
 }
 
 // (renderMarginYearChart and buildMarginYear were retired with the
@@ -579,10 +637,20 @@ function renderSimOnYear(year, yearStats, yMax) {
   }
   row.style.display = '';
 
-  // Build the district pool: sorted lean values from the year, length =
-  // however many districts matched (typically 435).  The simulator only
-  // needs them ascending; we let runSimulations infer N from pool length.
-  const pool = Float64Array.from(yearStats.allLeans).sort();
+  // Build the district pool: sort the year's per-CD leans ASCENDING (the
+  // simulator's median-anchored swing/opp effects assume sorted input),
+  // and keep a parallel array of (state|district) keys so the simulator's
+  // per-pool-slot outputs can be mapped back to specific real districts
+  // for the predicted-vs-actual scatter below.
+  const N = yearStats.allLeans.length;
+  const order = Array.from({ length: N }, (_, i) => i);
+  order.sort((a, b) => yearStats.allLeans[a] - yearStats.allLeans[b]);
+  const pool = new Float64Array(N);
+  const sortedKeys = new Array(N);
+  for (let i = 0; i < N; i++) {
+    pool[i] = yearStats.allLeans[order[i]];
+    sortedKeys[i] = yearStats.allStates[order[i]] + '|' + yearStats.allDistricts[order[i]];
+  }
   const lo = -100, hi = 100;
   const spec = { binSize, lo, hi };
   // Re-run the cached parameters on this real-district pool.  Fixed at
@@ -590,7 +658,9 @@ function renderSimOnYear(year, yearStats, yMax) {
   // drags need fast feedback, and per-bin averages smooth out well below
   // 1000 sims anyway.  No marginBinSpec (the right-column chart was
   // retired so the simulator can skip those bins entirely).
-  const sims = runSimulations(saved.params, histNsim(), spec, null, null, pool);
+  // `trackPerDistrict: true` (the trailing arg) accumulates per-district
+  // mean z so renderScatter can pair predictions with actual margins.
+  const sims = runSimulations(saved.params, histNsim(), spec, null, null, pool, true);
   const mb = sims.mismatchBins;
   if (!mb) { row.style.display = 'none'; return; }
 
@@ -645,6 +715,96 @@ function renderSimOnYear(year, yearStats, yMax) {
     yaxis: { title: { text: 'Seats', font: { size: 11 } }, range: [0, yMax] },
     margin: { l: 50, r: 14, t: 38, b: 50 },
     showlegend: false, bargap: 0.05, barmode: 'stack', plot_bgcolor: '#fff',
+  }, { displayModeBar: false, responsive: true });
+
+  // Per-district predicted-vs-actual scatter on the same sim output.
+  renderScatter(year, yearStats, sortedKeys, sims.perDistrict);
+}
+
+// One dot per House district in the selected year: x = simulator's expected
+// margin (mean z across sims, pp), y = the district's actual House election
+// margin (R% − D%, pp).  Uncontested races (|actual margin| = 100 — i.e. one
+// of the major parties got literally zero votes, typically because they
+// didn't field a candidate) are filtered out before the regression; they'd
+// just pull the line toward the corners without saying anything about
+// model fit.  Dots are coloured by who actually won.
+function renderScatter(year, yearStats, sortedKeys, perDistrict) {
+  const row = document.getElementById('scatterRow');
+  if (!yearStats || !yearStats.marginByKey || !perDistrict || !perDistrict.avgZ) {
+    row.style.display = 'none';
+    return;
+  }
+  const margins = yearStats.marginByKey;
+  const N = sortedKeys.length;
+  const xs = [], ys = [], colors = [], hoverText = [];
+  let nUncontested = 0;
+  for (let i = 0; i < N; i++) {
+    const info = margins.get(sortedKeys[i]);
+    if (!info) continue;
+    const actual = info.margin;
+    // Drop uncontested races (margin saturated at the edges).
+    if (Math.abs(actual) >= 99.5) { nUncontested++; continue; }
+    const predicted = perDistrict.avgZ[i];
+    xs.push(predicted);
+    ys.push(actual);
+    colors.push(info.winner_party === 'R'
+      ? 'rgba(214,39,40,0.55)'
+      : info.winner_party === 'D'
+        ? 'rgba(31,119,180,0.55)'
+        : 'rgba(120,120,120,0.55)');
+    const [st, di] = sortedKeys[i].split('|');
+    hoverText.push(`${st}-${di}<br>predicted ${predicted.toFixed(1)} · actual ${actual.toFixed(1)}`);
+  }
+  if (xs.length < 3) { row.style.display = 'none'; return; }
+  row.style.display = '';
+
+  const reg = linearRegression(xs, ys);
+  // Draw the regression line across the full x-range of the data so it's
+  // visible regardless of how the simulator's predictions cluster.
+  let lineXs = [], lineYs = [];
+  if (reg) {
+    let xLo = Infinity, xHi = -Infinity;
+    for (const x of xs) { if (x < xLo) xLo = x; if (x > xHi) xHi = x; }
+    lineXs = [xLo, xHi];
+    lineYs = [reg.slope * xLo + reg.intercept, reg.slope * xHi + reg.intercept];
+  }
+
+  const titleParts = [
+    `<b>${year}: Simulator-predicted vs actual House margin</b>`,
+    `n=${xs.length}` + (nUncontested ? ` (${nUncontested} uncontested dropped)` : ''),
+    reg ? `slope ${reg.slope.toFixed(2)}` : null,
+    reg ? `intercept ${reg.intercept.toFixed(1)}` : null,
+    reg ? `r² ${reg.r2.toFixed(3)}` : null,
+  ].filter(Boolean);
+
+  Plotly.react('scatterChart', [
+    { x: xs, y: ys, mode: 'markers', type: 'scatter', name: 'districts',
+      marker: { color: colors, size: 6, line: { width: 0 } },
+      text: hoverText, hovertemplate: '%{text}<extra></extra>' },
+    reg ? {
+      x: lineXs, y: lineYs, mode: 'lines', type: 'scatter', name: 'fit',
+      line: { color: '#333', width: 1.5, dash: 'dot' },
+      hoverinfo: 'skip',
+    } : null,
+  ].filter(Boolean), {
+    title: { text: titleParts.join(' &nbsp;·&nbsp; '), font: { size: 13 }, x: 0.04, xanchor: 'left' },
+    xaxis: {
+      title: { text: 'Simulator-predicted margin (R% − D%)', font: { size: 11 } },
+      ticksuffix: '%', zeroline: true, zerolinecolor: '#666', zerolinewidth: 1,
+    },
+    yaxis: {
+      title: { text: 'Actual House margin (R% − D%)', font: { size: 11 } },
+      ticksuffix: '%', zeroline: true, zerolinecolor: '#666', zerolinewidth: 1,
+    },
+    margin: { l: 60, r: 14, t: 38, b: 50 },
+    showlegend: false, plot_bgcolor: '#fff',
+    // Light y=x reference line as a shape so the user can see how far the
+    // fit deviates from "predictions equal actuals."
+    shapes: [{
+      type: 'line', x0: -100, x1: 100, y0: -100, y1: 100,
+      line: { color: '#bbb', width: 1, dash: 'dash' },
+      layer: 'below',
+    }],
   }, { displayModeBar: false, responsive: true });
 }
 
@@ -748,6 +908,10 @@ function renderYearThumb(divId, year, stats, yMax) {
     return;
   }
   const houseIdx = indexHouse(data.house);
+  // Per-(year, state, district) actual House margin + winner party.  Used
+  // by renderScatter to pair the simulator's per-district predictions with
+  // the real-world outcome, dropping uncontested races along the way.
+  const marginsIdx = indexMargins(data.margins);
   const yearStats = {};
   let yMax = 0;
   for (const y of YEARS) {
@@ -758,6 +922,15 @@ function renderYearThumb(divId, year, stats, yMax) {
       ? buildYear(y, data.pvi, 'pvi', houseIdx)
       : buildYear(y, data.pres, 'margin', houseIdx);
     yearStats[y].isMidterm = isMidterm;
+    // Attach a per-year margin map keyed on "state|district" so
+    // renderScatter doesn't have to filter the full margins index each
+    // time the user picks a new year.
+    const marginByKey = new Map();
+    for (const [k, info] of marginsIdx) {
+      const [cy, st, di] = k.split('|');
+      if (+cy === y) marginByKey.set(st + '|' + di, info);
+    }
+    yearStats[y].marginByKey = marginByKey;
     for (const v of yearStats[y].dCounts) if (v > yMax) yMax = v;
     for (const v of yearStats[y].rCounts) if (v > yMax) yMax = v;
   }

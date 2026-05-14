@@ -538,13 +538,19 @@ function intentionalModOffsets(mode, K, L) {
 // adjustment + noise, and is the simulator's analog of a vote margin.
 // Useful for the "Distribution of per-district election margins" view that
 // parallels the historical House margin chart.
+// `perDistrictTracker`, when provided, is `{ zSum, rWins }` — Float64Array /
+// Int32Array of length N, indexed by district pool position.  We accumulate
+// the simulator's per-district z (the "vote score" R minus D, in pp) and the
+// number of sims in which R won that district.  Lets the historical page
+// plot a per-district scatter of model-predicted vs actual House margin.
 function simulateOne(
 	p,
 	returnFull = false,
 	districtPool = null,
 	mismatchTracker = null,
 	electedTracker = null,
-	marginTracker = null
+	marginTracker = null,
+	perDistrictTracker = null
 ) {
 	// Districts are deterministic given (m, muDist, sigmaDist).  When
 	// simulateOne is called from runSimulations, the caller passes the
@@ -616,6 +622,12 @@ function simulateOne(
 	const mgLo = marginTracker ? marginTracker.lo : 0;
 	const mgStep = marginTracker ? marginTracker.binSize : 1;
 	const mgNBins = marginTracker ? marginTracker.nBins : 0;
+	// Per-district z + R-win tracker.  zSum gets averaged across sims by the
+	// caller; rWins / (n_sims) gives the simulator's R-win probability per
+	// district.  Indexed by pool position, so the caller is responsible for
+	// keeping any (state, district) labels aligned with the pool order.
+	const pdZSum = perDistrictTracker ? perDistrictTracker.zSum : null;
+	const pdRWins = perDistrictTracker ? perDistrictTracker.rWins : null;
 	let mismatches = 0; // R in D-lean district, or D in R-lean district (di ≠ 0)
 	if (vIsZero) {
 		// Fast path — no v-shift on the swing bell when v = 0.
@@ -691,6 +703,10 @@ function simulateOne(
 				else if (bi >= mgNBins) bi = mgNBins - 1;
 				if (isR) mgRCounts[bi]++;
 				else mgDCounts[bi]++;
+			}
+			if (pdZSum) {
+				pdZSum[i] += z;
+				if (isR) pdRWins[i]++;
 			}
 			if (di !== 0 && ((isR && di < 0) || (!isR && di > 0))) {
 				mismatches++;
@@ -774,6 +790,10 @@ function simulateOne(
 				else if (bi >= mgNBins) bi = mgNBins - 1;
 				if (isR) mgRCounts[bi]++;
 				else mgDCounts[bi]++;
+			}
+			if (pdZSum) {
+				pdZSum[i] += z;
+				if (isR) pdRWins[i]++;
 			}
 			if (di !== 0 && ((isR && di < 0) || (!isR && di > 0))) {
 				mismatches++;
@@ -900,13 +920,19 @@ function simulateOne(
 // Float64Array of lean values in pp.  Tie-break duplication is skipped when
 // a custom pool is supplied (it's only meaningful for the synthetic
 // "fully-gerrymandered" edge case, which can't occur on real data).
+// `trackPerDistrict`, when true, accumulates per-district sums of z (the
+// simulator's vote score, R−D in pp) and per-district R-win counts across
+// all sims.  The result is exposed as `result.perDistrict = { avgZ, rWinProb }`
+// — both Float64Arrays of length N indexed by pool position.  Used by the
+// historical page's "predicted vs actual margin" scatter.
 function runSimulations(
 	p,
 	n,
 	mismatchBinSpec = null,
 	electedBinSpec = null,
 	marginBinSpec = null,
-	customDistrictPool = null
+	customDistrictPool = null,
+	trackPerDistrict = false
 ) {
 	// If a real-district pool was supplied, use it as-is and let it set N.
 	// Otherwise build the analytic pool from the slider mixture.  Sorted
@@ -1043,6 +1069,15 @@ function runSimulations(
 		marginBins = { dCounts, rCounts, centres, ranges, binSize, nBins };
 	}
 
+	// Optional per-district tracker (z + R-win counts per pool slot).
+	let perDistrictTracker = null;
+	if (trackPerDistrict) {
+		perDistrictTracker = {
+			zSum: new Float64Array(N),
+			rWins: new Int32Array(N),
+		};
+	}
+
 	for (let s = 0; s < n; s++) {
 		// Even sims use the D-tiebreak pool, odd sims the R-tiebreak pool.
 		const pool = (s & 1) === 0 ? poolD : poolR;
@@ -1052,7 +1087,8 @@ function runSimulations(
 			pool,
 			mismatchTracker,
 			electedTracker,
-			marginTracker
+			marginTracker,
+			perDistrictTracker
 		);
 		meds[s] = out.medianIdeology;
 		p33s[s] = out.p33Ideology;
@@ -1113,6 +1149,19 @@ function runSimulations(
 		marginBins.nSims = n;
 	}
 
+	// Per-district averages: avgZ is the simulator's expected z (vote score
+	// in pp) for each pool slot; rWinProb is its R-win probability ∈ [0, 1].
+	let perDistrict = null;
+	if (perDistrictTracker) {
+		const avgZ = new Float64Array(N);
+		const rWinProb = new Float64Array(N);
+		for (let i = 0; i < N; i++) {
+			avgZ[i] = perDistrictTracker.zSum[i] / n;
+			rWinProb[i] = perDistrictTracker.rWins[i] / n;
+		}
+		perDistrict = { avgZ, rWinProb };
+	}
+
 	return {
 		meds,
 		p33s,
@@ -1127,5 +1176,6 @@ function runSimulations(
 		mismatchBins,
 		electedBins,
 		marginBins,
+		perDistrict,
 	};
 }
