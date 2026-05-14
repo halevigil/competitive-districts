@@ -840,20 +840,22 @@ function renderSimOnYear(year, yearStats, yMax) {
     }
   }
 
-  // Title — includes the goodness-of-fit number with a parenthetical
-  // that also reports the contested-district sample size (uncontested
-  // races are excluded from the PIT / W² calculation above).
-  const titleParts = [
+  // Title: two lines so the fit-W² parenthetical doesn't overflow into
+  // the chart at typical viewport widths.  Line 1 is the summary (year +
+  // seat counts + median lean); line 2 is the goodness-of-fit metric.
+  const headerLine = [
     `<b>Simulator on ${year} districts</b>`,
     `D-won ${totalD.toFixed(1)}, R-won ${totalR.toFixed(1)}`,
     `median lean ${formatLean(med)}`,
-  ];
+  ].join(' &nbsp;·&nbsp; ');
+  let titleText = headerLine;
   if (pitFit != null) {
-    titleParts.push(
+    titleText += '<br>' +
+      `<span style="font-size:11px">` +
       `fit W²=${pitFit.toFixed(2)} ` +
       `(goodness of fit on ${pitN} contested districts; ` +
-      `lower=better, ≲0.46 if calibrated)`
-    );
+      `lower=better, ≲0.46 if calibrated)` +
+      `</span>`;
   }
 
   // Build the spectrum heatmap matrix: each district contributes K
@@ -878,13 +880,14 @@ function renderSimOnYear(year, yearStats, yMax) {
       leanLabel + ': %{x:.0f}%<br>' +
       'predicted margin: %{z:.1f}% (R−D)<extra></extra>',
   }], {
-    title: { text: titleParts.join(' &nbsp;·&nbsp; '), font: { size: 13 }, x: 0.04, xanchor: 'left' },
+    title: { text: titleText, font: { size: 13 }, x: 0.04, xanchor: 'left' },
     xaxis: {
       title: { text: leanLabel + ' %  (← Democratic · Republican →)', standoff: 4, font: { size: 11 } },
       ticksuffix: '%', range: [-100, 100], zeroline: true, zerolinecolor: '#333', zerolinewidth: 1,
     },
     yaxis: { title: { text: 'Seats', font: { size: 11 } }, range: [0, yMax], dtick: 5 },
-    margin: { l: 50, r: 14, t: 38, b: 50 },
+    // Extra top margin to fit the two-line title without clipping.
+    margin: { l: 50, r: 14, t: 58, b: 50 },
     showlegend: false, plot_bgcolor: '#fff',
   }, { displayModeBar: false, responsive: true });
 }
