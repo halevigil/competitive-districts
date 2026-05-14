@@ -368,8 +368,7 @@
 				height: 200px;
 			}
 			#morePlotsRSeatsChart,
-			#morePlotsIdeologyChart,
-			#morePlotsDistrictMarginsChart {
+			#morePlotsIdeologyChart {
 				width: 100%;
 				height: 360px;
 				margin-top: 16px;
@@ -614,8 +613,6 @@
 								under the current sliders.</span
 							>
 						</div>
-						<h4>Distribution of Per-District Election Margins</h4>
-						<div id="morePlotsDistrictMarginsChart"></div>
 						<h4>Distribution of Rep Ideology</h4>
 						<div id="morePlotsIdeologyChart"></div>
 						<h4>20 Example Chambers</h4>
@@ -1284,9 +1281,11 @@
 						lo: window.CONFIG.histograms.repIdeology.lo,
 						hi: window.CONFIG.histograms.repIdeology.hi,
 					},
-					// Per-district margin bins — same grid as the historical
-					// House-margin chart so the two read as parallel views.
-					{ binSize: histCfg.binSize, lo: -100, hi: 100 },
+					// marginBinSpec removed — the per-district-margin
+					// histogram in "see more plots" was retired, and the
+					// main district-partisanship chart now shows margins
+					// per cell directly via the heatmap colour scale.
+					null,
 					null,
 					// trackPerDistrict: the historical page's bottom-row
 					// heatmap reads pool + perDistrict.avgZ from localStorage
@@ -1775,12 +1774,6 @@
 						sims.electedBins
 					);
 				}
-				if (sims.marginBins) {
-					renderDistrictMarginsChart(
-						"morePlotsDistrictMarginsChart",
-						sims.marginBins
-					);
-				}
 			}
 
 			function renderExampleChamber(params, divId, idx) {
@@ -2055,91 +2048,10 @@
 				);
 			}
 
-			// Per-district election-margin distribution.  Bins z (clipped to
-			// [-100, +100]) split by which side won the seat.  Same visual
-			// style as the historical page's right-column House-margin chart
-			// so the two read as parallel views.
-			function renderDistrictMarginsChart(divId, marginBins) {
-				const { centres, ranges, avgD, avgR, binSize } = marginBins;
-				Plotly.newPlot(
-					divId,
-					[
-						{
-							x: centres,
-							y: avgD,
-							type: "bar",
-							name: "D-won",
-							marker: {
-								color: "rgba(31,119,180,0.85)",
-								line: { width: 0 },
-							},
-							width: binSize,
-							customdata: ranges,
-							hovertemplate:
-								"margin: %{customdata[0]:.0f} to %{customdata[1]:.0f}<br>" +
-								"avg D-won seats: %{y:.2f}<extra></extra>",
-						},
-						{
-							x: centres,
-							y: avgR,
-							type: "bar",
-							name: "R-won",
-							marker: {
-								color: "rgba(214,39,40,0.85)",
-								line: { width: 0 },
-							},
-							width: binSize,
-							customdata: ranges,
-							hovertemplate:
-								"margin: %{customdata[0]:.0f} to %{customdata[1]:.0f}<br>" +
-								"avg R-won seats: %{y:.2f}<extra></extra>",
-						},
-					],
-					{
-						title: {
-							text: "Distribution of Per-District Election Margins",
-							font: { size: 13 },
-						},
-						xaxis: {
-							title: {
-								text: "Election margin  (← Democratic · Republican →)",
-								standoff: 4,
-							},
-							range: [-100, 100],
-							// Pin tick labels so the axis numbers are always
-							// visible regardless of plot width.
-							tickmode: "array",
-							tickvals: [-100, -75, -50, -25, 0, 25, 50, 75, 100],
-							ticktext: [
-								"−100",
-								"−75",
-								"−50",
-								"−25",
-								"0",
-								"+25",
-								"+50",
-								"+75",
-								"+100",
-							],
-							zeroline: true,
-							zerolinecolor: "#333",
-							zerolinewidth: 1,
-						},
-						yaxis: { title: "Avg seats per chamber" },
-						margin: { l: 60, r: 20, t: 50, b: 60 },
-						barmode: "stack",
-						bargap: 0.05,
-						legend: {
-							orientation: "h",
-							x: 0.5,
-							xanchor: "center",
-							y: -0.22,
-							yanchor: "top",
-						},
-					},
-					{ displayModeBar: false, responsive: true }
-				);
-			}
+			// (renderDistrictMarginsChart removed — the per-district election-
+			// margin histogram in "see more plots" was retired now that the
+			// main district-partisanship chart shows the full margin spectrum
+			// via heatmap colour.)
 		</script>
 	</body>
 </html>
