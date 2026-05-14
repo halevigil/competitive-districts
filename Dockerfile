@@ -12,9 +12,14 @@ COPY nginx.conf /etc/nginx/conf.d/default.conf
 WORKDIR /usr/share/nginx/html
 RUN rm -rf ./*
 
-# Copy site assets.
-COPY index.html historical.html plots.html ./
-COPY config.js model.js ./
+# Copy site assets.  controls.{js,css} are shared by the simulator and
+# the historical page (added since the original Dockerfile was written —
+# must be in this list, or the deployed sliders fall back to unstyled
+# defaults and the historical-page sidebar breaks).  historical_legacy.html
+# is the pre-redesign snapshot we keep around for reference.
+COPY index.html historical.html historical_legacy.html plots.html ./
+COPY config.js model.js controls.js ./
+COPY controls.css ./
 COPY data ./data
 
 EXPOSE 8080

@@ -265,16 +265,9 @@
   </div>
 </div>
 
-<!-- Per-district predicted-vs-actual scatter for the selected year.
-     One dot per House election district: x = simulator's expected vote
-     margin (using the current sliders + that district's lean), y = the
-     district's actual margin in the YYYY election.  Uncontested races
-     (|margin| = 100 in the source CSV) are filtered out — they would
-     pull the regression toward the axis edges in a way that has nothing
-     to do with model fit. -->
-<div id="scatterRow" class="yearRow" style="display: none; margin-top: 12px;">
-  <div class="panel"><div id="scatterChart" class="chart" style="height: 420px;"></div></div>
-</div>
+<!-- (The calibration-scatter row was retired in favour of per-district
+     margin colouring on each heatmap above + a goodness-of-fit χ² that
+     now lives in the "Simulator on YYYY districts" title.) -->
 
 <h2>Pick a cycle to compare</h2>
 <div id="picker" class="pickerGrid"><div class="loading" style="grid-column: 1 / -1;">Loading data…</div></div>
@@ -401,6 +394,62 @@ function parseCsv(text) {
     for (let i = 0; i < header.length; i++) o[header[i]] = r[i];
     return o;
   });
+}
+
+// Diverging colour scale used by every seats-by-lean chart on the page:
+// each district is a single unit-height cell coloured by its margin of
+// victory (R% − D%, pp).  Dark blue = D blowout, dark red = R blowout.
+// IMPORTANT: NO white midpoint.  Even a 1-point margin needs to read
+// as obviously blue or red — the chart is about who won — so we put a
+// SHARP discontinuity at zero (two stops at 0.5) between a still-clearly-
+// blue "D squeaker" colour and a still-clearly-red "R squeaker" colour.
+// On the D side, even the lightest shade is a recognisable blue; same
+// on the R side with red.  Linear ramps from there out to dark on each end.
+const HEATMAP_COLORSCALE = [
+  [0.00, 'rgb(8, 48, 107)'],      // -100: darkest blue
+  [0.20, 'rgb(33, 113, 181)'],    //  -60: strong blue
+  [0.40, 'rgb(66, 146, 198)'],    //  -20: medium blue
+  [0.50, 'rgb(107, 174, 214)'],   //  -0:  light-but-clearly blue (D squeaker)
+  [0.50, 'rgb(251, 106, 74)'],    //  +0:  light-but-clearly red (R squeaker) — SHARP JUMP
+  [0.60, 'rgb(239, 59, 44)'],     //  +20: medium red
+  [0.80, 'rgb(165, 15, 21)'],     //  +60: strong red
+  [1.00, 'rgb(103, 0, 13)'],      // +100: darkest red
+];
+
+// Build the 2D z matrix for a seats-by-lean heatmap.  Each input district
+// has a `lean` (X-bin axis) and a `margin` (colour).  Within each X bin
+// the districts are sorted DESCENDING by margin, so the bottom cell of
+// each stack is the bin's most R-leaning district (darkest red) and the
+// top cell is its most D-leaning (darkest blue) — matching the visual
+// convention requested upstream.  Cells beyond a bin's stack height come
+// out as NaN, which Plotly heatmap renders as transparent.
+function buildSeatMatrix(leans, margins) {
+  const lo = -100, hi = 100;
+  const nBins = Math.ceil((hi - lo) / binSize);
+  const byBin = new Array(nBins).fill(null).map(() => []);
+  for (let i = 0; i < leans.length; i++) {
+    const m = margins[i];
+    if (m == null || !isFinite(m)) continue;
+    let idx = Math.floor((leans[i] - lo) / binSize);
+    if (idx < 0) idx = 0;
+    else if (idx >= nBins) idx = nBins - 1;
+    byBin[idx].push(m);
+  }
+  // Sort descending: largest positive (R) first, largest negative (D) last.
+  for (let b = 0; b < nBins; b++) byBin[b].sort((a, b) => b - a);
+  let maxStack = 0;
+  for (let b = 0; b < nBins; b++) if (byBin[b].length > maxStack) maxStack = byBin[b].length;
+  const z = [];
+  for (let layer = 0; layer < maxStack; layer++) {
+    const row = new Array(nBins);
+    for (let b = 0; b < nBins; b++) {
+      row[b] = layer < byBin[b].length ? byBin[b][layer] : NaN;
+    }
+    z.push(row);
+  }
+  const centres = new Array(nBins);
+  for (let i = 0; i < nBins; i++) centres[i] = lo + (i + 0.5) * binSize;
+  return { z, centres, maxStack };
 }
 
 async function loadAll() {
@@ -561,19 +610,13 @@ function buildYear(year, leanRows, leanField, houseIdx) {
 // right-column margin histograms — see historical_legacy.html.)
 
 function renderYearChart(divId, year, stats, yMax) {
-  const { centres, ranges, dCounts, rCounts, leans, nD, nR, isMidterm } = stats;
-  // Spell out the 2-to-1 weighting in the axis label so the chart is
-  // self-explanatory — the previous "PVI (2-to-1)" needed footnote text
-  // for any reader who hadn't heard the term.  "last pres × 2 + prior × 1"
-  // is the exact computation the build script applies (see PVI_BACKING in
-  // data/build-historical.py).
+  const { leans, nD, nR, isMidterm, allLeansWithMargin } = stats;
   const leanLabel = isMidterm
     ? 'PVI (last pres × 2 + prior pres × 1)'
     : 'Presidential margin';
   // Shift pres-year medians to be relative to the national popular vote
   // (PVI rows are already relative to their weighted prior-pres average,
-  // so no shift needed there).  The result is directly comparable to the
-  // simulator's median lean, which is reported relative to v.
+  // so no shift needed there).
   const medRaw = medianOfNumbers(leans || []);
   const nat = NATIONAL_PRES_MARGIN[year];
   const medRel = isMidterm ? medRaw : (medRaw == null ? null : medRaw - nat);
@@ -582,37 +625,32 @@ function renderYearChart(divId, year, stats, yMax) {
     `D-won ${nD}, R-won ${nR}`,
     `median lean ${formatLean(medRel)}`,
   ];
-  // Plotly.react diff-updates the chart when it already exists, so
-  // clicking a different year thumbnail is near-instant.
-  Plotly.react(divId, [
-    {
-      x: centres, y: dCounts, type: 'bar', name: 'D-won',
-      marker: { color: 'rgba(31,119,180,0.85)', line: { width: 0 } },
-      width: binSize, customdata: ranges,
-      hovertemplate:
-        leanLabel + ': %{customdata[0]:.0f}% to %{customdata[1]:.0f}%<br>' +
-        'D-won seats: %{y}<extra></extra>',
-    },
-    {
-      x: centres, y: rCounts, type: 'bar', name: 'R-won',
-      marker: { color: 'rgba(214,39,40,0.85)', line: { width: 0 } },
-      width: binSize, customdata: ranges,
-      hovertemplate:
-        leanLabel + ': %{customdata[0]:.0f}% to %{customdata[1]:.0f}%<br>' +
-        'R-won seats: %{y}<extra></extra>',
-    },
-  ], {
+  // One coloured cell per district.  Lean is the X-bin, actual House
+  // margin is the colour (dark blue = D blowout, dark red = R blowout,
+  // near-white = toss-up).
+  const matrixIn = allLeansWithMargin || [];
+  const xs = matrixIn.map(d => d.lean);
+  const ms = matrixIn.map(d => d.margin);
+  const m = buildSeatMatrix(xs, ms);
+  Plotly.react(divId, [{
+    z: m.z, x: m.centres, type: 'heatmap',
+    y: m.z.map((_, i) => i + 0.5),
+    colorscale: HEATMAP_COLORSCALE,
+    zmin: -100, zmax: 100, zmid: 0,
+    xgap: 0, ygap: 0,
+    showscale: false,
+    hovertemplate:
+      leanLabel + ': %{x:.0f}%<br>' +
+      'House margin: %{z:.1f}% (R−D)<extra></extra>',
+  }], {
     title: { text: titleParts.join(' &nbsp;·&nbsp; '), font: { size: 13 }, x: 0.04, xanchor: 'left' },
     xaxis: {
       title: { text: leanLabel + ' %  (← Democratic · Republican →)', standoff: 4, font: { size: 11 } },
       ticksuffix: '%', range: [-100, 100], zeroline: true, zerolinecolor: '#333', zerolinewidth: 1,
     },
-    yaxis: { title: { text: 'Seats', font: { size: 11 } }, range: [0, yMax] },
+    yaxis: { title: { text: 'Seats', font: { size: 11 } }, range: [0, yMax], dtick: 5 },
     margin: { l: 50, r: 14, t: 38, b: 50 },
-    showlegend: false,
-    bargap: 0.05,
-    barmode: 'stack',
-    plot_bgcolor: '#fff',
+    showlegend: false, plot_bgcolor: '#fff',
   }, { displayModeBar: false, responsive: true });
 }
 
@@ -637,176 +675,130 @@ function renderSimOnYear(year, yearStats, yMax) {
   }
   row.style.display = '';
 
-  // Build the district pool: sort the year's per-CD leans ASCENDING (the
-  // simulator's median-anchored swing/opp effects assume sorted input),
-  // and keep a parallel array of (state|district) keys so the simulator's
-  // per-pool-slot outputs can be mapped back to specific real districts
-  // for the predicted-vs-actual scatter below.
+  // Sort the year's per-CD leans ASCENDING for the simulator's median-
+  // anchored swing/opp effects.  We carry an `order` permutation parallel
+  // to the pool so the simulator's per-district outputs can be matched
+  // back to specific (state, district) cells — and so we can build a
+  // parallel `actuals` array for the empirical PIT below.
   const N = yearStats.allLeans.length;
   const order = Array.from({ length: N }, (_, i) => i);
   order.sort((a, b) => yearStats.allLeans[a] - yearStats.allLeans[b]);
   const pool = new Float64Array(N);
-  const sortedKeys = new Array(N);
+  const actuals = new Float64Array(N);
   for (let i = 0; i < N; i++) {
     pool[i] = yearStats.allLeans[order[i]];
-    sortedKeys[i] = yearStats.allStates[order[i]] + '|' + yearStats.allDistricts[order[i]];
+    const key = yearStats.allStates[order[i]] + '|' + yearStats.allDistricts[order[i]];
+    const info = yearStats.marginByKey?.get(key);
+    actuals[i] = (info && isFinite(info.margin) && Math.abs(info.margin) < 99.5)
+      ? info.margin : NaN;
   }
   const lo = -100, hi = 100;
   const spec = { binSize, lo, hi };
-  // Re-run the cached parameters on this real-district pool.  Fixed at
-  // 200 sims regardless of what the simulator page persisted — slider
-  // drags need fast feedback, and per-bin averages smooth out well below
-  // 1000 sims anyway.  No marginBinSpec (the right-column chart was
-  // retired so the simulator can skip those bins entirely).
-  // `trackPerDistrict: true` (the trailing arg) accumulates per-district
-  // mean z so renderScatter can pair predictions with actual margins.
-  const sims = runSimulations(saved.params, histNsim(), spec, null, null, pool, true);
+  // Re-run the cached parameters on this real-district pool with per-
+  // district z tracking AND empirical PIT counting (z < actuals[i]).
+  const sims = runSimulations(
+    saved.params, histNsim(), spec, null, null, pool,
+    { actuals }
+  );
   const mb = sims.mismatchBins;
-  if (!mb) { row.style.display = 'none'; return; }
+  if (!mb || !sims.perDistrict || !sims.perDistrict.avgZ) {
+    row.style.display = 'none';
+    return;
+  }
 
   const totalD = mb.avgDWins.reduce((a, b) => a + b, 0);
   const totalR = mb.avgRWins.reduce((a, b) => a + b, 0);
-  // The median LEAN of this row's pool is structural — it's the chamber-
-  // pivot district's lean, which the top row's chart also reports.
-  // Compute it directly from the sorted pool (medianFromBins on the
-  // simulator's binned output introduces ~0.5 pp of error because PVI
-  // values are quantized to 0.01 pp and cluster non-uniformly inside
-  // each bin) so the two rows agree exactly.  For presidential years we
-  // also apply the same "relative to the national popular vote" shift
-  // the top row applies (PVI rows are already in this form, so midterm
-  // years skip the shift).
+  // Median LEAN of the pool (matches the top row's same-year value).
   const isMidterm = MIDTERM_YEARS.has(year);
   const medRaw = pool[(pool.length - 1) >> 1];
   const nat = NATIONAL_PRES_MARGIN[year];
   const med = isMidterm ? medRaw : (medRaw == null ? null : medRaw - nat);
-  // Matching label to renderYearChart — self-documents the weighting
-  // instead of relying on the user to know what "2-to-1" means.
   const leanLabel = isMidterm
     ? 'PVI (last pres × 2 + prior pres × 1)'
     : 'Presidential margin';
+
+  // ---- empirical-PIT goodness-of-fit χ² ----------------------------------
+  // Don't assume a Gaussian per-district predicted distribution (the
+  // simulator's noise + candidate components have heavier tails and
+  // slight skew).  Use the empirical PIT computed inside the simulator:
+  // u_i = (count of sims where predicted z < actual margin) / n_sims.
+  // Under perfect calibration u_i ~ Uniform(0, 1) across districts, so
+  // we bin into 20 buckets and compute χ² against the uniform expectation.
+  // χ² ≈ 19 → calibrated;  ≫30 → distribution shape doesn't match reality.
+  // Non-gameable: widening predicted σ pushes u_i toward 0.5 (middle of
+  // PIT bin range) and χ² goes up; narrowing pushes to the edges and χ²
+  // also goes up.
+  const ePIT = sims.perDistrict.empiricalPIT;
+  let pitChi2 = null;
+  let pitN = 0;
+  if (ePIT) {
+    const nBinsPIT = 20;
+    const binCounts = new Array(nBinsPIT).fill(0);
+    for (let i = 0; i < ePIT.length; i++) {
+      const u = ePIT[i];
+      if (!(u === u)) continue; // skip NaN (uncontested / unmatched)
+      let idx = Math.floor(u * nBinsPIT);
+      if (idx < 0) idx = 0;
+      else if (idx >= nBinsPIT) idx = nBinsPIT - 1;
+      binCounts[idx]++;
+      pitN++;
+    }
+    if (pitN > 0) {
+      const expected = pitN / nBinsPIT;
+      let chi2 = 0;
+      for (let i = 0; i < nBinsPIT; i++) {
+        const d = binCounts[i] - expected;
+        chi2 += (d * d) / expected;
+      }
+      pitChi2 = chi2;
+    }
+  }
+
+  // Title — includes the goodness-of-fit number with a parenthetical.
   const titleParts = [
     `<b>Simulator on ${year} districts</b>`,
     `D-won ${totalD.toFixed(1)}, R-won ${totalR.toFixed(1)}`,
     `median lean ${formatLean(med)}`,
     `v ${saved.params.v ?? 0}`,
   ];
-  // Plotly.react diff-updates the existing SVG when the chart already
-  // exists — much faster than newPlot, which rebuilds it from scratch.
-  // First call falls through to a full build automatically.
-  Plotly.react('simOnYearChart', [
-    { x: mb.centres, y: mb.avgDWins, type: 'bar', name: 'D-won',
-      marker: { color: 'rgba(31,119,180,0.85)', line: { width: 0 } },
-      width: binSize, customdata: mb.ranges,
-      hovertemplate:
-        leanLabel + ': %{customdata[0]:.0f}% to %{customdata[1]:.0f}%<br>' +
-        'avg D-won seats: %{y:.2f}<extra></extra>' },
-    { x: mb.centres, y: mb.avgRWins, type: 'bar', name: 'R-won',
-      marker: { color: 'rgba(214,39,40,0.85)', line: { width: 0 } },
-      width: binSize, customdata: mb.ranges,
-      hovertemplate:
-        leanLabel + ': %{customdata[0]:.0f}% to %{customdata[1]:.0f}%<br>' +
-        'avg R-won seats: %{y:.2f}<extra></extra>' },
-  ], {
+  if (pitChi2 != null) {
+    titleParts.push(
+      `fit χ²=${pitChi2.toFixed(0)} (goodness of fit, lower=better, ≈19 if calibrated)`
+    );
+  }
+
+  // Build the heatmap matrix from per-district predicted margins.
+  const avgZ = sims.perDistrict.avgZ;
+  const xs = new Array(N), ms = new Array(N);
+  for (let i = 0; i < N; i++) { xs[i] = pool[i]; ms[i] = avgZ[i]; }
+  const m = buildSeatMatrix(xs, ms);
+
+  Plotly.react('simOnYearChart', [{
+    z: m.z, x: m.centres, type: 'heatmap',
+    y: m.z.map((_, i) => i + 0.5),
+    colorscale: HEATMAP_COLORSCALE,
+    zmin: -100, zmax: 100, zmid: 0,
+    xgap: 0, ygap: 0,
+    showscale: false,
+    hovertemplate:
+      leanLabel + ': %{x:.0f}%<br>' +
+      'predicted margin: %{z:.1f}% (R−D)<extra></extra>',
+  }], {
     title: { text: titleParts.join(' &nbsp;·&nbsp; '), font: { size: 13 }, x: 0.04, xanchor: 'left' },
     xaxis: {
       title: { text: leanLabel + ' %  (← Democratic · Republican →)', standoff: 4, font: { size: 11 } },
       ticksuffix: '%', range: [-100, 100], zeroline: true, zerolinecolor: '#333', zerolinewidth: 1,
     },
-    yaxis: { title: { text: 'Seats', font: { size: 11 } }, range: [0, yMax] },
+    yaxis: { title: { text: 'Seats', font: { size: 11 } }, range: [0, yMax], dtick: 5 },
     margin: { l: 50, r: 14, t: 38, b: 50 },
-    showlegend: false, bargap: 0.05, barmode: 'stack', plot_bgcolor: '#fff',
-  }, { displayModeBar: false, responsive: true });
-
-  // Per-district predicted-vs-actual scatter on the same sim output.
-  renderScatter(year, yearStats, sortedKeys, sims.perDistrict);
-}
-
-// One dot per House district in the selected year: x = simulator's expected
-// margin (mean z across sims, pp), y = the district's actual House election
-// margin (R% − D%, pp).  Uncontested races (|actual margin| = 100 — i.e. one
-// of the major parties got literally zero votes, typically because they
-// didn't field a candidate) are filtered out before the regression; they'd
-// just pull the line toward the corners without saying anything about
-// model fit.  Dots are coloured by who actually won.
-function renderScatter(year, yearStats, sortedKeys, perDistrict) {
-  const row = document.getElementById('scatterRow');
-  if (!yearStats || !yearStats.marginByKey || !perDistrict || !perDistrict.avgZ) {
-    row.style.display = 'none';
-    return;
-  }
-  const margins = yearStats.marginByKey;
-  const N = sortedKeys.length;
-  const xs = [], ys = [], colors = [], hoverText = [];
-  let nUncontested = 0;
-  for (let i = 0; i < N; i++) {
-    const info = margins.get(sortedKeys[i]);
-    if (!info) continue;
-    const actual = info.margin;
-    // Drop uncontested races (margin saturated at the edges).
-    if (Math.abs(actual) >= 99.5) { nUncontested++; continue; }
-    const predicted = perDistrict.avgZ[i];
-    xs.push(predicted);
-    ys.push(actual);
-    colors.push(info.winner_party === 'R'
-      ? 'rgba(214,39,40,0.55)'
-      : info.winner_party === 'D'
-        ? 'rgba(31,119,180,0.55)'
-        : 'rgba(120,120,120,0.55)');
-    const [st, di] = sortedKeys[i].split('|');
-    hoverText.push(`${st}-${di}<br>predicted ${predicted.toFixed(1)} · actual ${actual.toFixed(1)}`);
-  }
-  if (xs.length < 3) { row.style.display = 'none'; return; }
-  row.style.display = '';
-
-  const reg = linearRegression(xs, ys);
-  // Draw the regression line across the full x-range of the data so it's
-  // visible regardless of how the simulator's predictions cluster.
-  let lineXs = [], lineYs = [];
-  if (reg) {
-    let xLo = Infinity, xHi = -Infinity;
-    for (const x of xs) { if (x < xLo) xLo = x; if (x > xHi) xHi = x; }
-    lineXs = [xLo, xHi];
-    lineYs = [reg.slope * xLo + reg.intercept, reg.slope * xHi + reg.intercept];
-  }
-
-  const titleParts = [
-    `<b>${year}: Simulator-predicted vs actual House margin</b>`,
-    `n=${xs.length}` + (nUncontested ? ` (${nUncontested} uncontested dropped)` : ''),
-    reg ? `slope ${reg.slope.toFixed(2)}` : null,
-    reg ? `intercept ${reg.intercept.toFixed(1)}` : null,
-    reg ? `r² ${reg.r2.toFixed(3)}` : null,
-  ].filter(Boolean);
-
-  Plotly.react('scatterChart', [
-    { x: xs, y: ys, mode: 'markers', type: 'scatter', name: 'districts',
-      marker: { color: colors, size: 6, line: { width: 0 } },
-      text: hoverText, hovertemplate: '%{text}<extra></extra>' },
-    reg ? {
-      x: lineXs, y: lineYs, mode: 'lines', type: 'scatter', name: 'fit',
-      line: { color: '#333', width: 1.5, dash: 'dot' },
-      hoverinfo: 'skip',
-    } : null,
-  ].filter(Boolean), {
-    title: { text: titleParts.join(' &nbsp;·&nbsp; '), font: { size: 13 }, x: 0.04, xanchor: 'left' },
-    xaxis: {
-      title: { text: 'Simulator-predicted margin (R% − D%)', font: { size: 11 } },
-      ticksuffix: '%', zeroline: true, zerolinecolor: '#666', zerolinewidth: 1,
-    },
-    yaxis: {
-      title: { text: 'Actual House margin (R% − D%)', font: { size: 11 } },
-      ticksuffix: '%', zeroline: true, zerolinecolor: '#666', zerolinewidth: 1,
-    },
-    margin: { l: 60, r: 14, t: 38, b: 50 },
     showlegend: false, plot_bgcolor: '#fff',
-    // Light y=x reference line as a shape so the user can see how far the
-    // fit deviates from "predictions equal actuals."
-    shapes: [{
-      type: 'line', x0: -100, x1: 100, y0: -100, y1: 100,
-      line: { color: '#bbb', width: 1, dash: 'dash' },
-      layer: 'below',
-    }],
   }, { displayModeBar: false, responsive: true });
 }
+
+// (renderScatter / the calibration scatter row were retired — the
+// goodness-of-fit χ² is now shown in the "Simulator on YYYY districts"
+// title line, and the heatmap-coloured charts above already convey the
+// per-district margin information the scatter was trying to show.)
 
 // Render the live simulator-run row from data the main page wrote to
 // localStorage on its last render.  Stays hidden if no run is cached.
@@ -822,50 +814,86 @@ function renderSimulatorRun(yMax) {
     return;
   }
   row.style.display = '';
-  const {
-    binSize, centres, ranges,
-    avgDWins, avgRWins,
-    rGerry, dGerry, v,
-  } = saved;
-  const totalD = avgDWins.reduce((a,b) => a + b, 0);
-  const totalR = avgRWins.reduce((a,b) => a + b, 0);
-  const simMed = medianFromBins(centres, avgDWins, avgRWins, binSize);
+  const { binSize, rGerry, dGerry, v } = saved;
+  const pool = saved.pool;
+  const perDistrictAvgZ = saved.perDistrictAvgZ;
+  // Need both arrays to render a per-district heatmap.  If localStorage
+  // was written by an older simulator-page session that didn't track
+  // per-district data, fall back to a single solid-color cell per bin
+  // using the binned avgDWins/avgRWins counts (graceful degradation
+  // for cross-tab use; same-tab always has the new data).
+  const haveDistrictData = Array.isArray(pool) && Array.isArray(perDistrictAvgZ)
+    && pool.length === perDistrictAvgZ.length && pool.length > 0;
+
+  let totalD, totalR, simMed;
+  if (haveDistrictData) {
+    totalD = 0; totalR = 0;
+    for (const z of perDistrictAvgZ) {
+      if (z > 0) totalR++;
+      else if (z < 0) totalD++;
+      else if (Math.random() < 0.5) totalR++;
+      else totalD++;
+    }
+    const sortedPool = [...pool].sort((a, b) => a - b);
+    simMed = sortedPool[(sortedPool.length - 1) >> 1];
+  } else {
+    totalD = saved.avgDWins.reduce((a,b) => a + b, 0);
+    totalR = saved.avgRWins.reduce((a,b) => a + b, 0);
+    simMed = medianFromBins(saved.centres, saved.avgDWins, saved.avgRWins, binSize);
+  }
+
   const titleParts = [
     `<b>Simulator (current run)</b>`,
     `D-won ${totalD.toFixed(0)}, R-won ${totalR.toFixed(0)}`,
     `median lean ${formatLean(simMed)}`,
     `rGerry ${rGerry?.toFixed?.(2) ?? '—'}, dGerry ${dGerry?.toFixed?.(2) ?? '—'}, v ${v ?? 0}`,
   ];
-  Plotly.react('simRunChart', [
-    {
-      x: centres, y: avgDWins, type: 'bar', name: 'D-won',
-      marker: { color: 'rgba(31,119,180,0.85)', line: { width: 0 } },
-      width: binSize, customdata: ranges,
+
+  if (haveDistrictData) {
+    const m = buildSeatMatrix(pool, perDistrictAvgZ);
+    Plotly.react('simRunChart', [{
+      z: m.z, x: m.centres, type: 'heatmap',
+      y: m.z.map((_, i) => i + 0.5),
+      colorscale: HEATMAP_COLORSCALE,
+      zmin: -100, zmax: 100, zmid: 0,
+      xgap: 0, ygap: 0,
+      showscale: false,
       hovertemplate:
-        'partisanship: %{customdata[0]:.0f}% to %{customdata[1]:.0f}%<br>' +
-        'avg D-won seats: %{y:.2f}<extra></extra>',
-    },
-    {
-      x: centres, y: avgRWins, type: 'bar', name: 'R-won',
-      marker: { color: 'rgba(214,39,40,0.85)', line: { width: 0 } },
-      width: binSize, customdata: ranges,
-      hovertemplate:
-        'partisanship: %{customdata[0]:.0f}% to %{customdata[1]:.0f}%<br>' +
-        'avg R-won seats: %{y:.2f}<extra></extra>',
-    },
-  ], {
-    title: { text: titleParts.join(' &nbsp;·&nbsp; '), font: { size: 13 }, x: 0.04, xanchor: 'left' },
-    xaxis: {
-      title: { text: 'District partisanship %  (← Democratic · Republican →)', standoff: 4, font: { size: 11 } },
-      ticksuffix: '%', range: [-100, 100], zeroline: true, zerolinecolor: '#333', zerolinewidth: 1,
-    },
-    yaxis: { title: { text: 'Seats', font: { size: 11 } }, range: [0, yMax] },
-    margin: { l: 50, r: 14, t: 38, b: 50 },
-    showlegend: false,
-    bargap: 0.05,
-    barmode: 'stack',
-    plot_bgcolor: '#fff',
-  }, { displayModeBar: false, responsive: true });
+        'partisanship: %{x:.0f}%<br>' +
+        'predicted margin: %{z:.1f}% (R−D)<extra></extra>',
+    }], {
+      title: { text: titleParts.join(' &nbsp;·&nbsp; '), font: { size: 13 }, x: 0.04, xanchor: 'left' },
+      xaxis: {
+        title: { text: 'District partisanship %  (← Democratic · Republican →)', standoff: 4, font: { size: 11 } },
+        ticksuffix: '%', range: [-100, 100], zeroline: true, zerolinecolor: '#333', zerolinewidth: 1,
+      },
+      yaxis: { title: { text: 'Seats', font: { size: 11 } }, range: [0, yMax], dtick: 5 },
+      margin: { l: 50, r: 14, t: 38, b: 50 },
+      showlegend: false, plot_bgcolor: '#fff',
+    }, { displayModeBar: false, responsive: true });
+  } else {
+    // Legacy fallback for cross-tab updates from a pre-heatmap simulator
+    // page: keep the old stacked-bar look so the row still shows something
+    // useful.  The next on-page run will rewrite localStorage with the
+    // pool + perDistrictAvgZ fields and switch over automatically.
+    Plotly.react('simRunChart', [
+      { x: saved.centres, y: saved.avgDWins, type: 'bar', name: 'D-won',
+        marker: { color: 'rgba(31,119,180,0.85)', line: { width: 0 } },
+        width: binSize, hoverinfo: 'skip' },
+      { x: saved.centres, y: saved.avgRWins, type: 'bar', name: 'R-won',
+        marker: { color: 'rgba(214,39,40,0.85)', line: { width: 0 } },
+        width: binSize, hoverinfo: 'skip' },
+    ], {
+      title: { text: titleParts.join(' &nbsp;·&nbsp; '), font: { size: 13 }, x: 0.04, xanchor: 'left' },
+      xaxis: {
+        title: { text: 'District partisanship %  (← Democratic · Republican →)', standoff: 4, font: { size: 11 } },
+        ticksuffix: '%', range: [-100, 100], zeroline: true, zerolinecolor: '#333', zerolinewidth: 1,
+      },
+      yaxis: { title: { text: 'Seats', font: { size: 11 } }, range: [0, yMax] },
+      margin: { l: 50, r: 14, t: 38, b: 50 },
+      showlegend: false, bargap: 0.05, barmode: 'stack', plot_bgcolor: '#fff',
+    }, { displayModeBar: false, responsive: true });
+  }
 }
 
 // Stripped-down version of renderYearChart for the picker thumbnails:
@@ -873,25 +901,29 @@ function renderSimulatorRun(yMax) {
 // compact title.  Keeps the same yMax so visual area is comparable to the
 // big panel above.
 function renderYearThumb(divId, year, stats, yMax) {
-  const { centres, ranges, dCounts, rCounts, leans, nD, nR, isMidterm } = stats;
+  const { leans, nD, nR, isMidterm, allLeansWithMargin } = stats;
   const medRaw = medianOfNumbers(leans || []);
   const nat = NATIONAL_PRES_MARGIN[year];
   const medRel = isMidterm ? medRaw : (medRaw == null ? null : medRaw - nat);
   const title = `<b>${year}</b> · ${nD}D/${nR}R · ${formatLean(medRel)}`;
-  Plotly.newPlot(divId, [
-    { x: centres, y: dCounts, type: 'bar', name: 'D',
-      marker: { color: 'rgba(31,119,180,0.85)', line: { width: 0 } },
-      width: binSize, hoverinfo: 'skip' },
-    { x: centres, y: rCounts, type: 'bar', name: 'R',
-      marker: { color: 'rgba(214,39,40,0.85)', line: { width: 0 } },
-      width: binSize, hoverinfo: 'skip' },
-  ], {
+  const matrixIn = allLeansWithMargin || [];
+  const xs = matrixIn.map(d => d.lean);
+  const ms = matrixIn.map(d => d.margin);
+  const m = buildSeatMatrix(xs, ms);
+  Plotly.newPlot(divId, [{
+    z: m.z, x: m.centres, type: 'heatmap',
+    y: m.z.map((_, i) => i + 0.5),
+    colorscale: HEATMAP_COLORSCALE,
+    zmin: -100, zmax: 100, zmid: 0,
+    xgap: 0, ygap: 0,
+    showscale: false, hoverinfo: 'skip',
+  }], {
     title: { text: title, font: { size: 10 }, x: 0.04, xanchor: 'left', y: 0.97 },
     xaxis: { range: [-100, 100], showticklabels: false, zeroline: true,
              zerolinecolor: '#666', zerolinewidth: 1, showgrid: false, fixedrange: true },
     yaxis: { range: [0, yMax], showticklabels: false, showgrid: false, fixedrange: true },
     margin: { l: 4, r: 4, t: 16, b: 4 },
-    showlegend: false, bargap: 0.05, barmode: 'stack', plot_bgcolor: '#fff',
+    showlegend: false, plot_bgcolor: '#fff',
   }, { displayModeBar: false, responsive: true, staticPlot: true });
 }
 
@@ -931,6 +963,25 @@ function renderYearThumb(divId, year, stats, yMax) {
       if (+cy === y) marginByKey.set(st + '|' + di, info);
     }
     yearStats[y].marginByKey = marginByKey;
+    // Build a per-district {lean, margin, state, district} list once so
+    // every render function (top row, thumbnail, etc.) shares the same
+    // input.  Uncontested races still get included here (margin = ±100);
+    // they appear as the most-saturated colour at the bin's edge.  The
+    // simulator-on-year row pulls actuals from marginByKey directly and
+    // filters uncontested before computing PIT.
+    const allLeansWithMargin = [];
+    for (let i = 0; i < yearStats[y].allLeans.length; i++) {
+      const key = yearStats[y].allStates[i] + '|' + yearStats[y].allDistricts[i];
+      const info = marginByKey.get(key);
+      if (!info || !isFinite(info.margin)) continue;
+      allLeansWithMargin.push({
+        lean: yearStats[y].allLeans[i],
+        margin: info.margin,
+        state: yearStats[y].allStates[i],
+        district: yearStats[y].allDistricts[i],
+      });
+    }
+    yearStats[y].allLeansWithMargin = allLeansWithMargin;
     for (const v of yearStats[y].dCounts) if (v > yMax) yMax = v;
     for (const v of yearStats[y].rCounts) if (v > yMax) yMax = v;
   }
@@ -995,19 +1046,26 @@ function renderYearThumb(divId, year, stats, yMax) {
     const spec = { binSize: cfg.binSize, lo: -100, hi: 100 };
     const t0 = performance.now();
     const nsim = histNsim();
-    // No marginBinSpec — the right-column margin chart was retired, so
-    // the simulator can skip building those bins entirely.
-    const sims = runSimulations(p, nsim, spec, null, null);
+    // trackPerDistrict: true gives us per-district avgZ so the bottom-
+    // row heatmap can colour each seat by its mean predicted margin.
+    // We also cache the pool (analytic chamber's lean values) so the
+    // heatmap can rebuild even on a cross-tab storage event.
+    const sims = runSimulations(p, nsim, spec, null, null, null, true);
     const mb = sims.mismatchBins;
     if (!mb) return;
     try {
+      const poolArr = sims.districtPool ? Array.from(sims.districtPool) : null;
+      const avgZArr = sims.perDistrict && sims.perDistrict.avgZ
+        ? Array.from(sims.perDistrict.avgZ) : null;
       localStorage.setItem('simulator_current_run', JSON.stringify({
         timestamp: Date.now(),
         binSize: mb.binSize, centres: mb.centres, ranges: mb.ranges,
         avgDWins: mb.avgDWins, avgRWins: mb.avgRWins,
-        // Keep margin fields in the blob shape so the simulator page
-        // (which still wants both views) doesn't see an unexpectedly
-        // missing key — historical.html just doesn't compute them.
+        // Per-district arrays drive the heatmap on the bottom row.
+        pool: poolArr,
+        perDistrictAvgZ: avgZArr,
+        // Legacy margin fields kept null so the simulator page doesn't
+        // see a missing key — historical.html doesn't compute them.
         avgDMargin: null,
         avgRMargin: null,
         rGerry: p.rGerry, dGerry: p.dGerry, v: p.v,

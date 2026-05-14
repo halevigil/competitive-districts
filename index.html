@@ -1224,7 +1224,12 @@
 					},
 					// Per-district margin bins — same grid as the historical
 					// House-margin chart so the two read as parallel views.
-					{ binSize: histCfg.binSize, lo: -100, hi: 100 }
+					{ binSize: histCfg.binSize, lo: -100, hi: 100 },
+					null,
+					// trackPerDistrict: the historical page's bottom-row
+					// heatmap reads pool + perDistrict.avgZ from localStorage
+					// to colour each seat by its mean predicted margin.
+					true
 				);
 				const example = simulateOne(p, true);
 				const t1 = performance.now();
@@ -1253,6 +1258,10 @@
 					const mb = sims.mismatchBins;
 					const gb = sims.marginBins;
 					if (mb) {
+						const poolArr = sims.districtPool
+							? Array.from(sims.districtPool) : null;
+						const avgZArr = sims.perDistrict && sims.perDistrict.avgZ
+							? Array.from(sims.perDistrict.avgZ) : null;
 						localStorage.setItem(
 							"simulator_current_run",
 							JSON.stringify({
@@ -1269,6 +1278,11 @@
 								// counts per chamber, just like avgDWins.
 								avgDMargin: gb ? gb.avgD : null,
 								avgRMargin: gb ? gb.avgR : null,
+								// Per-district arrays for the historical
+								// page's heatmap bottom row (one cell per
+								// district coloured by mean predicted margin).
+								pool: poolArr,
+								perDistrictAvgZ: avgZArr,
 								rGerry: p.rGerry,
 								dGerry: p.dGerry,
 								v: p.v,

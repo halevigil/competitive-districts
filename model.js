@@ -538,11 +538,19 @@ function intentionalModOffsets(mode, K, L) {
 // adjustment + noise, and is the simulator's analog of a vote margin.
 // Useful for the "Distribution of per-district election margins" view that
 // parallels the historical House margin chart.
-// `perDistrictTracker`, when provided, is `{ zSum, rWins }` — Float64Array /
-// Int32Array of length N, indexed by district pool position.  We accumulate
-// the simulator's per-district z (the "vote score" R minus D, in pp) and the
-// number of sims in which R won that district.  Lets the historical page
-// plot a per-district scatter of model-predicted vs actual House margin.
+// `perDistrictTracker`, when provided, is `{ zSum, zSumSq, rWins,
+// actuals, belowActual }` — Float64Arrays + Int32Arrays of length N,
+// indexed by district pool position.  We accumulate the simulator's
+// per-district z (R−D score, pp), z² for variance, R-win counts, and —
+// if the caller supplied `actuals` (an array of real-world margins
+// keyed parallel to the pool) — the number of sims in which the
+// simulator's predicted z fell BELOW the district's actual.  That
+// gives an empirical PIT (count / n_sims ∈ [0, 1]) per district
+// without assuming the per-district predicted distribution is
+// Gaussian, which the historical page uses to compute a non-gameable
+// goodness-of-fit χ² for the simulator-on-this-year row.  Districts
+// with non-finite actuals (e.g. uncontested races) get NaN in
+// `actuals`; the inner loop just skips them.
 function simulateOne(
 	p,
 	returnFull = false,
@@ -622,12 +630,13 @@ function simulateOne(
 	const mgLo = marginTracker ? marginTracker.lo : 0;
 	const mgStep = marginTracker ? marginTracker.binSize : 1;
 	const mgNBins = marginTracker ? marginTracker.nBins : 0;
-	// Per-district z + R-win tracker.  zSum gets averaged across sims by the
-	// caller; rWins / (n_sims) gives the simulator's R-win probability per
-	// district.  Indexed by pool position, so the caller is responsible for
-	// keeping any (state, district) labels aligned with the pool order.
+	// Per-district z / z² / R-win / below-actual tracker.  See the
+	// comment on the function signature for the full semantics.
 	const pdZSum = perDistrictTracker ? perDistrictTracker.zSum : null;
+	const pdZSumSq = perDistrictTracker ? perDistrictTracker.zSumSq : null;
 	const pdRWins = perDistrictTracker ? perDistrictTracker.rWins : null;
+	const pdActuals = perDistrictTracker ? perDistrictTracker.actuals : null;
+	const pdBelowActual = perDistrictTracker ? perDistrictTracker.belowActual : null;
 	let mismatches = 0; // R in D-lean district, or D in R-lean district (di ≠ 0)
 	if (vIsZero) {
 		// Fast path — no v-shift on the swing bell when v = 0.
@@ -706,7 +715,15 @@ function simulateOne(
 			}
 			if (pdZSum) {
 				pdZSum[i] += z;
+				pdZSumSq[i] += z * z;
 				if (isR) pdRWins[i]++;
+				// Empirical PIT counter: bump only when an actual margin
+				// was supplied AND finite (NaN sentinel for uncontested
+				// or unmatched districts skips them).
+				if (pdActuals) {
+					const a = pdActuals[i];
+					if (a === a && z < a) pdBelowActual[i]++;
+				}
 			}
 			if (di !== 0 && ((isR && di < 0) || (!isR && di > 0))) {
 				mismatches++;
@@ -793,7 +810,15 @@ function simulateOne(
 			}
 			if (pdZSum) {
 				pdZSum[i] += z;
+				pdZSumSq[i] += z * z;
 				if (isR) pdRWins[i]++;
+				// Empirical PIT counter: bump only when an actual margin
+				// was supplied AND finite (NaN sentinel for uncontested
+				// or unmatched districts skips them).
+				if (pdActuals) {
+					const a = pdActuals[i];
+					if (a === a && z < a) pdBelowActual[i]++;
+				}
 			}
 			if (di !== 0 && ((isR && di < 0) || (!isR && di > 0))) {
 				mismatches++;
@@ -920,11 +945,15 @@ function simulateOne(
 // Float64Array of lean values in pp.  Tie-break duplication is skipped when
 // a custom pool is supplied (it's only meaningful for the synthetic
 // "fully-gerrymandered" edge case, which can't occur on real data).
-// `trackPerDistrict`, when true, accumulates per-district sums of z (the
-// simulator's vote score, R−D in pp) and per-district R-win counts across
-// all sims.  The result is exposed as `result.perDistrict = { avgZ, rWinProb }`
-// — both Float64Arrays of length N indexed by pool position.  Used by the
-// historical page's "predicted vs actual margin" scatter.
+// `trackPerDistrict`, when truthy, accumulates per-district mean z, std z,
+// and R-win probability across all sims.  Two call shapes:
+//   trackPerDistrict: true                   → just the stats, no PIT
+//   trackPerDistrict: { actuals: [...] }     → also compute an empirical
+//                                              PIT u_i = (# sims where
+//                                              z_i < actuals[i]) / n
+// `actuals` must be parallel to the pool (NaN sentinel skips a district).
+// Result is exposed as `result.perDistrict = { avgZ, stdZ, rWinProb,
+// empiricalPIT? }` — Float64Arrays indexed by pool position.
 function runSimulations(
 	p,
 	n,
@@ -1069,12 +1098,20 @@ function runSimulations(
 		marginBins = { dCounts, rCounts, centres, ranges, binSize, nBins };
 	}
 
-	// Optional per-district tracker (z + R-win counts per pool slot).
+	// Optional per-district tracker (z, z², R-win counts; optional actuals
+	// + below-actual counter for empirical PIT).
 	let perDistrictTracker = null;
 	if (trackPerDistrict) {
+		const actuals =
+			typeof trackPerDistrict === "object" && trackPerDistrict.actuals
+				? trackPerDistrict.actuals
+				: null;
 		perDistrictTracker = {
 			zSum: new Float64Array(N),
+			zSumSq: new Float64Array(N),
 			rWins: new Int32Array(N),
+			actuals,
+			belowActual: actuals ? new Int32Array(N) : null,
 		};
 	}
 
@@ -1149,17 +1186,38 @@ function runSimulations(
 		marginBins.nSims = n;
 	}
 
-	// Per-district averages: avgZ is the simulator's expected z (vote score
-	// in pp) for each pool slot; rWinProb is its R-win probability ∈ [0, 1].
+	// Per-district summaries: mean z (expected vote score), std z (the
+	// simulator's per-district uncertainty), R-win probability ∈ [0, 1],
+	// and (optionally) the empirical PIT against the supplied actuals.
 	let perDistrict = null;
 	if (perDistrictTracker) {
 		const avgZ = new Float64Array(N);
+		const stdZ = new Float64Array(N);
 		const rWinProb = new Float64Array(N);
+		let empiricalPIT = null;
+		const actuals = perDistrictTracker.actuals;
+		const belowActual = perDistrictTracker.belowActual;
+		if (actuals && belowActual) empiricalPIT = new Float64Array(N);
 		for (let i = 0; i < N; i++) {
-			avgZ[i] = perDistrictTracker.zSum[i] / n;
+			const m = perDistrictTracker.zSum[i] / n;
+			const m2 = perDistrictTracker.zSumSq[i] / n;
+			avgZ[i] = m;
+			// Clamp the variance at 0 to absorb tiny FP negatives when the
+			// simulator's per-district z is effectively constant across sims
+			// (e.g. sigmaN slider all the way down + symmetric candidates).
+			stdZ[i] = Math.sqrt(Math.max(0, m2 - m * m));
 			rWinProb[i] = perDistrictTracker.rWins[i] / n;
+			if (empiricalPIT) {
+				// NaN sentinel where the district had no valid actual
+				// (uncontested / unmatched).  The historical page filters
+				// these out of the χ² calculation.
+				empiricalPIT[i] = (actuals[i] === actuals[i])
+					? belowActual[i] / n
+					: NaN;
+			}
 		}
-		perDistrict = { avgZ, rWinProb };
+		perDistrict = { avgZ, stdZ, rWinProb };
+		if (empiricalPIT) perDistrict.empiricalPIT = empiricalPIT;
 	}
 
 	return {

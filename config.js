@@ -212,7 +212,7 @@ window.CONFIG = {
 		// The block's shape function in d_i then multiplies each of these.
 		safe: { mean: 8, var: 8, tail: 0 },
 		swing: { mean: 16, var: 4, tail: 2 },
-		opp: { mean: 2, var: 0, tail: 12 },
+		opp: { mean: 2, var: 8, tail: 12 },
 	},
 
 	// ---------------- HISTOGRAMS -----------------------------------------------
