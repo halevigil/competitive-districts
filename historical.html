@@ -231,10 +231,12 @@
   same sliders run on that cycle's real districts (middle), and the same
   sliders run on the simulator's synthetic chamber (bottom).  Adjust the
   knobs in the sidebar to retune the simulator in place — no need to bounce
-  back to the simulator page.  <b>Left chart in each pair:</b> seats binned
-  by partisan lean (presidential margin for pres years; Cook-style PVI
-  for midterms), coloured by who won the seat.  <b>Right:</b> distribution
-  of per-district election margins (R% − D%).
+  back to the simulator page.  Each chart shows seats binned by partisan
+  lean, coloured by who won (blue = Democratic, red = Republican).  For
+  presidential years the lean axis is the district's presidential margin;
+  for midterm years it's a Cook-style PVI computed from the previous two
+  presidential elections, weighted 2-to-1 (the more recent gets twice
+  the weight), minus the same weighted national average.
 </div>
 
 <!-- Top: the picked historical year, big.  Stays hidden until the data
@@ -502,7 +504,14 @@ function buildYear(year, leanRows, leanField, houseIdx) {
 
 function renderYearChart(divId, year, stats, yMax) {
   const { centres, ranges, dCounts, rCounts, leans, nD, nR, isMidterm } = stats;
-  const leanLabel = isMidterm ? 'PVI (2-to-1)' : 'Presidential margin';
+  // Spell out the 2-to-1 weighting in the axis label so the chart is
+  // self-explanatory — the previous "PVI (2-to-1)" needed footnote text
+  // for any reader who hadn't heard the term.  "last pres × 2 + prior × 1"
+  // is the exact computation the build script applies (see PVI_BACKING in
+  // data/build-historical.py).
+  const leanLabel = isMidterm
+    ? 'PVI (last pres × 2 + prior pres × 1)'
+    : 'Presidential margin';
   // Shift pres-year medians to be relative to the national popular vote
   // (PVI rows are already relative to their weighted prior-pres average,
   // so no shift needed there).  The result is directly comparable to the
@@ -589,7 +598,11 @@ function renderSimOnYear(year, yearStats, yMax) {
   const totalR = mb.avgRWins.reduce((a, b) => a + b, 0);
   const med = medianFromBins(mb.centres, mb.avgDWins, mb.avgRWins, binSize);
   const isMidterm = MIDTERM_YEARS.has(year);
-  const leanLabel = isMidterm ? 'PVI (2-to-1)' : 'Presidential margin';
+  // Matching label to renderYearChart — self-documents the weighting
+  // instead of relying on the user to know what "2-to-1" means.
+  const leanLabel = isMidterm
+    ? 'PVI (last pres × 2 + prior pres × 1)'
+    : 'Presidential margin';
   const titleParts = [
     `<b>Simulator on ${year} districts</b>`,
     `D-won ${totalD.toFixed(1)}, R-won ${totalR.toFixed(1)}`,
