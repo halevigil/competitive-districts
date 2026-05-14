@@ -65,13 +65,13 @@ window.CONFIG = {
 		// Simulations per render on the simulator page (index.html).  Larger
 		// = smoother per-bin averages, slower per-drag re-render.  At
 		// ~0.15 ms/sim, 500 sims ≈ 75 ms of pure compute per drag.
-		nsim: 500,
+		nsim: 1000,
 		// Same idea, but for the historical page (historical.html), which
 		// runs the simulator twice per drag (once on the analytic pool for
 		// the bottom row, once on the selected year's real district pool
 		// for the middle row).  Defaulted lower than `nsim` so drags stay
 		// snappy when there are two sims to do.
-		historicalNsim: 200,
+		historicalNsim: 1000,
 		// Milliseconds to wait after the LAST slider-input event before
 		// firing a fresh simulator render.  Larger = waits longer for the
 		// drag to settle (fewer re-renders, less churn); smaller = updates
@@ -231,7 +231,7 @@ window.CONFIG = {
 		// District-partisanship histogram (bottom chart): bin width in
 		// percentage points across the fixed [-100%, 100%] range.
 		district: {
-			binSize: 4,
+			binSize: 2,
 		},
 		// Per-party rep-ideology histograms (in "see more plots"):
 		// bin width and x-axis range, in ideology units (% points).  The
