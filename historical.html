@@ -596,8 +596,19 @@ function renderSimOnYear(year, yearStats, yMax) {
 
   const totalD = mb.avgDWins.reduce((a, b) => a + b, 0);
   const totalR = mb.avgRWins.reduce((a, b) => a + b, 0);
-  const med = medianFromBins(mb.centres, mb.avgDWins, mb.avgRWins, binSize);
+  // The median LEAN of this row's pool is structural — it's the chamber-
+  // pivot district's lean, which the top row's chart also reports.
+  // Compute it directly from the sorted pool (medianFromBins on the
+  // simulator's binned output introduces ~0.5 pp of error because PVI
+  // values are quantized to 0.01 pp and cluster non-uniformly inside
+  // each bin) so the two rows agree exactly.  For presidential years we
+  // also apply the same "relative to the national popular vote" shift
+  // the top row applies (PVI rows are already in this form, so midterm
+  // years skip the shift).
   const isMidterm = MIDTERM_YEARS.has(year);
+  const medRaw = pool[(pool.length - 1) >> 1];
+  const nat = NATIONAL_PRES_MARGIN[year];
+  const med = isMidterm ? medRaw : (medRaw == null ? null : medRaw - nat);
   // Matching label to renderYearChart — self-documents the weighting
   // instead of relying on the user to know what "2-to-1" means.
   const leanLabel = isMidterm
