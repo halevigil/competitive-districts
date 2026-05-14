@@ -349,11 +349,15 @@ const binSize = Math.max(2,
     && window.CONFIG.histograms.district
     && window.CONFIG.histograms.district.binSize) || 4);
 
-// How many sims a slider-driven run does on this page.  Far smaller than
-// the simulator page's 1000 — slider drags need fast feedback, and per-bin
-// averages are visually stable well below 1000 sims.  ~200 puts each onRun
-// under ~100ms total compute on a typical laptop.
-const HIST_NSIM = 200;
+// How many sims a slider-driven run does on this page.  Resolved from
+// config.js (`constants.historicalNsim`) on every call so the value
+// can be mutated live (e.g. from devtools) and picked up on the next
+// drag without a reload.  Far smaller than the simulator page's `nsim`
+// — slider drags need fast feedback, and per-bin averages are visually
+// stable well below 1000 sims.
+function histNsim() {
+  return window.CONFIG?.constants?.historicalNsim ?? 200;
+}
 
 // ---------------------------------------------------------------------------
 // Tiny CSV parser — handles double-quoted fields with embedded commas.  Good
@@ -577,7 +581,7 @@ function renderSimOnYear(year, yearStats, yMax) {
   // drags need fast feedback, and per-bin averages smooth out well below
   // 1000 sims anyway.  No marginBinSpec (the right-column chart was
   // retired so the simulator can skip those bins entirely).
-  const sims = runSimulations(saved.params, HIST_NSIM, spec, null, null, pool);
+  const sims = runSimulations(saved.params, histNsim(), spec, null, null, pool);
   const mb = sims.mismatchBins;
   if (!mb) { row.style.display = 'none'; return; }
 
@@ -793,9 +797,10 @@ function renderYearThumb(divId, year, stats, yMax) {
     const cfg = window.CONFIG.histograms.district;
     const spec = { binSize: cfg.binSize, lo: -100, hi: 100 };
     const t0 = performance.now();
+    const nsim = histNsim();
     // No marginBinSpec — the right-column margin chart was retired, so
     // the simulator can skip building those bins entirely.
-    const sims = runSimulations(p, HIST_NSIM, spec, null, null);
+    const sims = runSimulations(p, nsim, spec, null, null);
     const mb = sims.mismatchBins;
     if (!mb) return;
     try {
@@ -809,7 +814,7 @@ function renderYearThumb(divId, year, stats, yMax) {
         avgDMargin: null,
         avgRMargin: null,
         rGerry: p.rGerry, dGerry: p.dGerry, v: p.v,
-        params: p, nsim: HIST_NSIM,
+        params: p, nsim,
       }));
     } catch (_) { /* private mode / quota — ignore */ }
     renderSimulatorRun(yMax);
@@ -827,10 +832,16 @@ function renderYearThumb(divId, year, stats, yMax) {
         `D-won <span class="num">${totalD.toFixed(1)}</span>, ` +
         `R-won <span class="num">${totalR.toFixed(1)}</span><br>` +
         `chamber-pivot lean <span class="num">${formatLean(simMed)}</span> &nbsp;·&nbsp; ` +
-        `${HIST_NSIM} sims in ${(t1 - t0).toFixed(0)}ms`;
+        `${nsim} sims in ${(t1 - t0).toFixed(0)}ms`;
     }
   }
-  CONTROLS.bind({ onRun: runAndRender });
+  // Pass debounceConfigKey so this page reads `historicalSliderDebounceMs`
+  // from config.js (with a fallback to the shared `sliderDebounceMs`) —
+  // lets historical and the simulator page be tuned independently.
+  CONTROLS.bind({
+    onRun: runAndRender,
+    debounceConfigKey: 'historicalSliderDebounceMs',
+  });
 
   // Cross-tab live-update: if the simulator page is still open in another
   // tab and the user re-runs it there, refresh both sim-driven rows here

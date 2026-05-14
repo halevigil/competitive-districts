@@ -384,10 +384,19 @@
 		};
 		const scheduleRun = () => {
 			if (pendingTimer) clearTimeout(pendingTimer);
-			// Tunable in config.js as constants.sliderDebounceMs.  Larger
-			// = waits longer after the drag stops; smaller = updates
-			// closer to real-time mid-drag.  Falls back to 80ms.
-			const ms = window.CONFIG?.constants?.sliderDebounceMs ?? 80;
+			// Debounce window, in milliseconds.  Resolution order:
+			//   1. The optional `debounceConfigKey` the caller passes to
+			//      bind() — e.g. historical.html passes
+			//      'historicalSliderDebounceMs' so it gets its own knob.
+			//   2. The shared `sliderDebounceMs` field — covers the
+			//      simulator page and any caller that doesn't override.
+			//   3. Hard fallback of 80 ms if neither is set.
+			// Read on every scheduleRun call so live mutation works.
+			const C = window.CONFIG?.constants;
+			const key = opts.debounceConfigKey;
+			const ms = (key && C?.[key] != null)
+				? C[key]
+				: (C?.sliderDebounceMs ?? 80);
 			pendingTimer = setTimeout(() => {
 				pendingTimer = null;
 				if (opts.onRun) opts.onRun(readParams());
