@@ -775,40 +775,50 @@ function renderSimOnYear(year, yearStats, yMax) {
     ? 'PVI (last pres × 2 + prior pres × 1)'
     : 'Presidential margin';
 
-  // ---- empirical-PIT goodness-of-fit χ² ----------------------------------
-  // Don't assume a Gaussian per-district predicted distribution (the
-  // simulator's noise + candidate components have heavier tails and
-  // slight skew).  Use the empirical PIT computed inside the simulator:
-  // u_i = (count of sims where predicted z < actual margin) / n_sims.
-  // Under perfect calibration u_i ~ Uniform(0, 1) across districts, so
-  // we bin into 20 buckets and compute χ² against the uniform expectation.
-  // χ² ≈ 19 → calibrated;  ≫30 → distribution shape doesn't match reality.
-  // Non-gameable: widening predicted σ pushes u_i toward 0.5 (middle of
-  // PIT bin range) and χ² goes up; narrowing pushes to the edges and χ²
-  // also goes up.
+  // ---- empirical-PIT goodness-of-fit (Cramér–von Mises) -------------------
+  // For each district the simulator already counted the number of sims
+  // in which predicted z fell BELOW the actual margin; dividing by n_sims
+  // gives the empirical PIT u_i ∈ [0, 1].  Under perfect calibration the
+  // u_i are uniform on [0, 1] across districts.
+  //
+  // We test that hypothesis with the Cramér–von Mises (W²) statistic:
+  //   W² = 1/(12n) + Σᵢ ( (2i−1)/(2n) − u_(i) )²
+  // where u_(1) ≤ … ≤ u_(n) is the sorted PIT.  W² compares the empirical
+  // CDF of u to the uniform CDF (a straight line from 0 to 1), integrating
+  // squared deviation across the whole [0, 1] range.  Two big wins over
+  // the previous χ²-on-binned-PIT metric:
+  //   1. No bin choice — much less run-to-run noise.  χ² with 20 bins
+  //      had std √(2·df) ≈ 6 even at perfect calibration; W² is far
+  //      smoother because every u_i contributes its exact rank.
+  //   2. Distribution-agnostic — no Gaussian assumption on the per-
+  //      district predicted distribution (which has slight skew /
+  //      heavier tails than Gaussian).
+  // Non-gameable: widening σ shifts u_i toward 0.5 (clusters mid-CDF
+  // → bend in empirical CDF → W² up); narrowing piles them at 0 and 1
+  // (steps at edges → W² up).  Has a real optimum.
+  // Reference points (asymptotic):
+  //   W² ≈ 0.17  → expected under calibration
+  //   W² ≤ 0.46 → can't reject calibration at p = 0.05
+  //   W² ≫ 0.46 → predicted distributions visibly miscalibrated
   const ePIT = sims.perDistrict.empiricalPIT;
-  let pitChi2 = null;
+  let pitFit = null;
   let pitN = 0;
   if (ePIT) {
-    const nBinsPIT = 20;
-    const binCounts = new Array(nBinsPIT).fill(0);
+    const uVals = [];
     for (let i = 0; i < ePIT.length; i++) {
       const u = ePIT[i];
-      if (!(u === u)) continue; // skip NaN (uncontested / unmatched)
-      let idx = Math.floor(u * nBinsPIT);
-      if (idx < 0) idx = 0;
-      else if (idx >= nBinsPIT) idx = nBinsPIT - 1;
-      binCounts[idx]++;
-      pitN++;
+      if (u === u) uVals.push(u); // skip NaN (uncontested / unmatched)
     }
+    pitN = uVals.length;
     if (pitN > 0) {
-      const expected = pitN / nBinsPIT;
-      let chi2 = 0;
-      for (let i = 0; i < nBinsPIT; i++) {
-        const d = binCounts[i] - expected;
-        chi2 += (d * d) / expected;
+      uVals.sort((a, b) => a - b);
+      let w2 = 1 / (12 * pitN);
+      for (let i = 0; i < pitN; i++) {
+        const expected = (2 * (i + 1) - 1) / (2 * pitN);
+        const diff = expected - uVals[i];
+        w2 += diff * diff;
       }
-      pitChi2 = chi2;
+      pitFit = w2;
     }
   }
 
@@ -819,9 +829,9 @@ function renderSimOnYear(year, yearStats, yMax) {
     `median lean ${formatLean(med)}`,
     `v ${saved.params.v ?? 0}`,
   ];
-  if (pitChi2 != null) {
+  if (pitFit != null) {
     titleParts.push(
-      `fit χ²=${pitChi2.toFixed(0)} (goodness of fit, lower=better, ≈19 if calibrated)`
+      `fit W²=${pitFit.toFixed(2)} (goodness of fit, lower=better, ≲0.46 if calibrated)`
     );
   }
 
