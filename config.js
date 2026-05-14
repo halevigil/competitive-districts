@@ -62,7 +62,16 @@ window.CONFIG = {
 	// ---------------- SIMULATION CONSTANTS -------------------------------------
 	constants: {
 		m: 217, // half-chamber size — total districts = 2*m + 1 = 435
-		nsim: 500, // simulations per render
+		// Simulations per render on the simulator page (index.html).  Larger
+		// = smoother per-bin averages, slower per-drag re-render.  At
+		// ~0.15 ms/sim, 500 sims ≈ 75 ms of pure compute per drag.
+		nsim: 500,
+		// Same idea, but for the historical page (historical.html), which
+		// runs the simulator twice per drag (once on the analytic pool for
+		// the bottom row, once on the selected year's real district pool
+		// for the middle row).  Defaulted lower than `nsim` so drags stay
+		// snappy when there are two sims to do.
+		historicalNsim: 200,
 		// Milliseconds to wait after the LAST slider-input event before
 		// firing a fresh simulator render.  Larger = waits longer for the
 		// drag to settle (fewer re-renders, less churn); smaller = updates
@@ -70,8 +79,13 @@ window.CONFIG = {
 		//   30  → feels close to "live" updates during drag
 		//   80  → balanced (a brief pause triggers a render)
 		//   150 → only updates when you stop moving
-		// Read by both index.html and controls.js so it's a single knob.
+		// `sliderDebounceMs` controls the simulator page; the historical
+		// page falls back to it if `historicalSliderDebounceMs` is unset,
+		// otherwise uses its own value.  Either page can therefore be
+		// tuned independently (or both together by setting only the
+		// shared knob).
 		sliderDebounceMs: 80,
+		historicalSliderDebounceMs: 80,
 		sigmaN: 2, // fallback election noise σ if the slider is missing
 		// Election-noise SHAPE.  The actual noise σ comes from the sigmaN
 		// slider; this just picks the unit-variance distribution that gets
