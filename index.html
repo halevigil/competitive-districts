@@ -587,12 +587,16 @@
 					2nd: one example chamber — each district's partisanship vs
 					the elected representative's ideology. The black star marks
 					the median rep.<br />
-					3rd: histogram of district partisanship across the chamber,
-					with each bar split by who won the seat — blue = average
-					D-won seats, red = average R-won seats (averaged over the
-					1000 simulations). Total bar height = total districts in
-					that partisanship range. Mismatches show up as red bars in
-					D-leaning bins or blue bars in R-leaning bins.<br />
+					3rd: histogram of district partisanship across the chamber.
+					Each district is one cell stacked in its partisanship bin;
+					<b>cell colour = party of victory + margin of victory</b> —
+					blue if the simulator's D candidate is expected to win,
+					red if the R is, with darker shades for larger predicted
+					margins.  Within each column the cells form a spectrum of
+					likely margins (each district contributes a slice of its
+					predicted distribution), so a column that mixes blue and
+					red marks seats the simulator thinks could plausibly go
+					either way.<br />
 					4th: distribution of final Republican seats across the 1000
 					simulations. Bars are red when R holds a majority and blue
 					when D does, split at the chamber's majority threshold.
@@ -764,6 +768,71 @@
 			// ============================================================================
 			// RENDERING
 			// ============================================================================
+
+			// Diverging colour scale shared with historical.html so the two
+			// pages' district-partisanship charts read the same way.
+			// Margins map: dark blue = D blowout, light blue near boundary
+			// (D squeaker), light red just past zero (R squeaker), dark red
+			// = R blowout.  Light-but-clearly-partisan shades near the
+			// boundary avoid a "white toss-up" ambiguous cell.
+			const HEATMAP_COLORSCALE = [
+				[0.00, "rgb(8, 48, 107)"],     // -100: darkest blue
+				[0.20, "rgb(33, 113, 181)"],   //  -60
+				[0.35, "rgb(66, 146, 198)"],   //  -30
+				[0.45, "rgb(158, 202, 225)"],  //  -10
+				[0.50, "rgb(214, 230, 242)"],  //   0− pale blue
+				[0.50, "rgb(252, 220, 210)"],  //   0+ pale red
+				[0.55, "rgb(252, 174, 145)"],  //  +10
+				[0.65, "rgb(251, 106, 74)"],   //  +30
+				[0.80, "rgb(203, 24, 29)"],    //  +60
+				[1.00, "rgb(103, 0, 13)"],     // +100: darkest red
+			];
+
+			// Spectrum-per-column matrix builder for the district-partisanship
+			// chart.  Each district contributes K vertically-stacked cells
+			// drawn at evenly-spaced quantiles of its predicted Gaussian
+			// N(avgZ, stdZ), so a column shows the distribution of likely
+			// margins for the bin's seats (not just their mean).  Cell
+			// height = 1/K seats so the y axis stays in seat units.  Sort
+			// within each bin DESCENDING by margin → darkest red (most R)
+			// at the bottom of the stack, darkest blue (most D) at the top.
+			// Mirrors the helper of the same name on historical.html.
+			function buildSimulatorSeatMatrix(leans, mus, sigmas, binSize, K) {
+				K = K || 10;
+				const lo = -100, hi = 100;
+				const nBins = Math.ceil((hi - lo) / binSize);
+				const byBin = new Array(nBins).fill(null).map(() => []);
+				const offsets = new Array(K);
+				for (let k = 0; k < K; k++) offsets[k] = probit((k + 0.5) / K);
+				for (let i = 0; i < leans.length; i++) {
+					const mu = mus[i];
+					if (mu == null || !isFinite(mu)) continue;
+					let idx = Math.floor((leans[i] - lo) / binSize);
+					if (idx < 0) idx = 0;
+					else if (idx >= nBins) idx = nBins - 1;
+					const sigma = (sigmas && isFinite(sigmas[i])) ? sigmas[i] : 0;
+					for (let k = 0; k < K; k++) {
+						byBin[idx].push(mu + sigma * offsets[k]);
+					}
+				}
+				for (let b = 0; b < nBins; b++) byBin[b].sort((a, b) => b - a);
+				let maxStack = 0;
+				for (let b = 0; b < nBins; b++) if (byBin[b].length > maxStack) maxStack = byBin[b].length;
+				const z = [];
+				for (let layer = 0; layer < maxStack; layer++) {
+					const row = new Array(nBins);
+					for (let b = 0; b < nBins; b++) {
+						row[b] = layer < byBin[b].length ? byBin[b][layer] : NaN;
+					}
+					z.push(row);
+				}
+				const centres = new Array(nBins);
+				for (let i = 0; i < nBins; i++) centres[i] = lo + (i + 0.5) * binSize;
+				const yArr = new Array(maxStack);
+				for (let i = 0; i < maxStack; i++) yArr[i] = (i + 0.5) / K;
+				return { z, centres, yArr, maxStack };
+			}
+
 			function renderHistogram(meds, parties) {
 				const dMeds = [],
 					rMeds = [];
@@ -961,50 +1030,46 @@
 			}
 
 			function renderDistrictHist(sims) {
-				// Stacked-bar histogram: each bin is split into D-won (blue) on
-				// the bottom and R-won (red) on top, taken from the per-bin
-				// average wins runSimulations accumulates as a byproduct of the
-				// main 1000-sim run.  Total bar height = total districts in the
-				// pool falling in that bin (every district elects someone, so
-				// avgDWins + avgRWins per bin equals the district count).
-				const { centres, ranges, avgDWins, avgRWins, binSize } =
-					sims.mismatchBins;
-				// Total per bin for the y-axis floor calculation.
-				const totals = avgDWins.map((d, i) => d + avgRWins[i]);
+				// Per-district margin heatmap, matching the historical page's
+				// "Simulator on YYYY districts" row.  Each district contributes
+				// K vertically-stacked cells coloured by quantile samples of
+				// its predicted margin distribution N(avgZ, stdZ), so columns
+				// show a spectrum of likely margins — not just the mean.
+				// Y axis stays in "seats" units (each cell = 1/K seats).
+				const binSize = sims.mismatchBins.binSize;
+				const pool = sims.districtPool;
+				const avgZ = sims.perDistrict && sims.perDistrict.avgZ;
+				const stdZ = sims.perDistrict && sims.perDistrict.stdZ;
+				// Defensive fallback: if per-district tracking isn't on,
+				// build a flat one-cell-per-district matrix at the analytic
+				// pool's lean values so the chart still renders something.
+				if (!avgZ || !stdZ || !pool) {
+					console.warn("renderDistrictHist: missing per-district data");
+					return;
+				}
+				const N = pool.length;
+				const mus = new Array(N), sigmas = new Array(N);
+				for (let i = 0; i < N; i++) {
+					mus[i] = avgZ[i];
+					sigmas[i] = stdZ[i];
+				}
+				const m = buildSimulatorSeatMatrix(Array.from(pool), mus, sigmas, binSize, 10);
+				// y-axis range in seats — keep the 20-seat floor that matches
+				// the historical page, but auto-grow when a packed-gerry bump
+				// pushes a bin taller.
+				const yMax = Math.max(20, m.maxStack / 10);
 				Plotly.react(
 					"districtHistChart",
-					[
-						{
-							x: centres,
-							y: avgDWins,
-							type: "bar",
-							name: "D-won",
-							marker: {
-								color: "rgba(31,119,180,0.85)",
-								line: { width: 0 },
-							},
-							width: binSize,
-							customdata: ranges,
-							hovertemplate:
-								"partisanship: %{customdata[0]:.1f}% to %{customdata[1]:.1f}%<br>" +
-								"avg D-won seats: %{y:.2f}<extra></extra>",
-						},
-						{
-							x: centres,
-							y: avgRWins,
-							type: "bar",
-							name: "R-won",
-							marker: {
-								color: "rgba(214,39,40,0.85)",
-								line: { width: 0 },
-							},
-							width: binSize,
-							customdata: ranges,
-							hovertemplate:
-								"partisanship: %{customdata[0]:.1f}% to %{customdata[1]:.1f}%<br>" +
-								"avg R-won seats: %{y:.2f}<extra></extra>",
-						},
-					],
+					[{
+						z: m.z, x: m.centres, y: m.yArr, type: "heatmap",
+						colorscale: HEATMAP_COLORSCALE,
+						zmin: -100, zmax: 100, zmid: 0,
+						xgap: 0, ygap: 0,
+						showscale: false,
+						hovertemplate:
+							"partisanship: %{x:.0f}%<br>" +
+							"predicted margin: %{z:.1f}% (R−D)<extra></extra>",
+					}],
 					{
 						title: {
 							text: "Distribution of District Partisanship Across the Chamber",
@@ -1018,19 +1083,16 @@
 							ticksuffix: "%",
 							zeroline: true,
 							zerolinecolor: "#888",
+							range: [-100, 100],
 						},
-						// Y-axis floor pinned at 20 so the chart stays visually comparable to
-						// the historical-data histograms in historical.html (which top out
-						// around 20 districts per 2-pp bin).  When a sampled chamber has a
-						// taller spike (e.g. a packed gerry bump), the axis grows to fit.
 						yaxis: {
-							title: "Count",
-							range: [0, Math.max(20, ...totals)],
+							title: "Seats",
+							range: [0, yMax],
+							dtick: 5,
 						},
 						margin: { l: 60, r: 20, t: 50, b: 70 },
 						showlegend: false,
-						bargap: 0.02,
-						barmode: "stack",
+						plot_bgcolor: "#fff",
 					},
 					{ displayModeBar: false, responsive: true }
 				);
