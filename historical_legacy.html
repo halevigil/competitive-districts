@@ -84,15 +84,13 @@
     border-radius: 999px; padding: 4px 12px;
   }
   .backLink:hover { background: #f0f0f0; }
-  /* Each row is one big chart panel — the seats-by-partisan-lean view.
-     An earlier version of the page also showed a per-district election
-     margin histogram on the right side of each row; that two-column
-     layout is preserved in historical_legacy.html for reference.  Here
-     we keep just the seats chart so each row reads as a single visual
-     unit and the comparison stack stays vertically tight. */
+  /* The detail comparison area: the picked historical year and the current
+     simulator run, each as one row of two big charts (seats-by-lean on the
+     left, election-margin distribution on the right).  Stacked vertically
+     so you can scan one against the other. */
   .yearRow {
     display: grid;
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
     gap: 12px;
   }
   .panel {
@@ -118,6 +116,9 @@
     padding: 4px;
     cursor: pointer;
     transition: border-color 0.12s, transform 0.12s;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
   }
   .thumb:hover { border-color: #999; }
   .thumb.selected { border-color: var(--accent); }
@@ -241,6 +242,7 @@
      loads; then defaults to the most recent cycle. -->
 <div id="selectedRow" class="yearRow" style="display: none;">
   <div class="panel"><div id="selSeatsChart" class="chart"></div></div>
+  <div class="panel"><div id="selMarginChart" class="chart"></div></div>
 </div>
 
 <!-- Middle: the simulator's current sliders, but run on the picked
@@ -252,6 +254,7 @@
      with full params is available. -->
 <div id="simOnYearRow" class="yearRow" style="display: none; margin-top: 12px;">
   <div class="panel"><div id="simOnYearChart" class="chart"></div></div>
+  <div class="panel"><div id="simOnYearMarginChart" class="chart"></div></div>
 </div>
 
 <!-- Bottom: simulator run on its own analytic district pool, pulled
@@ -260,6 +263,9 @@
 <div id="simRunRow" class="yearRow" style="display: none; margin-top: 12px;">
   <div class="panel">
     <div id="simRunChart" class="chart"></div>
+  </div>
+  <div class="panel">
+    <div id="simRunMarginChart" class="chart"></div>
   </div>
 </div>
 
@@ -348,12 +354,6 @@ const binSize = Math.max(2,
   (window.CONFIG && window.CONFIG.histograms
     && window.CONFIG.histograms.district
     && window.CONFIG.histograms.district.binSize) || 4);
-
-// How many sims a slider-driven run does on this page.  Far smaller than
-// the simulator page's 1000 — slider drags need fast feedback, and per-bin
-// averages are visually stable well below 1000 sims.  ~200 puts each onRun
-// under ~100ms total compute on a typical laptop.
-const HIST_NSIM = 200;
 
 // ---------------------------------------------------------------------------
 // Tiny CSV parser — handles double-quoted fields with embedded commas.  Good
@@ -493,8 +493,73 @@ function buildYear(year, leanRows, leanField, houseIdx) {
   return { centres, ranges, dCounts, rCounts, leans, allLeans, nMatched, nUnmatched, nD, nR };
 }
 
-// (renderMarginYearChart and buildMarginYear were retired with the
-// right-column margin histograms — see historical_legacy.html.)
+// Per-district House election-margin distribution for one cycle.  Same bin
+// grid as the seats-by-pres chart so the two read as parallel views of the
+// same year; bars stacked by D-won / R-won (which collapses to a coloured
+// histogram by sign of the margin, since margin sign IS the winner).
+function buildMarginYear(year, marginRows) {
+  const lo = -100, hi = 100;
+  const nBins = Math.ceil((hi - lo) / binSize);
+  const dCounts = new Array(nBins).fill(0);
+  const rCounts = new Array(nBins).fill(0);
+  let nD = 0, nR = 0;
+  for (const m of marginRows) {
+    if (+m.cycle !== year) continue;
+    const margin = parseFloat(m.margin);
+    if (!isFinite(margin)) continue;
+    let idx = Math.floor((margin - lo) / binSize);
+    if (idx < 0) idx = 0; else if (idx >= nBins) idx = nBins - 1;
+    if (m.winner_party === 'D') { dCounts[idx]++; nD++; }
+    else if (m.winner_party === 'R') { rCounts[idx]++; nR++; }
+  }
+  const centres = new Array(nBins);
+  const ranges  = new Array(nBins);
+  for (let i = 0; i < nBins; i++) {
+    const a = lo + i * binSize;
+    const b = a + binSize;
+    centres[i] = (a + b) / 2;
+    ranges[i]  = [a, b];
+  }
+  return { centres, ranges, dCounts, rCounts, nD, nR };
+}
+
+function renderMarginYearChart(divId, year, stats, yMax) {
+  const { centres, ranges, dCounts, rCounts, nD, nR } = stats;
+  const titleParts = [
+    `<b>${year}</b>`,
+    `D-won ${nD}, R-won ${nR}`,
+  ];
+  Plotly.newPlot(divId, [
+    {
+      x: centres, y: dCounts, type: 'bar', name: 'D-won',
+      marker: { color: 'rgba(31,119,180,0.85)', line: { width: 0 } },
+      width: binSize, customdata: ranges,
+      hovertemplate:
+        'House margin: %{customdata[0]:.0f}% to %{customdata[1]:.0f}%<br>' +
+        'D-won seats: %{y}<extra></extra>',
+    },
+    {
+      x: centres, y: rCounts, type: 'bar', name: 'R-won',
+      marker: { color: 'rgba(214,39,40,0.85)', line: { width: 0 } },
+      width: binSize, customdata: ranges,
+      hovertemplate:
+        'House margin: %{customdata[0]:.0f}% to %{customdata[1]:.0f}%<br>' +
+        'R-won seats: %{y}<extra></extra>',
+    },
+  ], {
+    title: { text: titleParts.join(' &nbsp;·&nbsp; '), font: { size: 13 }, x: 0.04, xanchor: 'left' },
+    xaxis: {
+      title: { text: 'House election margin %  (← Democratic · Republican →)', standoff: 4, font: { size: 11 } },
+      ticksuffix: '%', range: [-100, 100], zeroline: true, zerolinecolor: '#333', zerolinewidth: 1,
+    },
+    yaxis: { title: { text: 'Seats', font: { size: 11 } }, range: [0, yMax] },
+    margin: { l: 50, r: 14, t: 38, b: 50 },
+    showlegend: false,
+    bargap: 0.05,
+    barmode: 'stack',
+    plot_bgcolor: '#fff',
+  }, { displayModeBar: false, responsive: true });
+}
 
 function renderYearChart(divId, year, stats, yMax) {
   const { centres, ranges, dCounts, rCounts, leans, nD, nR, isMidterm } = stats;
@@ -511,9 +576,7 @@ function renderYearChart(divId, year, stats, yMax) {
     `D-won ${nD}, R-won ${nR}`,
     `median lean ${formatLean(medRel)}`,
   ];
-  // Plotly.react diff-updates the chart when it already exists, so
-  // clicking a different year thumbnail is near-instant.
-  Plotly.react(divId, [
+  Plotly.newPlot(divId, [
     {
       x: centres, y: dCounts, type: 'bar', name: 'D-won',
       marker: { color: 'rgba(31,119,180,0.85)', line: { width: 0 } },
@@ -554,7 +617,7 @@ function renderYearChart(divId, year, stats, yMax) {
 // side-by-side: real history → model on those exact districts → model on
 // its own synthetic chamber.  Hidden when there's no cached run or when
 // the cache predates the "save full params" change.
-function renderSimOnYear(year, yearStats, yMax) {
+function renderSimOnYear(year, yearStats, yMax, mMax) {
   const row = document.getElementById('simOnYearRow');
   let saved;
   try { saved = JSON.parse(localStorage.getItem('simulator_current_run') || 'null'); }
@@ -572,19 +635,28 @@ function renderSimOnYear(year, yearStats, yMax) {
   const pool = Float64Array.from(yearStats.allLeans).sort();
   const lo = -100, hi = 100;
   const spec = { binSize, lo, hi };
-  // Re-run the cached parameters on this real-district pool.  Fixed at
-  // 200 sims regardless of what the simulator page persisted — slider
-  // drags need fast feedback, and per-bin averages smooth out well below
-  // 1000 sims anyway.  No marginBinSpec (the right-column chart was
-  // retired so the simulator can skip those bins entirely).
-  const sims = runSimulations(saved.params, HIST_NSIM, spec, null, null, pool);
+  // Re-run the cached parameters on this real-district pool.  Use the
+  // cached nsim if the page wrote one; otherwise default to 200 (faster
+  // than the full 1000 so year-switching feels snappy on the historical
+  // page, and the per-bin averages already smooth out at 200).
+  const nsim = Math.max(50, Math.min(saved.nsim || 200, 1000));
+  const sims = runSimulations(saved.params, nsim, spec, null, spec, pool);
   const mb = sims.mismatchBins;
-  if (!mb) { row.style.display = 'none'; return; }
+  const gb = sims.marginBins;
+  if (!mb || !gb) { row.style.display = 'none'; return; }
 
   const totalD = mb.avgDWins.reduce((a, b) => a + b, 0);
   const totalR = mb.avgRWins.reduce((a, b) => a + b, 0);
   const med = medianFromBins(mb.centres, mb.avgDWins, mb.avgRWins, binSize);
   const isMidterm = MIDTERM_YEARS.has(year);
+  const nat = NATIONAL_PRES_MARGIN[year];
+  // The pool itself is already in the same lean convention as the
+  // historical row, so its median doesn't need the popular-vote shift
+  // that the empirical pres-year row gets.  Show the simulated median
+  // relative to the pool's median to keep the "median lean" tag
+  // comparable across the three rows: the historical row's tag is the
+  // median *district* lean, and this one is the *chamber-pivot* seat's
+  // lean after applying the simulator's vote/quality/etc. effects.
   const leanLabel = isMidterm ? 'PVI (2-to-1)' : 'Presidential margin';
   const titleParts = [
     `<b>Simulator on ${year} districts</b>`,
@@ -592,10 +664,7 @@ function renderSimOnYear(year, yearStats, yMax) {
     `median lean ${formatLean(med)}`,
     `v ${saved.params.v ?? 0}`,
   ];
-  // Plotly.react diff-updates the existing SVG when the chart already
-  // exists — much faster than newPlot, which rebuilds it from scratch.
-  // First call falls through to a full build automatically.
-  Plotly.react('simOnYearChart', [
+  Plotly.newPlot('simOnYearChart', [
     { x: mb.centres, y: mb.avgDWins, type: 'bar', name: 'D-won',
       marker: { color: 'rgba(31,119,180,0.85)', line: { width: 0 } },
       width: binSize, customdata: mb.ranges,
@@ -618,13 +687,39 @@ function renderSimOnYear(year, yearStats, yMax) {
     margin: { l: 50, r: 14, t: 38, b: 50 },
     showlegend: false, bargap: 0.05, barmode: 'stack', plot_bgcolor: '#fff',
   }, { displayModeBar: false, responsive: true });
+
+  Plotly.newPlot('simOnYearMarginChart', [
+    { x: gb.centres, y: gb.avgD, type: 'bar', name: 'D-won',
+      marker: { color: 'rgba(31,119,180,0.85)', line: { width: 0 } },
+      width: binSize, customdata: gb.ranges,
+      hovertemplate:
+        'margin: %{customdata[0]:.0f} to %{customdata[1]:.0f}<br>' +
+        'avg D-won seats: %{y:.2f}<extra></extra>' },
+    { x: gb.centres, y: gb.avgR, type: 'bar', name: 'R-won',
+      marker: { color: 'rgba(214,39,40,0.85)', line: { width: 0 } },
+      width: binSize, customdata: gb.ranges,
+      hovertemplate:
+        'margin: %{customdata[0]:.0f} to %{customdata[1]:.0f}<br>' +
+        'avg R-won seats: %{y:.2f}<extra></extra>' },
+  ], {
+    title: { text: titleParts.join(' &nbsp;·&nbsp; '), font: { size: 13 }, x: 0.04, xanchor: 'left' },
+    xaxis: {
+      title: { text: 'Election margin  (← Democratic · Republican →)', standoff: 4, font: { size: 11 } },
+      range: [-100, 100], zeroline: true, zerolinecolor: '#333', zerolinewidth: 1,
+    },
+    yaxis: { title: { text: 'Seats', font: { size: 11 } }, range: [0, mMax] },
+    margin: { l: 50, r: 14, t: 38, b: 50 },
+    showlegend: false, bargap: 0.05, barmode: 'stack', plot_bgcolor: '#fff',
+  }, { displayModeBar: false, responsive: true });
 }
 
 // Render the live simulator-run row from data the main page wrote to
 // localStorage on its last render.  Stays hidden if no run is cached.
-// Reuses the year-chart visual style + the shared yMax so the simulator
-// panel sits visually next to the historical ones at the same scale.
-function renderSimulatorRun(yMax) {
+// Reuses the year-chart visual style + the shared yMax / mMax so the
+// simulator panels sit visually next to the historical ones at the same
+// scale.  Layout mirrors the per-year rows: seats-by-partisanship on the
+// left, per-district election margin distribution on the right.
+function renderSimulatorRun(yMax, mMax) {
   let saved;
   try { saved = JSON.parse(localStorage.getItem('simulator_current_run') || 'null'); }
   catch (_) { saved = null; }
@@ -637,6 +732,7 @@ function renderSimulatorRun(yMax) {
   const {
     binSize, centres, ranges,
     avgDWins, avgRWins,
+    avgDMargin, avgRMargin,
     rGerry, dGerry, v,
   } = saved;
   const totalD = avgDWins.reduce((a,b) => a + b, 0);
@@ -648,7 +744,7 @@ function renderSimulatorRun(yMax) {
     `median lean ${formatLean(simMed)}`,
     `rGerry ${rGerry?.toFixed?.(2) ?? '—'}, dGerry ${dGerry?.toFixed?.(2) ?? '—'}, v ${v ?? 0}`,
   ];
-  Plotly.react('simRunChart', [
+  Plotly.newPlot('simRunChart', [
     {
       x: centres, y: avgDWins, type: 'bar', name: 'D-won',
       marker: { color: 'rgba(31,119,180,0.85)', line: { width: 0 } },
@@ -678,6 +774,45 @@ function renderSimulatorRun(yMax) {
     barmode: 'stack',
     plot_bgcolor: '#fff',
   }, { displayModeBar: false, responsive: true });
+
+  // Right panel: per-district election margin distribution.  Falls back
+  // gracefully if an older run (pre-margin-tracker) is in localStorage.
+  if (avgDMargin && avgRMargin) {
+    Plotly.newPlot('simRunMarginChart', [
+      {
+        x: centres, y: avgDMargin, type: 'bar', name: 'D-won',
+        marker: { color: 'rgba(31,119,180,0.85)', line: { width: 0 } },
+        width: binSize, customdata: ranges,
+        hovertemplate:
+          'margin: %{customdata[0]:.0f} to %{customdata[1]:.0f}<br>' +
+          'avg D-won seats: %{y:.2f}<extra></extra>',
+      },
+      {
+        x: centres, y: avgRMargin, type: 'bar', name: 'R-won',
+        marker: { color: 'rgba(214,39,40,0.85)', line: { width: 0 } },
+        width: binSize, customdata: ranges,
+        hovertemplate:
+          'margin: %{customdata[0]:.0f} to %{customdata[1]:.0f}<br>' +
+          'avg R-won seats: %{y:.2f}<extra></extra>',
+      },
+    ], {
+      title: { text: titleParts.join(' &nbsp;·&nbsp; '), font: { size: 13 }, x: 0.04, xanchor: 'left' },
+      xaxis: {
+        title: { text: 'Election margin  (← Democratic · Republican →)', standoff: 4, font: { size: 11 } },
+        range: [-100, 100], zeroline: true, zerolinecolor: '#333', zerolinewidth: 1,
+      },
+      yaxis: { title: { text: 'Seats', font: { size: 11 } }, range: [0, mMax] },
+      margin: { l: 50, r: 14, t: 38, b: 50 },
+      showlegend: false,
+      bargap: 0.05,
+      barmode: 'stack',
+      plot_bgcolor: '#fff',
+    }, { displayModeBar: false, responsive: true });
+  } else {
+    // Hide just the right panel if margin data isn't available.
+    document.getElementById('simRunMarginChart').innerHTML =
+      '<div style="padding:30px;color:#777;font-size:12px;text-align:center;">Re-run the simulator to populate this chart.</div>';
+  }
 }
 
 // Stripped-down version of renderYearChart for the picker thumbnails:
@@ -707,8 +842,25 @@ function renderYearThumb(divId, year, stats, yMax) {
   }, { displayModeBar: false, responsive: true, staticPlot: true });
 }
 
-// (renderMarginYearThumb was retired with the right-column margin
-// histograms — see historical_legacy.html.)
+function renderMarginYearThumb(divId, year, stats, mMax) {
+  const { centres, dCounts, rCounts, nD, nR } = stats;
+  const title = `<b>${year}</b> margins · ${nD}D/${nR}R`;
+  Plotly.newPlot(divId, [
+    { x: centres, y: dCounts, type: 'bar', name: 'D',
+      marker: { color: 'rgba(31,119,180,0.85)', line: { width: 0 } },
+      width: binSize, hoverinfo: 'skip' },
+    { x: centres, y: rCounts, type: 'bar', name: 'R',
+      marker: { color: 'rgba(214,39,40,0.85)', line: { width: 0 } },
+      width: binSize, hoverinfo: 'skip' },
+  ], {
+    title: { text: title, font: { size: 10 }, x: 0.04, xanchor: 'left', y: 0.97 },
+    xaxis: { range: [-100, 100], showticklabels: false, zeroline: true,
+             zerolinecolor: '#666', zerolinewidth: 1, showgrid: false, fixedrange: true },
+    yaxis: { range: [0, mMax], showticklabels: false, showgrid: false, fixedrange: true },
+    margin: { l: 4, r: 4, t: 16, b: 4 },
+    showlegend: false, bargap: 0.05, barmode: 'stack', plot_bgcolor: '#fff',
+  }, { displayModeBar: false, responsive: true, staticPlot: true });
+}
 
 (async function main() {
   const picker = document.getElementById('picker');
@@ -721,7 +873,9 @@ function renderYearThumb(divId, year, stats, yMax) {
   }
   const houseIdx = indexHouse(data.house);
   const yearStats = {};
+  const marginStats = {};
   let yMax = 0;
+  let mMax = 0;
   for (const y of YEARS) {
     // Presidential years bin by pres margin; midterm years bin by Cook-
     // style PVI (computed from the two prior pres cycles, 2-to-1 weighted).
@@ -730,11 +884,15 @@ function renderYearThumb(divId, year, stats, yMax) {
       ? buildYear(y, data.pvi, 'pvi', houseIdx)
       : buildYear(y, data.pres, 'margin', houseIdx);
     yearStats[y].isMidterm = isMidterm;
+    marginStats[y] = buildMarginYear(y, data.margins);
     for (const v of yearStats[y].dCounts) if (v > yMax) yMax = v;
     for (const v of yearStats[y].rCounts) if (v > yMax) yMax = v;
+    for (const v of marginStats[y].dCounts) if (v > mMax) mMax = v;
+    for (const v of marginStats[y].rCounts) if (v > mMax) mMax = v;
   }
   // Headroom that scales with bin size.
   yMax = Math.ceil(yMax / 5) * 5 + Math.max(2, Math.round(binSize / 2));
+  mMax = Math.ceil(mMax / 5) * 5 + Math.max(2, Math.round(binSize / 2));
 
   // Selecting a year mirrors that year's stats up into the big detail row.
   // The thumbnail picker just toggles which card is highlighted; the
@@ -749,10 +907,11 @@ function renderYearThumb(divId, year, stats, yMax) {
     try { localStorage.setItem(SELECTED_YEAR_KEY, String(y)); } catch (_) {}
     document.getElementById('selectedRow').style.display = '';
     renderYearChart('selSeatsChart', y, yearStats[y], yMax);
+    renderMarginYearChart('selMarginChart', y, marginStats[y], mMax);
     // Middle row: simulator on this year's actual districts.  Re-runs
     // every time the year changes; quietly stays hidden if there's no
     // cached run with full params yet.
-    renderSimOnYear(y, yearStats[y], yMax);
+    renderSimOnYear(y, yearStats[y], yMax, mMax);
     for (const card of picker.querySelectorAll('.thumb')) {
       card.classList.toggle('selected', +card.dataset.year === y);
     }
@@ -765,13 +924,14 @@ function renderYearThumb(divId, year, stats, yMax) {
     card.className = 'thumb';
     card.dataset.year = y;
     card.title = `Compare ${y} to current sim`;
-    const chart = document.createElement('div');
-    chart.id = 'tc' + y;
-    chart.className = 'thumbChart';
-    card.appendChild(chart);
+    const left  = document.createElement('div'); left.id  = 'tc' + y; left.className  = 'thumbChart';
+    const right = document.createElement('div'); right.id = 'tm' + y; right.className = 'thumbChart';
+    card.appendChild(left);
+    card.appendChild(right);
     card.addEventListener('click', () => selectYear(y));
     picker.appendChild(card);
-    renderYearThumb(chart.id, y, yearStats[y], yMax);
+    renderYearThumb(left.id, y, yearStats[y], yMax);
+    renderMarginYearThumb(right.id, y, marginStats[y], mMax);
   }
   // Restore the previously-selected cycle from localStorage if it's still
   // a valid year; otherwise default to the most recent cycle.
@@ -793,28 +953,23 @@ function renderYearThumb(divId, year, stats, yMax) {
     const cfg = window.CONFIG.histograms.district;
     const spec = { binSize: cfg.binSize, lo: -100, hi: 100 };
     const t0 = performance.now();
-    // No marginBinSpec — the right-column margin chart was retired, so
-    // the simulator can skip building those bins entirely.
-    const sims = runSimulations(p, HIST_NSIM, spec, null, null);
-    const mb = sims.mismatchBins;
+    const sims = runSimulations(p, p.nsim, spec, null, spec);
+    const mb = sims.mismatchBins, gb = sims.marginBins;
     if (!mb) return;
     try {
       localStorage.setItem('simulator_current_run', JSON.stringify({
         timestamp: Date.now(),
         binSize: mb.binSize, centres: mb.centres, ranges: mb.ranges,
         avgDWins: mb.avgDWins, avgRWins: mb.avgRWins,
-        // Keep margin fields in the blob shape so the simulator page
-        // (which still wants both views) doesn't see an unexpectedly
-        // missing key — historical.html just doesn't compute them.
-        avgDMargin: null,
-        avgRMargin: null,
+        avgDMargin: gb ? gb.avgD : null,
+        avgRMargin: gb ? gb.avgR : null,
         rGerry: p.rGerry, dGerry: p.dGerry, v: p.v,
-        params: p, nsim: HIST_NSIM,
+        params: p, nsim: p.nsim,
       }));
     } catch (_) { /* private mode / quota — ignore */ }
-    renderSimulatorRun(yMax);
+    renderSimulatorRun(yMax, mMax);
     if (selectedYear != null) {
-      renderSimOnYear(selectedYear, yearStats[selectedYear], yMax);
+      renderSimOnYear(selectedYear, yearStats[selectedYear], yMax, mMax);
     }
     if (stats) {
       const totalD = mb.avgDWins.reduce((a,b) => a+b, 0);
@@ -827,7 +982,7 @@ function renderYearThumb(divId, year, stats, yMax) {
         `D-won <span class="num">${totalD.toFixed(1)}</span>, ` +
         `R-won <span class="num">${totalR.toFixed(1)}</span><br>` +
         `chamber-pivot lean <span class="num">${formatLean(simMed)}</span> &nbsp;·&nbsp; ` +
-        `${HIST_NSIM} sims in ${(t1 - t0).toFixed(0)}ms`;
+        `${p.nsim} sims in ${(t1 - t0).toFixed(0)}ms`;
     }
   }
   CONTROLS.bind({ onRun: runAndRender });
@@ -838,9 +993,9 @@ function renderYearThumb(divId, year, stats, yMax) {
   // are — they're independent of the simulator-page sliders.
   window.addEventListener('storage', (e) => {
     if (e.key !== 'simulator_current_run') return;
-    renderSimulatorRun(yMax);
+    renderSimulatorRun(yMax, mMax);
     if (selectedYear != null) {
-      renderSimOnYear(selectedYear, yearStats[selectedYear], yMax);
+      renderSimOnYear(selectedYear, yearStats[selectedYear], yMax, mMax);
     }
   });
 })();

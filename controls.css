@@ -1,0 +1,209 @@
+/* =============================================================================
+ * controls.css — shared styling for the simulator's parameter panel.
+ * Loaded by both index.html (the simulator) and historical.html (so the
+ * panel can sit next to the historical-comparison charts without bouncing
+ * the user to the simulator page just to twiddle a slider).
+ *
+ * The CSS variables (--bg, --panel, …) are declared by each host page's
+ * own :root rules; this file relies on them existing and only owns the
+ * widget-level styling.
+ * ============================================================================= */
+
+.controls h3 {
+	margin: 14px 0 4px 0;
+	font-size: 12px;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	color: var(--accent);
+	border-bottom: 1px solid var(--border);
+	padding-bottom: 2px;
+}
+.controls h3:first-child {
+	margin-top: 0;
+}
+.row {
+	display: flex;
+	align-items: center;
+	margin: 6px 0;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+.row label {
+	flex: 1 1 100%;
+	font-size: 12px;
+	color: #333;
+}
+.row input[type="range"] {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+.slider-wrap {
+	position: relative;
+	flex: 1 1 auto;
+	min-width: 0;
+	display: flex;
+	align-items: center;
+}
+/* Render the slider's track ourselves so we can stack the center indicator
+   BETWEEN the track and the thumb.  Native track is hidden (transparent),
+   thumb styled explicitly, and the track + center line are drawn as
+   wrapper pseudo-elements. */
+.slider-wrap input[type="range"] {
+	width: 100%;
+	margin: 0;
+	flex: 1 1 auto;
+	position: relative;
+	z-index: 3;
+	-webkit-appearance: none;
+	appearance: none;
+	background: transparent;
+	height: 16px;
+}
+.slider-wrap input[type="range"]::-webkit-slider-runnable-track {
+	background: transparent;
+	height: 4px;
+	border: none;
+}
+.slider-wrap input[type="range"]::-moz-range-track {
+	background: transparent;
+	height: 4px;
+	border: none;
+}
+.slider-wrap input[type="range"]::-webkit-slider-thumb {
+	-webkit-appearance: none;
+	appearance: none;
+	width: 14px;
+	height: 14px;
+	border-radius: 50%;
+	background: var(--accent);
+	margin-top: -5px;
+	border: none;
+	cursor: pointer;
+}
+.slider-wrap input[type="range"]::-moz-range-thumb {
+	width: 14px;
+	height: 14px;
+	border-radius: 50%;
+	background: var(--accent);
+	border: none;
+	cursor: pointer;
+}
+/* Custom track (z-index 1): dark fill on the left of the thumb,
+   light gray on the right.  --val (0-100%) is set per-slider in JS. */
+.slider-wrap::before {
+	content: "";
+	position: absolute;
+	left: 0;
+	right: 0;
+	top: 50%;
+	height: 4px;
+	transform: translateY(-50%);
+	background: linear-gradient(
+		to right,
+		var(--accent) 0,
+		var(--accent) var(--val, 50%),
+		#d4d4d4 var(--val, 50%),
+		#d4d4d4 100%
+	);
+	border-radius: 2px;
+	pointer-events: none;
+	z-index: 1;
+}
+/* Partisan-divergent variant (popular vote): the fill grows OUT from the
+   centre indicator instead of from the left, and is coloured red when
+   right-of-centre, blue when left-of-centre.  --lo and --hi are set
+   per-slider in JS so the gradient draws a coloured band between them. */
+.slider-wrap.partisan::before {
+	background: linear-gradient(
+		to right,
+		#d4d4d4 0,
+		#d4d4d4 var(--lo, 50%),
+		var(--fill-color, var(--accent)) var(--lo, 50%),
+		var(--fill-color, var(--accent)) var(--hi, 50%),
+		#d4d4d4 var(--hi, 50%),
+		#d4d4d4 100%
+	);
+}
+/* Default-value indicator (z-index 2): in front of the track, behind the
+   thumb.  Positioned at --default-pct (set per-slider in init() based on
+   the slider's default value), falling back to 50% if not set. */
+.slider-wrap::after {
+	content: "";
+	position: absolute;
+	left: var(--default-pct, 50%);
+	top: 50%;
+	transform: translate(-50%, -50%);
+	width: 2px;
+	height: 10px;
+	background: var(--accent);
+	border-radius: 1px;
+	pointer-events: none;
+	z-index: 2;
+}
+.row .val {
+	flex: 0 0 64px;
+	font-family: "SF Mono", Menlo, monospace;
+	font-size: 11px;
+	text-align: right;
+	color: #222;
+	border: 1px solid var(--border);
+	border-radius: 3px;
+	padding: 2px 4px;
+	background: #fff;
+	-moz-appearance: textfield;
+}
+.row .val::-webkit-outer-spin-button,
+.row .val::-webkit-inner-spin-button {
+	-webkit-appearance: none;
+	margin: 0;
+}
+.row .val:focus {
+	outline: 2px solid var(--accent);
+	outline-offset: -1px;
+}
+.row .hint {
+	flex: 1 1 100%;
+	font-size: 10px;
+	color: var(--muted);
+	margin-top: -2px;
+}
+.vote-display {
+	font-family: "SF Mono", Menlo, monospace;
+	font-weight: 600;
+	color: var(--accent);
+}
+.vote-display.r {
+	color: var(--r);
+}
+.vote-display.d {
+	color: var(--d);
+}
+.controls button {
+	background: var(--accent);
+	color: white;
+	border: 0;
+	padding: 8px 16px;
+	border-radius: 4px;
+	cursor: pointer;
+	font-size: 13px;
+	margin-top: 8px;
+	width: 100%;
+}
+.controls button:hover {
+	background: #1a2733;
+}
+/* Checkbox row that ties two sibling sliders together. */
+.pin-row {
+	margin: -2px 0 10px 0;
+	font-size: 11px;
+	color: var(--muted);
+}
+.pin-row label {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	cursor: pointer;
+}
+.pin-row input[type="checkbox"] {
+	margin: 0;
+}

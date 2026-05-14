@@ -62,7 +62,16 @@ window.CONFIG = {
 	// ---------------- SIMULATION CONSTANTS -------------------------------------
 	constants: {
 		m: 217, // half-chamber size — total districts = 2*m + 1 = 435
-		nsim: 1000, // simulations per render
+		nsim: 500, // simulations per render
+		// Milliseconds to wait after the LAST slider-input event before
+		// firing a fresh simulator render.  Larger = waits longer for the
+		// drag to settle (fewer re-renders, less churn); smaller = updates
+		// closer to real-time as you drag (more re-renders, more CPU).
+		//   30  → feels close to "live" updates during drag
+		//   80  → balanced (a brief pause triggers a render)
+		//   150 → only updates when you stop moving
+		// Read by both index.html and controls.js so it's a single knob.
+		sliderDebounceMs: 80,
 		sigmaN: 2, // fallback election noise σ if the slider is missing
 		// Election-noise SHAPE.  The actual noise σ comes from the sigmaN
 		// slider; this just picks the unit-variance distribution that gets
