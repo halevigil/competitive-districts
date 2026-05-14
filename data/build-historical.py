@@ -19,8 +19,8 @@ from collections import defaultdict
 # Presidential years use the per-district presidential margin as the lean
 # axis on historical.html; midterm years use a Cook-PVI-style metric
 # computed below from the two most recent presidential cycles.
-PRES_YEARS    = (2008, 2012, 2016, 2020, 2024)
-MIDTERM_YEARS = (2010, 2014, 2018, 2022)
+PRES_YEARS    = (1992, 1996, 2000, 2004, 2008, 2012, 2016, 2020, 2024)
+MIDTERM_YEARS = (1994, 1998, 2002, 2006, 2010, 2014, 2018, 2022)
 YEARS         = tuple(sorted(PRES_YEARS + MIDTERM_YEARS))
 
 # National two-party presidential margin per cycle (R% − D%, percentage
@@ -31,6 +31,9 @@ YEARS         = tuple(sorted(PRES_YEARS + MIDTERM_YEARS))
 # same years.  Cook uses a 3-to-1 weighting these days; we use 2-to-1
 # (matches Cook's older methodology and reads cleaner here).
 NATIONAL_PRES_MARGIN = {
+    1988:  +7.72,  # Bush beat Dukakis by 7.72 pp
+    1992:  -5.56,  # Clinton beat Bush by 5.56 pp (Perot got 18.9%)
+    1996:  -8.51,  # Clinton beat Dole by 8.51 pp (Perot got 8.4%)
     2000:  -0.51,  # Gore beat Bush by 0.51 pp in popular vote (lost EC)
     2004:  +2.46,  # Bush beat Kerry by 2.46 pp
     2008:  -7.27,  # Obama beat McCain by 7.27 pp
@@ -45,25 +48,145 @@ NATIONAL_PRES_MARGIN = {
 # only one cycle is available in the right district lines, we fall back
 # to single-cycle (the 2-to-1 collapses to 1-to-0).
 PVI_BACKING = {
-    2010: ("2008", [(2008, 2), (2004, 1)]),       # 2002-cycle lines
-    2014: ("2020", [(2012, 2), (2008, 1)]),       # 2012-cycle lines
+    # 1992-cycle lines (1992-2000 elections).  1988 was held in 1980s-cycle
+    # lines, so 1994's PVI is single-cycle (just 1992); 1998 gets the full
+    # 2-to-1 weighting.
+    1994: ("2000", [(1992, 1)]),
+    1998: ("2000", [(1996, 2), (1992, 1)]),
+    # 2002-cycle lines (2002-2010 elections).  1996 isn't available in
+    # 2002-cycle lines, so 2002's PVI is single-cycle (just 2000).
+    2002: ("2008", [(2000, 1)]),
+    2006: ("2008", [(2004, 2), (2000, 1)]),
+    2010: ("2008", [(2008, 2), (2004, 1)]),
+    # 2012-cycle lines (2012-2020 elections).
+    2014: ("2020", [(2012, 2), (2008, 1)]),
     2018: ("2020", [(2016, 2), (2012, 1)]),
-    2022: ("2022", [(2020, 1)]),                  # no 2016 in 2022-cycle lines
+    # 2022-cycle lines (single-cycle: no 2016 in 2022-cycle lines).
+    2022: ("2022", [(2020, 1)]),
 }
 
 # -----------------------------------------------------------------------------
-# House winners — per district per year, picking the candidate with the most
-# votes in the general election.  Skips primaries / specials / runoffs.
+# House winners + margins — per district per cycle, picking the candidate
+# with the most votes in the general election.
+#
+# Sources (merged into one normalised structure before tallying):
+#   - 538 raw           — 1998-2024 (its earliest cycle is 1998)
+#   - MEDSL 1976-2018   — 1992-1996 fill-in for the years 538 doesn't cover
+#
+# Two real-world wrinkles drive the slightly-elaborate logic below.
+#
+# (A) Stage fallback.  Most cycles label the November general as
+#     stage='general' (538) or stage='gen' (MEDSL).  Exceptions are
+#     Louisiana from 1998 on (stage='jungle primary' + sometimes a
+#     December 'runoff'), and the two court-ordered mid-decade Texas
+#     redraws — TX 1996 and TX 2006 — that ran a similar jungle-style
+#     November contest with a runoff in a few districts.  For each
+#     district we keep results from the *highest-priority stage that
+#     exists* (0 = normal general, 1 = runoff, 2 = jungle primary /
+#     court-ordered "primary" stage that functioned as the general).
+#     This recovers every LA seat and the 13+5 TX seats that fall out
+#     of a naive general-only filter.
+#
+# (B) Candidate-aware fusion handling.  New York runs cross-endorsed
+#     candidates on multiple ballot lines (e.g. James Walsh 2004 on
+#     REP + CRV + IDP) and a naive party-line sum miscredits the
+#     non-major-party rows as 'O' — sometimes flipping the apparent
+#     winner.  Aggregating per-candidate (summing all of one person's
+#     ballot lines, then asking what their primary D/R/I tag was)
+#     fixes the fusion case and also lets us drop "scatter" / NA /
+#     write-in pool rows that aren't real candidates.
 # -----------------------------------------------------------------------------
-house_rows = defaultdict(list)  # (year, state, district) -> [(votes, party), ...]
+
+# Three known Independents who held a seat and consistently caucused
+# with one of the two major parties.  We recode their winning row to
+# the caucus party so the historical chart's "blue = D-won, red = R-won"
+# colouring reflects who would vote for Speaker, not the ballot label.
+INDEPENDENT_CAUCUS = {
+    # Bernie Sanders (VT-AL) ran as I every cycle 1990-2006 and caucused
+    # with the Democrats throughout his House tenure.
+    ("VT", "01", 1992): "D",
+    ("VT", "01", 1994): "D",
+    ("VT", "01", 1996): "D",
+    ("VT", "01", 1998): "D",
+    ("VT", "01", 2000): "D",
+    ("VT", "01", 2002): "D",
+    ("VT", "01", 2004): "D",
+    ("VT", "01", 2006): "D",
+    # Jo Ann Emerson won MO-08 1996 as an Independent (her R husband died
+    # mid-cycle and she missed the R primary deadline); seated with R.
+    ("MO", "08", 1996): "R",
+    # Virgil Goode left the Democrats mid-term and ran I for VA-05 2000;
+    # caucused with R that Congress, formally switched to R in 2002.
+    ("VA", "05", 2000): "R",
+}
+
+# The 50 states.  Non-voting House delegates (DC, PR, GU, VI, AS, MP) show up
+# in the 538 raw file but aren't part of the 435-seat chamber, so we skip
+# them to keep the join with the 435-district pres-by-CD universe clean.
+VOTING_STATES = frozenset({
+    "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN",
+    "IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV",
+    "NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN",
+    "TX","UT","VT","VA","WA","WV","WI","WY",
+})
+
+def _norm_district(d):
+    d = str(d).strip()
+    if d in ("", "0", "00") or d.upper() in ("AL", "AT-LARGE"):
+        return "01"
+    return d.zfill(2) if d.isdigit() else d
+
+def _party_from(*tokens):
+    """Map any of (ballot_party, party) free-text labels into D / R / O."""
+    blob = " ".join((t or "") for t in tokens).upper()
+    if "DEM" in blob or " D " in f" {blob} ":
+        return "D"
+    if "REP" in blob or " R " in f" {blob} ":
+        return "R"
+    return "O"
+
+# Strings the source files use as a non-candidate placeholder.  We drop these
+# rows because they pool blank / spoiled / write-in / "other" ballots and the
+# names don't represent a real candidate.
+_NOT_A_CANDIDATE = {"", "scatter", "scattering", "na", "n/a", "other", "others",
+                    "write-in", "writein", "write in", "blank", "void"}
+
+def _is_real_candidate(name):
+    return (name or "").strip().lower() not in _NOT_A_CANDIDATE
+
+# Stage priority: 0 = normal general (preferred when present), 1 = runoff,
+# 2 = jungle primary / court-ordered "primary" that functioned as general.
+def _538_stage_priority(stage, runoff_flag=False):
+    s = (stage or "").lower()
+    if s == "general":        return 1 if runoff_flag else 0
+    if s == "runoff":         return 1
+    if s == "jungle primary": return 2
+    return None
+
+def _medsl_stage_priority(stage, runoff):
+    if stage == "gen":
+        return 1 if runoff == "TRUE" else 0
+    if stage == "pri":
+        return 2
+    return None
+
+# All ingested candidate rows land here, keyed by district + stage_priority.
+# Value: list of (candidate_name, party_code, votes).  We later pick the
+# lowest stage_priority that has data for each district.
+by_district_stage = defaultdict(lambda: defaultdict(list))
+
+# --- 538 raw (1998-2024) ------------------------------------------------------
 with open("538-house-raw.csv", newline="") as f:
     rdr = csv.DictReader(f)
     for row in rdr:
         if row["office_name"] != "U.S. House":
             continue
-        if row["stage"] != "general":
-            continue
         if row["special"].lower() == "true":
+            # We *do* keep the TX-2006 / TX-1996 special-flagged rows further
+            # down by source-specific logic, but 538 generally only flags true
+            # special elections this way and we don't want those to shadow the
+            # cycle's regular general (e.g. a March 2018 PA-18 special would
+            # otherwise outrank the November cycle entry for the same seat).
             continue
         try:
             year = int(row["cycle"])
@@ -71,67 +194,158 @@ with open("538-house-raw.csv", newline="") as f:
             continue
         if year not in YEARS:
             continue
+        prio = _538_stage_priority(row["stage"])
+        if prio is None:
+            continue
         try:
             votes = int(row["votes"]) if row["votes"] else 0
         except ValueError:
             votes = 0
         state = row["state_abbrev"]
-        # office_seat_name like "District 7" or "At-Large"
+        if state not in VOTING_STATES:
+            continue
         seat = row["office_seat_name"] or "At-Large"
         if seat.startswith("District "):
             district = seat[len("District "):].zfill(2)
         elif seat.lower() in ("at-large", "at large"):
-            district = "AL"
+            district = "01"
         else:
-            district = seat
-        # Party normalised to D / R / O.
-        bp = (row["ballot_party"] or row["party"] or "").upper()
-        if "DEM" in bp or bp == "D":
-            party = "D"
-        elif "REP" in bp or bp == "R":
-            party = "R"
-        else:
-            party = "O"
-        house_rows[(year, state, district)].append((votes, party))
+            district = seat.zfill(2) if seat.isdigit() else seat
+        cand = (row.get("candidate_name") or "").strip()
+        party = _party_from(row.get("ballot_party"), row.get("party"))
+        by_district_stage[(year, state, district)][prio].append((cand, party, votes))
 
-with open("house-winners.csv", "w", newline="") as f:
-    w = csv.writer(f)
-    w.writerow(["cycle", "state", "district", "winner_party"])
-    for (year, state, district), candidates in sorted(house_rows.items()):
-        if not candidates:
+# Pull the TX-2006 court-ordered districts from 538's special=TRUE rows.
+# Those 5 seats (TX-15/21/23/25/28) have no normal-general row anywhere in
+# the dataset — the November vote is stage='jungle primary' special=TRUE and
+# the runoff (TX-23 only) is stage='runoff' special=TRUE.  Treat them the
+# same way as the cycle's regular jungle-primary / runoff for the purpose of
+# stage_priority so the rest of the pipeline picks them up.
+TX2006_REDRAW = {"15", "21", "23", "25", "28"}
+with open("538-house-raw.csv", newline="") as f:
+    rdr = csv.DictReader(f)
+    for row in rdr:
+        if row["office_name"] != "U.S. House":
             continue
-        # Sum votes by party (handles fusion / multiple lines per candidate).
+        if row["cycle"] != "2006" or row["state_abbrev"] != "TX":
+            continue
+        if row["special"].lower() != "true":
+            continue
+        seat = row["office_seat_name"] or ""
+        if not seat.startswith("District "):
+            continue
+        district_raw = seat[len("District "):]
+        if district_raw not in TX2006_REDRAW:
+            continue
+        prio = _538_stage_priority(row["stage"])
+        if prio is None:
+            continue
+        try:
+            votes = int(row["votes"]) if row["votes"] else 0
+        except ValueError:
+            votes = 0
+        cand = (row.get("candidate_name") or "").strip()
+        party = _party_from(row.get("ballot_party"), row.get("party"))
+        district = district_raw.zfill(2)
+        by_district_stage[(2006, "TX", district)][prio].append((cand, party, votes))
+
+# --- MEDSL 1976-2018 (1992 / 1994 / 1996) -------------------------------------
+MEDSL_YEARS = (1992, 1994, 1996)
+with open("medsl-1976-2018-house.csv", newline="", encoding="latin-1") as f:
+    rdr = csv.DictReader(f)
+    for row in rdr:
+        try:
+            year = int(row["year"])
+        except ValueError:
+            continue
+        if year not in MEDSL_YEARS:
+            continue
+        if row.get("writein", "").upper() == "TRUE":
+            continue
+        prio = _medsl_stage_priority(row["stage"], row.get("runoff", ""))
+        if prio is None:
+            continue
+        try:
+            votes = int(row["candidatevotes"]) if row["candidatevotes"] else 0
+        except ValueError:
+            votes = 0
+        state = row["state_po"]
+        district = _norm_district(row["district"])
+        cand = (row.get("candidate") or "").strip()
+        party = _party_from(row.get("party"))
+        by_district_stage[(year, state, district)][prio].append((cand, party, votes))
+
+# Now collapse each district to one stage's worth of candidate-grouped rows
+# and write house-winners + house-margins.
+def _aggregate_candidates(rows):
+    """Group candidate-line rows into per-candidate totals.
+
+    Returns a dict candidate_name -> (total_votes, party_code), and a
+    "non-candidate" tally for 'scatter'/blank rows we exclude from the
+    candidate winner pick but still want for margin denominators.
+
+    party_code is D if any of the candidate's rows is D, else R if any is
+    R, else O — the usual fusion-ticket cross-endorsement.
+    """
+    per_cand_votes  = defaultdict(int)
+    per_cand_parties = defaultdict(set)
+    non_cand_by_party = defaultdict(int)
+    for cand, party, votes in rows:
+        if _is_real_candidate(cand):
+            per_cand_votes[cand]   += votes
+            per_cand_parties[cand].add(party)
+        else:
+            non_cand_by_party[party] += votes
+    def party_pick(s):
+        if "D" in s: return "D"
+        if "R" in s: return "R"
+        return "O"
+    cand_table = {c: (per_cand_votes[c], party_pick(per_cand_parties[c]))
+                  for c in per_cand_votes}
+    return cand_table, non_cand_by_party
+
+with open("house-winners.csv", "w", newline="") as w_winners, \
+     open("house-margins.csv", "w", newline="") as w_margins:
+    ww = csv.writer(w_winners);  ww.writerow(["cycle","state","district","winner_party"])
+    wm = csv.writer(w_margins);  wm.writerow(["cycle","state","district","margin","winner_party"])
+    for (year, state, district), by_stage in sorted(by_district_stage.items()):
+        # Use the lowest priority (= preferred) stage that has any rows.
+        rows = None
+        for prio in (0, 1, 2):
+            if by_stage.get(prio):
+                rows = by_stage[prio]; break
+        if not rows:
+            continue
+        cand_table, non_cand = _aggregate_candidates(rows)
+        if not cand_table:
+            continue
+        # Winner = candidate with most total votes.  Then map I-caucused-with-X
+        # cases to the caucus party for the chart-colour purposes.
+        winner_name, (_, winner_party) = max(cand_table.items(),
+                                             key=lambda kv: kv[1][0])
+        winner_party = INDEPENDENT_CAUCUS.get((state, district, year), winner_party)
+        ww.writerow([year, state, district, winner_party])
+        # Margin: sum candidate totals by candidate's primary party plus the
+        # non-candidate "scatter" pool by its source label.  Denominator is
+        # everything that hit the ballot in that stage.
         by_party = defaultdict(int)
-        for votes, party in candidates:
+        for cname, (votes, party) in cand_table.items():
             by_party[party] += votes
-        winner = max(by_party.items(), key=lambda kv: kv[1])[0]
-        w.writerow([year, state, district, winner])
-print("house-winners.csv written")
-
-# -----------------------------------------------------------------------------
-# Per-district House election MARGIN — same source as house-winners.csv but
-# expressed as (R% − D%) in percentage points.  Districts where one of D / R
-# didn't run (or got rounded to zero votes) are stored as ±100 so the
-# histogram on the historical page can still bin them.  Used for the
-# right-column "Distribution of Election Margins" chart on historical.html.
-# -----------------------------------------------------------------------------
-with open("house-margins.csv", "w", newline="") as f:
-    w = csv.writer(f)
-    w.writerow(["cycle", "state", "district", "margin", "winner_party"])
-    for (year, state, district), candidates in sorted(house_rows.items()):
-        if not candidates:
-            continue
-        by_party = defaultdict(int)
-        for votes, party in candidates:
+        for party, votes in non_cand.items():
             by_party[party] += votes
         total = sum(by_party.values())
         if total <= 0:
-            continue
-        d_pct = 100.0 * by_party.get("D", 0) / total
-        r_pct = 100.0 * by_party.get("R", 0) / total
-        margin = round(r_pct - d_pct, 2)
-        winner = max(by_party.items(), key=lambda kv: kv[1])[0]
-        w.writerow([year, state, district, margin, winner])
+            # Unopposed race with no recorded vote totals (common in
+            # 538's pre-2010 FL / OK rows tagged unopposed='true' with
+            # an empty votes cell).  We still know who won, so plot it
+            # at the chart's edge (±100) based on the winner's party.
+            margin = +100.0 if winner_party == "R" else (-100.0 if winner_party == "D" else 0.0)
+        else:
+            d_pct = 100.0 * by_party.get("D", 0) / total
+            r_pct = 100.0 * by_party.get("R", 0) / total
+            margin = round(r_pct - d_pct, 2)
+        wm.writerow([year, state, district, margin, winner_party])
+print("house-winners.csv written")
 print("house-margins.csv written")
 
 # -----------------------------------------------------------------------------
@@ -265,6 +479,33 @@ for row in rdr[2:]:
         if d is None or r is None:
             continue
         pres_out.append([cycle, "2020", state, district, round(r - d, 2)])
+
+# --- Atlas of U.S. Presidential Election Results by Congressional District
+#     (Kiernan Park-Egan / WWU, 2022) — pres results for 1988, 1992, 1996,
+#     and 2000 in the contemporary district lines for each year.  We only
+#     emit the 1992-cycle (1992-2000 lines, used for the 1992-2000 elections)
+#     rows: 1992, 1996, and 2000 each in 1992-cycle lines.  The 1988 sheet
+#     is in 1980s-cycle lines, which don't map cleanly to the 1992-cycle
+#     boundaries, so we exclude it (1994's PVI falls back to single-cycle
+#     using only 1992).  district_cycle is labelled "2000" — the last
+#     presidential election held in these lines — matching the existing
+#     "<last pres year>" convention ("2008" = 2002-cycle, "2020" = 2012-cycle).
+with open("atlas-1988-2000-pres-by-cd.csv", newline="") as f:
+    rdr = csv.DictReader(f)
+    for row in rdr:
+        try:
+            cycle = int(row["cycle"])
+        except ValueError:
+            continue
+        if cycle not in (1992, 1996, 2000):
+            continue
+        state    = row["state"]
+        district = _norm_district(row["district"])
+        try:
+            margin = round(float(row["margin"]), 2)
+        except ValueError:
+            continue
+        pres_out.append([cycle, "2000", state, district, margin])
 
 # --- Daily Kos 2020 in 2022-cycle (post-2020 redistricting, as used in
 #     2022 elections) districts.  Schema: District, Incumbent, Party,

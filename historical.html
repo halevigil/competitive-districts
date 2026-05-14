@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>Historical District Partisanship — 2008–2024</title>
+<title>Historical District Partisanship — 1992–2024</title>
 <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
 <script src="config.js"></script>
 <style>
@@ -22,17 +22,22 @@
     background: var(--bg); color: #222;
   }
   h1 { margin: 0 0 4px 0; font-size: 20px; color: var(--accent); }
+  h2 { margin: 16px 0 8px 0; font-size: 14px; color: var(--accent); font-weight: 600; }
   .subtitle { font-size: 12px; color: var(--muted); margin-bottom: 12px; line-height: 1.4; }
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 12px;
+  /* "Back to simulator" pill sits in the top-right corner, so the
+     historical → simulator round-trip is one click in either direction. */
+  .backLink {
+    position: absolute; top: 16px; right: 16px;
+    font-size: 12px; color: var(--accent); text-decoration: none;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 999px; padding: 4px 12px;
   }
-  /* Each year takes one full-width row; inside that row, the seats-by-pres
-     chart sits on the left and the per-district House margin distribution
-     on the right.  Last row (the "current simulator run") is one panel. */
+  .backLink:hover { background: #f0f0f0; }
+  /* The detail comparison area: the picked historical year and the current
+     simulator run, each as one row of two big charts (seats-by-lean on the
+     left, election-margin distribution on the right).  Stacked vertically
+     so you can scan one against the other. */
   .yearRow {
-    grid-column: 1 / -1;
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 12px;
@@ -43,8 +48,30 @@
     border-radius: 6px;
     padding: 6px;
   }
-  .chart { width: 100%; height: 280px; }
-  .full { grid-column: 1 / -1; }
+  .chart { width: 100%; height: 300px; }
+  /* The thumbnail picker: every historical year as a small clickable card
+     showing the same two charts in miniature.  Three columns so the nine
+     cycles fit on one screen.  The currently-selected card gets an accent
+     border so it's obvious which one is mirrored up in the detail area. */
+  .pickerGrid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+  }
+  .thumb {
+    background: var(--panel);
+    border: 2px solid var(--border);
+    border-radius: 6px;
+    padding: 4px;
+    cursor: pointer;
+    transition: border-color 0.12s, transform 0.12s;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+  }
+  .thumb:hover { border-color: #999; }
+  .thumb.selected { border-color: var(--accent); }
+  .thumbChart { width: 100%; height: 110px; }
   .footnote { font-size: 11px; color: var(--muted); margin-top: 12px; line-height: 1.4; }
   .footnote a { color: var(--accent); }
   .loading { font-size: 14px; color: var(--muted); padding: 30px; text-align: center; }
@@ -52,48 +79,78 @@
 </head>
 <body>
 
-<h1>Historical House Seats and Election Margins, 2008–2024</h1>
+<a class="backLink" href="index.html">← Back to simulator</a>
+
+<h1>Historical House Seats and Election Margins, 1992–2024</h1>
 <div class="subtitle">
-  Each row is one US House election cycle.  <b>Left:</b> seats binned by
-  the district's partisan lean (presidential margin for presidential years;
+  Pick a US House election cycle from the thumbnails below and it appears
+  full-size at the top, next to the latest simulator run, so the two are
+  easy to compare side-by-side.  <b>Left chart in each pair:</b> seats binned
+  by the district's partisan lean (presidential margin for presidential years;
   Cook-style PVI with 2-to-1 weighting on the two prior presidential cycles
   for midterm years), coloured by who actually won the House race (blue =
   Democratic, red = Republican).  <b>Right:</b> distribution of per-district
   House election margins (R% − D%) for that cycle.  Bin width is shared
   with the simulator (<code>CONFIG.histograms.district.binSize</code>).
-  The "median lean" tag in each title is the chamber-pivot district's
-  lean <i>relative to the popular vote</i> (national presidential margin
-  for pres years; the PVI rows are already in this form).
+  The "median lean" tag is the chamber-pivot district's lean
+  <i>relative to the popular vote</i> (national presidential margin for
+  pres years; the PVI rows are already in this form).
 </div>
 
-<div id="charts" class="grid"><div class="loading full">Loading data…</div></div>
+<!-- Top: the picked historical year, big.  Stays hidden until the data
+     loads; then defaults to the most recent cycle. -->
+<div id="selectedRow" class="yearRow" style="display: none;">
+  <div class="panel"><div id="selSeatsChart" class="chart"></div></div>
+  <div class="panel"><div id="selMarginChart" class="chart"></div></div>
+</div>
 
 <!-- Current simulator run, pulled live from localStorage (written by
      index.html on every render).  Hidden when no run is cached yet.
-     Sits below the historical-year panels so it reads as the simulator's
-     comparison sketch against the empirical history above.  Same row
-     layout as the historical years: seats-by-partisanship on the left,
-     per-district election margin distribution on the right. -->
+     Sits directly under the picked historical year for an apples-to-apples
+     comparison: seats-by-partisanship on the left, per-district election
+     margin distribution on the right. -->
 <div id="simRunRow" class="yearRow" style="display: none; margin-top: 12px;">
   <div class="panel">
-    <div id="simRunChart" class="chart" style="height: 300px;"></div>
+    <div id="simRunChart" class="chart"></div>
   </div>
   <div class="panel">
-    <div id="simRunMarginChart" class="chart" style="height: 300px;"></div>
+    <div id="simRunMarginChart" class="chart"></div>
   </div>
 </div>
 
+<h2>Pick a cycle to compare</h2>
+<div id="picker" class="pickerGrid"><div class="loading" style="grid-column: 1 / -1;">Loading data…</div></div>
+
 <div class="footnote">
   <p><b>Sources.</b>
-     House results: <a href="https://github.com/fivethirtyeight/election-results">FiveThirtyEight election-results</a> (per-district winner each cycle, in the contemporary district lines).
-     Presidential margin: <a href="https://www.the-downballot.com/p/data">The Downballot / Daily Kos Elections</a> per-CD calculations
-     (2024 in 2024-cycle districts; 2008/2012/2016/2020 in 2020-cycle districts).
+     House results 1998–2024: <a href="https://github.com/fivethirtyeight/election-results">FiveThirtyEight election-results</a>.
+     House results 1992–1996: <a href="https://electionlab.mit.edu/data">MIT Election Data + Science Lab</a> (1976–2018 constituency returns).
+     Presidential margin 2008–2024: <a href="https://www.the-downballot.com/p/data">The Downballot / Daily Kos Elections</a> per-CD calculations
+     (2024 in 2024-cycle districts; 2008/2012/2016/2020 in 2020-cycle districts; 2000/2004/2008 in 2002-cycle districts).
+     Presidential margin 1992/1996/2000 in 1992-cycle districts:
+     <a href="https://sites.google.com/view/presidentialbycongressionaldis/election-results">Atlas of U.S. Presidential Election Results by Congressional District</a>
+     (Kiernan Park-Egan / WWU, 2022), election data from the Almanac of American Politics (Barone &amp; Ujifusa) and Dave Leip's Atlas.
   </p>
-  <p>For 2008–2016 the join between House (contemporary districts) and presidential
-     margin (2020-cycle districts) is approximate — districts redrawn after the
-     2010 census don't match exactly, so a small fraction of seats per cycle are
-     dropped from the chart.  Match rates: 2008 ~316 / 326, 2012 ~402 / 408,
-     2016 ~429 / 435, 2020 ~429 / 435, 2024 ~429 / 435.</p>
+  <p><b>Coverage.</b> Every cycle matches the full 435 D/R seats against
+     a partisan-lean source.  Louisiana's federal elections (jungle primary +
+     occasional December runoff) and the two court-ordered Texas mid-decade
+     redraws (TX 1996, TX 2006) are absorbed by falling back from
+     <code>general</code> to <code>runoff</code> to <code>jungle primary</code>
+     on a per-district basis.  Fusion-ticket candidates (mostly New York
+     Republicans cross-endorsed on Conservative / Independence lines, and
+     Democrats on Working Families) are tallied per-candidate so all of
+     one person's ballot lines count together.  Three Independents who held
+     a seat and consistently caucused with a party are coloured by their
+     caucus: Bernie Sanders (VT-AL, 1992–2006) → D, Jo Ann Emerson
+     (MO-08, 1996) → R, Virgil Goode (VA-05, 2000) → R.</p>
+  <p><b>Caveats.</b> 1994's PVI bin is single-cycle (just 1992) — 1988 was held
+     in 1980s district lines and can't be projected cleanly into 1992-cycle
+     boundaries.  2002's PVI is single-cycle for the same reason (1996 lives
+     in 1992-cycle lines, 2000 in 2002-cycle).  For 2008–2016 the join between
+     House (contemporary districts) and presidential margin (2020-cycle
+     districts) is approximate — districts redrawn after the 2010 census don't
+     match exactly, so a few seats per cycle inherit a slightly-different
+     neighbour's lean rather than their own.</p>
 </div>
 
 <script>
@@ -104,8 +161,10 @@
 // pick the matching presidential-margin row (presidential years) or PVI
 // row (midterm years).
 const DISTRICT_CYCLE_FOR = {
+  // 1992-cycle lines (used 1992-2000 elections)
+  1992: '2000', 1994: '2000', 1996: '2000', 1998: '2000', 2000: '2000',
   // 2002-cycle lines (used 2002-2010 elections)
-  2008: '2008', 2010: '2008',
+  2002: '2008', 2004: '2008', 2006: '2008', 2008: '2008', 2010: '2008',
   // 2012-cycle lines (used 2012-2020 elections)
   2012: '2020', 2014: '2020', 2016: '2020', 2018: '2020', 2020: '2020',
   // 2022-cycle lines (used 2022 election as drawn)
@@ -113,9 +172,14 @@ const DISTRICT_CYCLE_FOR = {
   // 2024-cycle lines (minor differences from 2022 in NC/NY/AL/LA)
   2024: '2024',
 };
-const PRES_YEARS    = new Set([2008, 2012, 2016, 2020, 2024]);
-const MIDTERM_YEARS = new Set([2010, 2014, 2018, 2022]);
-const YEARS = [2008, 2010, 2012, 2014, 2016, 2018, 2020, 2022, 2024];
+const PRES_YEARS    = new Set([1992, 1996, 2000, 2004, 2008, 2012, 2016, 2020, 2024]);
+const MIDTERM_YEARS = new Set([1994, 1998, 2002, 2006, 2010, 2014, 2018, 2022]);
+const YEARS = [
+  1992, 1994, 1996, 1998, 2000,
+  2002, 2004, 2006, 2008, 2010,
+  2012, 2014, 2016, 2018, 2020,
+  2022, 2024,
+];
 
 // National popular vote margin (R% - D%) for each presidential election,
 // kept in sync with build-historical.py's table.  Used to express the
@@ -126,6 +190,7 @@ const YEARS = [2008, 2010, 2012, 2014, 2016, 2018, 2020, 2022, 2024];
 // relative to a weighted prior-pres average, so we only shift pres-year
 // medians.
 const NATIONAL_PRES_MARGIN = {
+  1992: -5.56, 1996: -8.51, 2000: -0.51, 2004: +2.46,
   2008: -7.27, 2012: -3.86, 2016: -2.10, 2020: -4.45, 2024: +1.48,
 };
 
@@ -486,13 +551,60 @@ function renderSimulatorRun(yMax, mMax) {
   }
 }
 
+// Stripped-down version of renderYearChart for the picker thumbnails:
+// same data + colours, but axis labels removed, tick fonts shrunk, and a
+// compact title.  Keeps the same yMax so visual area is comparable to the
+// big panel above.
+function renderYearThumb(divId, year, stats, yMax) {
+  const { centres, ranges, dCounts, rCounts, leans, nD, nR, isMidterm } = stats;
+  const medRaw = medianOfNumbers(leans || []);
+  const nat = NATIONAL_PRES_MARGIN[year];
+  const medRel = isMidterm ? medRaw : (medRaw == null ? null : medRaw - nat);
+  const title = `<b>${year}</b> · ${nD}D/${nR}R · ${formatLean(medRel)}`;
+  Plotly.newPlot(divId, [
+    { x: centres, y: dCounts, type: 'bar', name: 'D',
+      marker: { color: 'rgba(31,119,180,0.85)', line: { width: 0 } },
+      width: binSize, hoverinfo: 'skip' },
+    { x: centres, y: rCounts, type: 'bar', name: 'R',
+      marker: { color: 'rgba(214,39,40,0.85)', line: { width: 0 } },
+      width: binSize, hoverinfo: 'skip' },
+  ], {
+    title: { text: title, font: { size: 10 }, x: 0.04, xanchor: 'left', y: 0.97 },
+    xaxis: { range: [-100, 100], showticklabels: false, zeroline: true,
+             zerolinecolor: '#666', zerolinewidth: 1, showgrid: false, fixedrange: true },
+    yaxis: { range: [0, yMax], showticklabels: false, showgrid: false, fixedrange: true },
+    margin: { l: 4, r: 4, t: 16, b: 4 },
+    showlegend: false, bargap: 0.05, barmode: 'stack', plot_bgcolor: '#fff',
+  }, { displayModeBar: false, responsive: true, staticPlot: true });
+}
+
+function renderMarginYearThumb(divId, year, stats, mMax) {
+  const { centres, dCounts, rCounts, nD, nR } = stats;
+  const title = `<b>${year}</b> margins · ${nD}D/${nR}R`;
+  Plotly.newPlot(divId, [
+    { x: centres, y: dCounts, type: 'bar', name: 'D',
+      marker: { color: 'rgba(31,119,180,0.85)', line: { width: 0 } },
+      width: binSize, hoverinfo: 'skip' },
+    { x: centres, y: rCounts, type: 'bar', name: 'R',
+      marker: { color: 'rgba(214,39,40,0.85)', line: { width: 0 } },
+      width: binSize, hoverinfo: 'skip' },
+  ], {
+    title: { text: title, font: { size: 10 }, x: 0.04, xanchor: 'left', y: 0.97 },
+    xaxis: { range: [-100, 100], showticklabels: false, zeroline: true,
+             zerolinecolor: '#666', zerolinewidth: 1, showgrid: false, fixedrange: true },
+    yaxis: { range: [0, mMax], showticklabels: false, showgrid: false, fixedrange: true },
+    margin: { l: 4, r: 4, t: 16, b: 4 },
+    showlegend: false, bargap: 0.05, barmode: 'stack', plot_bgcolor: '#fff',
+  }, { displayModeBar: false, responsive: true, staticPlot: true });
+}
+
 (async function main() {
-  const container = document.getElementById('charts');
+  const picker = document.getElementById('picker');
   let data;
   try {
     data = await loadAll();
   } catch (err) {
-    container.innerHTML = `<div class="loading full">Failed to load data: ${err.message}</div>`;
+    picker.innerHTML = `<div class="loading" style="grid-column: 1 / -1;">Failed to load data: ${err.message}</div>`;
     return;
   }
   const houseIdx = indexHouse(data.house);
@@ -517,26 +629,53 @@ function renderSimulatorRun(yMax, mMax) {
   // Headroom that scales with bin size.
   yMax = Math.ceil(yMax / 5) * 5 + Math.max(2, Math.round(binSize / 2));
   mMax = Math.ceil(mMax / 5) * 5 + Math.max(2, Math.round(binSize / 2));
-  // Build the rows: one per year, two charts side-by-side.
-  container.innerHTML = '';
-  for (const y of YEARS) {
-    const row = document.createElement('div');
-    row.className = 'yearRow';
-    // Left: existing seats-by-pres-margin chart.
-    const leftPanel  = document.createElement('div'); leftPanel.className  = 'panel';
-    const leftChart  = document.createElement('div'); leftChart.id  = 'c' + y;        leftChart.className  = 'chart';
-    leftPanel.appendChild(leftChart);
-    // Right: new House election margin distribution.
-    const rightPanel = document.createElement('div'); rightPanel.className = 'panel';
-    const rightChart = document.createElement('div'); rightChart.id = 'm' + y;        rightChart.className = 'chart';
-    rightPanel.appendChild(rightChart);
-    row.appendChild(leftPanel);
-    row.appendChild(rightPanel);
-    container.appendChild(row);
-    renderYearChart(leftChart.id, y, yearStats[y], yMax);
-    renderMarginYearChart(rightChart.id, y, marginStats[y], mMax);
+
+  // Selecting a year mirrors that year's stats up into the big detail row.
+  // The thumbnail picker just toggles which card is highlighted; the
+  // simulator-run row directly below is what the user is actually comparing
+  // against.  The selection is cached in localStorage so bouncing back and
+  // forth between the simulator and this page preserves which cycle the
+  // user was comparing against.
+  const SELECTED_YEAR_KEY = 'historical_selected_year';
+  let selectedYear = null;
+  function selectYear(y) {
+    selectedYear = y;
+    try { localStorage.setItem(SELECTED_YEAR_KEY, String(y)); } catch (_) {}
+    document.getElementById('selectedRow').style.display = '';
+    renderYearChart('selSeatsChart', y, yearStats[y], yMax);
+    renderMarginYearChart('selMarginChart', y, marginStats[y], mMax);
+    for (const card of picker.querySelectorAll('.thumb')) {
+      card.classList.toggle('selected', +card.dataset.year === y);
+    }
   }
-  // Render the simulator's latest run (if any) at the top, on the same scale.
+
+  // Build the picker: one small card per cycle, click selects it.
+  picker.innerHTML = '';
+  for (const y of YEARS) {
+    const card = document.createElement('div');
+    card.className = 'thumb';
+    card.dataset.year = y;
+    card.title = `Compare ${y} to current sim`;
+    const left  = document.createElement('div'); left.id  = 'tc' + y; left.className  = 'thumbChart';
+    const right = document.createElement('div'); right.id = 'tm' + y; right.className = 'thumbChart';
+    card.appendChild(left);
+    card.appendChild(right);
+    card.addEventListener('click', () => selectYear(y));
+    picker.appendChild(card);
+    renderYearThumb(left.id, y, yearStats[y], yMax);
+    renderMarginYearThumb(right.id, y, marginStats[y], mMax);
+  }
+  // Restore the previously-selected cycle from localStorage if it's still
+  // a valid year; otherwise default to the most recent cycle.
+  let initialYear = YEARS[YEARS.length - 1];
+  try {
+    const saved = parseInt(localStorage.getItem(SELECTED_YEAR_KEY), 10);
+    if (YEARS.includes(saved)) initialYear = saved;
+  } catch (_) {}
+  selectYear(initialYear);
+
+  // Render the simulator's latest run (if any) on the same scale as the
+  // selected historical year.
   renderSimulatorRun(yMax, mMax);
   // Live-update if the user re-runs the simulator in another tab.
   window.addEventListener('storage', (e) => {
