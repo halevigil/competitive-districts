@@ -232,11 +232,17 @@
   sliders run on the simulator's synthetic chamber (bottom).  Adjust the
   knobs in the sidebar to retune the simulator in place — no need to bounce
   back to the simulator page.  Each chart shows seats binned by partisan
-  lean, coloured by who won (blue = Democratic, red = Republican).  For
-  presidential years the lean axis is the district's presidential margin;
-  for midterm years it's a Cook-style PVI computed from the previous two
-  presidential elections, weighted 2-to-1 (the more recent gets twice
-  the weight), minus the same weighted national average.
+  lean.  <b>Cell colour = party of victory + margin of victory:</b> blue if
+  the Democrat won, red if the Republican won, and darker shades indicate
+  larger margins (dark blue = D blowout, light blue = D squeaker, light red
+  = R squeaker, dark red = R blowout).  On the two simulator rows each
+  column shows a <i>spectrum</i> of likely margins — each district contributes
+  cells across the range its predicted distribution suggests, so a column
+  that mixes blue and red signals seats the simulator thinks could plausibly
+  go either way.  For presidential years the lean axis is the district's
+  presidential margin; for midterm years it's a Cook-style PVI computed
+  from the previous two presidential elections, weighted 2-to-1 (the more
+  recent gets twice the weight), minus the same weighted national average.
 </div>
 
 <!-- Top: the picked historical year, big.  Stays hidden until the data
