@@ -742,13 +742,31 @@ function renderSimOnYear(year, yearStats, yMax) {
   const order = Array.from({ length: N }, (_, i) => i);
   order.sort((a, b) => yearStats.allLeans[a] - yearStats.allLeans[b]);
   const pool = new Float64Array(N);
+  // `actuals` is the actual House margin for each district, in pool order.
+  // **Uncontested races are deliberately set to NaN here so they're
+  // excluded from the empirical PIT / goodness-of-fit computation.**
+  // |margin| ≥ 99.5 means one of the major parties got literally zero
+  // votes (538 records these as ±100); they say nothing about whether
+  // the simulator's predicted *distribution* of margins matches reality
+  // — they'd just dominate the PIT tail bins and inflate W².  The NaN
+  // sentinel cascades through:
+  //   • model.js inner loop skips districts with NaN actuals when
+  //     counting "sims where predicted z < actual" (the empirical PIT).
+  //   • model.js leaves perDistrict.empiricalPIT[i] as NaN for those.
+  //   • The W² loop below skips NaN u-values when building uVals.
+  // The kept-vs-excluded count is reported in the chart title.
   const actuals = new Float64Array(N);
+  let nUncontested = 0;
   for (let i = 0; i < N; i++) {
     pool[i] = yearStats.allLeans[order[i]];
     const key = yearStats.allStates[order[i]] + '|' + yearStats.allDistricts[order[i]];
     const info = yearStats.marginByKey?.get(key);
-    actuals[i] = (info && isFinite(info.margin) && Math.abs(info.margin) < 99.5)
-      ? info.margin : NaN;
+    if (info && isFinite(info.margin) && Math.abs(info.margin) < 99.5) {
+      actuals[i] = info.margin;
+    } else {
+      actuals[i] = NaN;
+      nUncontested++;
+    }
   }
   const lo = -100, hi = 100;
   const spec = { binSize, lo, hi };
@@ -822,16 +840,19 @@ function renderSimOnYear(year, yearStats, yMax) {
     }
   }
 
-  // Title — includes the goodness-of-fit number with a parenthetical.
+  // Title — includes the goodness-of-fit number with a parenthetical
+  // that also reports the contested-district sample size (uncontested
+  // races are excluded from the PIT / W² calculation above).
   const titleParts = [
     `<b>Simulator on ${year} districts</b>`,
     `D-won ${totalD.toFixed(1)}, R-won ${totalR.toFixed(1)}`,
     `median lean ${formatLean(med)}`,
-    `v ${saved.params.v ?? 0}`,
   ];
   if (pitFit != null) {
     titleParts.push(
-      `fit W²=${pitFit.toFixed(2)} (goodness of fit, lower=better, ≲0.46 if calibrated)`
+      `fit W²=${pitFit.toFixed(2)} ` +
+      `(goodness of fit on ${pitN} contested districts; ` +
+      `${nUncontested} uncontested excluded; lower=better, ≲0.46 if calibrated)`
     );
   }
 
