@@ -252,7 +252,7 @@ function _componentsKey(components) {
 		.join(";");
 }
 
-function _districtPoolKey(N, rGerry, dGerry, base, gerry) {
+function _districtPoolKey(N, rGerry, dGerry, urbanGerry, base, gerry, urban) {
 	const sym = base.enforceSymmetry ? "S" : "A";
 	return (
 		N +
@@ -260,6 +260,8 @@ function _districtPoolKey(N, rGerry, dGerry, base, gerry) {
 		rGerry +
 		"|" +
 		dGerry +
+		"|" +
+		(urbanGerry || 0) +
 		"|" +
 		sym +
 		"|" +
@@ -271,7 +273,9 @@ function _districtPoolKey(N, rGerry, dGerry, base, gerry) {
 		"|" +
 		_componentsKey(gerry.componentsR) +
 		"|" +
-		_componentsKey(gerry.componentsD)
+		_componentsKey(gerry.componentsD) +
+		"|" +
+		_componentsKey(urban && urban.components)
 	);
 }
 
@@ -308,24 +312,30 @@ function _buildMixtureSampler(components) {
 // from base / gerry-R / gerry-D in proportion to (1 − rGerry − dGerry),
 // rGerry, dGerry.  Kept around mostly for diagnostic / debugging use; the
 // main path goes through `analyticDistrictPool` below for noise-free output.
-function sampleDistrictPool(N, rGerry, dGerry, base, gerry) {
+function sampleDistrictPool(N, rGerry, dGerry, urbanGerry, base, gerry, urban) {
 	const enforceSym = !!base.enforceSymmetry;
 	const sampleBaseMix = _buildMixtureSampler(base.components);
 	const sampleGerryRMix = _buildMixtureSampler(gerry.componentsR);
 	const sampleGerryDMix = _buildMixtureSampler(gerry.componentsD);
+	const sampleUrbanMix = urban && urban.components
+		? _buildMixtureSampler(urban.components)
+		: null;
 	const removeLo = gerry.removeRange[0];
 	const removeHi = gerry.removeRange[1];
 
 	// Clamp so weights are valid even if the caller doesn't enforce the cap.
 	const wR = Math.max(0, rGerry);
 	const wD = Math.max(0, dGerry);
-	const wB = Math.max(0, 1 - wR - wD);
+	const wU = Math.max(0, urbanGerry || 0);
+	const wB = Math.max(0, 1 - wR - wD - wU);
 
-	// Deterministic split into nBase / nR / nD.  Match the mixture weights in
-	// expectation; per-render granularity is 1/N ≈ 0.23%.
-	const nBase = Math.round((N * wB) / (wB + wR + wD || 1));
-	const nR = Math.round((N * wR) / (wB + wR + wD || 1));
-	const nD = N - nBase - nR;
+	// Deterministic split into nBase / nR / nD / nU.  Match the mixture
+	// weights in expectation; per-render granularity is 1/N ≈ 0.23%.
+	const wTot = wB + wR + wD + wU || 1;
+	const nBase = Math.round((N * wB) / wTot);
+	const nR = Math.round((N * wR) / wTot);
+	const nU = Math.round((N * wU) / wTot);
+	const nD = N - nBase - nR - nU;
 
 	const pool = new Array(N);
 	let idx = 0;
@@ -370,6 +380,12 @@ function sampleDistrictPool(N, rGerry, dGerry, base, gerry) {
 		} while (x >= removeLo && x <= removeHi);
 		pool[idx++] = x;
 	}
+	// ---- URBAN-D portion (no removeRange — urban packs are at D+60-ish) ----
+	if (sampleUrbanMix) {
+		for (let i = 0; i < nU; i++) {
+			pool[idx++] = sampleUrbanMix(-100, 100);
+		}
+	}
 
 	pool.sort((a, b) => a - b);
 	return pool;
@@ -407,15 +423,22 @@ function _mixturePdf(x, components) {
 	return w > 0 ? d / w : 0;
 }
 
-function analyticDistrictPool(N, rGerry, dGerry, base, gerry) {
+function analyticDistrictPool(N, rGerry, dGerry, urbanGerry, base, gerry, urban) {
 	const enforceSym = !!base.enforceSymmetry;
 	const baseComps = base.components || [];
 	const gR = gerry.componentsR || [];
 	const gD = gerry.componentsD || [];
-	// Clamp into the valid simplex {wB, wR, wD ≥ 0, wB+wR+wD = 1}.
+	// Optional urban-D component: a small Gaussian centred at ~D+60 that
+	// represents naturally-packed urban Democratic seats (cities concentrate
+	// D voters geographically into a handful of blowout districts even
+	// without intentional gerrymandering).  Distinct from dGerry, which is
+	// "extra-safe via packing"; this one is "structural city demography".
+	const uComps = urban && urban.components ? urban.components : [];
+	// Clamp into the valid simplex {wB, wR, wD, wU ≥ 0, sum = 1}.
 	const wR = Math.max(0, rGerry);
 	const wD = Math.max(0, dGerry);
-	const wB = Math.max(0, 1 - wR - wD);
+	const wU = Math.max(0, urbanGerry || 0);
+	const wB = Math.max(0, 1 - wR - wD - wU);
 	const removeLo = gerry.removeRange[0];
 	const removeHi = gerry.removeRange[1];
 
@@ -431,6 +454,11 @@ function analyticDistrictPool(N, rGerry, dGerry, base, gerry) {
 		if (x >= removeLo && x <= removeHi) return 0;
 		return _mixturePdf(x, gD);
 	}
+	function urbanDens(x) {
+		// Always asymmetric (D-side packing); no removeRange — the urban
+		// bump sits at D+60, well outside any competitive band.
+		return _mixturePdf(x, uComps);
+	}
 
 	// Build the pool's CDF using midpoint-cell integration so the integration
 	// is exactly symmetric around 0 for symmetric densities (no boundary
@@ -442,7 +470,10 @@ function analyticDistrictPool(N, rGerry, dGerry, base, gerry) {
 	let acc = 0;
 	for (let i = 0; i < ANALYTIC_NCELLS; i++) {
 		const x = ANALYTIC_LO + (i + 0.5) * step;
-		acc += wB * baseDens(x) + wR * gerryRDens(x) + wD * gerryDDens(x);
+		acc += wB * baseDens(x)
+		     + wR * gerryRDens(x)
+		     + wD * gerryDDens(x)
+		     + wU * urbanDens(x);
 		cdf[i] = acc;
 	}
 	const total = cdf[ANALYTIC_NCELLS - 1];
@@ -468,13 +499,14 @@ function analyticDistrictPool(N, rGerry, dGerry, base, gerry) {
 	return out;
 }
 
-// Cached wrapper: returns the same pool while (N, rGerry, dGerry, base,
-// gerry) are unchanged.  The analytic pool is deterministic so caching is a
-// pure speed-up — it's already the same output every call for a given key.
-function buildDistrictPool(N, rGerry, dGerry, base, gerry) {
-	const key = _districtPoolKey(N, rGerry, dGerry, base, gerry);
+// Cached wrapper: returns the same pool while (N, rGerry, dGerry,
+// urbanGerry, base, gerry, urban) are unchanged.  The analytic pool is
+// deterministic so caching is a pure speed-up — it's already the same
+// output every call for a given key.
+function buildDistrictPool(N, rGerry, dGerry, urbanGerry, base, gerry, urban) {
+	const key = _districtPoolKey(N, rGerry, dGerry, urbanGerry, base, gerry, urban);
 	if (_poolCache.key === key) return _poolCache.pool;
-	const pool = analyticDistrictPool(N, rGerry, dGerry, base, gerry);
+	const pool = analyticDistrictPool(N, rGerry, dGerry, urbanGerry, base, gerry, urban);
 	_poolCache = { key, pool };
 	return pool;
 }
@@ -489,7 +521,7 @@ function buildDistrictPool(N, rGerry, dGerry, base, gerry) {
 // Anchored linear coupling: at slider position `defaultValue` returns
 // `defaultMu`; otherwise μ = defaultMu + slope * (currentValue - defaultValue).
 // Used for both the candidate-ideology mean (vs ambient-moderation σ) and the
-// district-partisanship mean (vs districtCompet σ).
+// district-partisan lean mean (vs districtCompet σ).
 function anchoredLinear(currentValue, defaultValue, defaultMu, slope) {
 	return defaultMu + slope * (currentValue - defaultValue);
 }
@@ -565,7 +597,7 @@ function simulateOne(
 	// pre-computed pool to avoid regenerating it per simulation.
 	const d =
 		districtPool ||
-		buildDistrictPool(2 * p.m + 1, p.rGerry, p.dGerry, p.base, p.gerry);
+		buildDistrictPool(2 * p.m + 1, p.rGerry, p.dGerry, p.urbanGerry, p.base, p.gerry, p.urban);
 	const N = d.length;
 	const r = returnFull ? new Float64Array(N) : null;
 	const party = returnFull ? new Array(N) : null;
@@ -599,6 +631,15 @@ function simulateOne(
 	// invSat instead of dividing.
 	const oppSaturation = opp.saturation || 1;
 	const invOppSat = 1 / oppSaturation;
+	// Per-district election-noise modulation: σ is amplified in safe
+	// seats by a saturating linear ramp on |d_i − medianLean|.  Pre-
+	// compute the inverse saturation so the inner loop multiplies; cache
+	// the amp locally so the hot path doesn't deref through `p` per
+	// district.  Disabled (cheap no-op) when safeAmp = 0.
+	const eNoise = p.electionNoise || {};
+	const safeNoiseAmp = eNoise.safeAmp ?? 0;
+	const invSafeNoiseSat = 1 / (eNoise.safeSaturation || 1);
+	const safeNoiseActive = safeNoiseAmp > 0;
 	const noiseType = p.noiseType;
 	const batesN = p.batesN;
 	const tukeyLambda = p.tukeyLambda;
@@ -636,6 +677,23 @@ function simulateOne(
 	const pdZSumSq = perDistrictTracker ? perDistrictTracker.zSumSq : null;
 	const pdRWins = perDistrictTracker ? perDistrictTracker.rWins : null;
 	const pdActuals = perDistrictTracker ? perDistrictTracker.actuals : null;
+	// Optional incumbency block (historical page only).  Per-district
+	// signs ∈ {−1, 0, +1} parallel to the pool, plus three scalars
+	// (mean, var, tail) that describe the per-sim per-district shift
+	// applied right before the cutoff:
+	//   shift_i = signs[i] · (mean + var · randn() + tail · laplace())
+	// Mean carries the slider value; var + tail come from
+	// `CONFIG.incumbencyMod` and let the boost vary cycle-to-cycle
+	// instead of being a fixed per-district scalar.  Affects per-
+	// district outcomes, the empirical PIT, and every downstream
+	// tracker uniformly.
+	const inc = perDistrictTracker ? perDistrictTracker.incumbency : null;
+	const incSigns = inc ? inc.signs : null;
+	const incMean  = inc ? (inc.mean ?? 0) : 0;
+	const incVar   = inc ? (inc.var  ?? 0) : 0;
+	const incTail  = inc ? (inc.tail ?? 0) : 0;
+	const incVarActive  = !!inc && incVar  !== 0;
+	const incTailActive = !!inc && incTail !== 0;
 	const pdBelowActual = perDistrictTracker ? perDistrictTracker.belowActual : null;
 	let mismatches = 0; // R in D-lean district, or D in R-lean district (di ≠ 0)
 	if (vIsZero) {
@@ -680,13 +738,30 @@ function simulateOne(
 				tailBumpR * laplaceSample();
 			// sigmaN is the σ of the additive election-noise term: a unit-variance
 			// shape (Bates or Tukey) scaled by sigmaN and added to the score.
+			// Per-district amplification in safe seats: same saturating-ramp
+			// shape as opp but symmetric, anchored at medianLean.
 			const noise =
 				sigmaN > 0
 					? noiseType === "tukey"
 						? tukeyLambdaSample(tukeyLambda)
 						: batesSample(batesN)
 					: 0;
-			const z = di - wMod * (cD + cR) + sigmaN * noise;
+			let sigmaN_i = sigmaN;
+			if (safeNoiseActive) {
+				const safeStretch = di > medianLean ? di - medianLean : medianLean - di;
+				const safeShape = safeStretch * invSafeNoiseSat;
+				sigmaN_i *= 1 + safeNoiseAmp * (safeShape > 1 ? 1 : safeShape);
+			}
+			let z = di - wMod * (cD + cR) + sigmaN_i * noise;
+			if (incSigns) {
+				const s = incSigns[i];
+				if (s !== 0) {
+					let shift = incMean;
+					if (incVarActive)  shift += incVar  * randn();
+					if (incTailActive) shift += incTail * laplaceSample();
+					z += s * shift;
+				}
+			}
 			// Hard cutoff at z = 0; randomise on exact ties so a perfectly
 			// symmetric setup (e.g. rGerry === dGerry, v = 0) has no
 			// deterministic bias in who wins the marginal seat.
@@ -777,14 +852,29 @@ function simulateOne(
 				varBumpR * randn() +
 				tailBumpR * laplaceSample();
 			// 'sigmaN' is the σ of the additive election-noise term (see fast-path
-			// comment above).
+			// comment above).  Same per-district safe-seat amplification.
 			const noise =
 				sigmaN > 0
 					? noiseType === "tukey"
 						? tukeyLambdaSample(tukeyLambda)
 						: batesSample(batesN)
 					: 0;
-			const z = v + di - wMod * (cD + cR) + sigmaN * noise;
+			let sigmaN_i = sigmaN;
+			if (safeNoiseActive) {
+				const safeStretch = di > medianLean ? di - medianLean : medianLean - di;
+				const safeShape = safeStretch * invSafeNoiseSat;
+				sigmaN_i *= 1 + safeNoiseAmp * (safeShape > 1 ? 1 : safeShape);
+			}
+			let z = v + di - wMod * (cD + cR) + sigmaN_i * noise;
+			if (incSigns) {
+				const s = incSigns[i];
+				if (s !== 0) {
+					let shift = incMean;
+					if (incVarActive)  shift += incVar  * randn();
+					if (incTailActive) shift += incTail * laplaceSample();
+					z += s * shift;
+				}
+			}
 			const isR = z > 0 ? 1 : 0;
 			const ri = isR ? cR : cD;
 			rVals[i] = ri;
@@ -940,7 +1030,7 @@ function simulateOne(
 // `customDistrictPool`, when provided, replaces the analytic pool that
 // `runSimulations` would normally build from (rGerry, dGerry, base, gerry).
 // The historical comparison page uses this to feed real-world per-district
-// partisanships (e.g. 1992 House districts' presidential margins) through the
+// partisan leans (e.g. 1992 House districts' presidential margins) through the
 // same simulator + slider settings.  Must be a length-N sorted Array /
 // Float64Array of lean values in pp.  Tie-break duplication is skipped when
 // a custom pool is supplied (it's only meaningful for the synthetic
@@ -969,7 +1059,7 @@ function runSimulations(
 	// d[(N-1)>>1] (the chamber median), so sort order is what matters.
 	const districtPool = customDistrictPool
 		? customDistrictPool
-		: analyticDistrictPool(2 * p.m + 1, p.rGerry, p.dGerry, p.base, p.gerry);
+		: analyticDistrictPool(2 * p.m + 1, p.rGerry, p.dGerry, p.urbanGerry, p.base, p.gerry, p.urban);
 	const N = districtPool.length;
 	const m = (N - 1) >> 1;
 	const meds = new Float64Array(n);
@@ -1003,7 +1093,7 @@ function runSimulations(
 		poolR = districtPool;
 	}
 	// medianDistParts records the boundary lean each sim actually used so
-	// the displayed "median district partisanship" averages both variants
+	// the displayed "median district partisan lean" averages both variants
 	// when the tiebreak is active; otherwise it's just the single value.
 	const medianDistParts = new Float64Array(n);
 	for (let i = 0; i < n; i++) {
@@ -1099,12 +1189,21 @@ function runSimulations(
 	}
 
 	// Optional per-district tracker (z, z², R-win counts; optional actuals
-	// + below-actual counter for empirical PIT).
+	// + below-actual counter for empirical PIT; optional incumbency
+	// bundle for the historical page's per-district z shift).
 	let perDistrictTracker = null;
 	if (trackPerDistrict) {
 		const actuals =
 			typeof trackPerDistrict === "object" && trackPerDistrict.actuals
 				? trackPerDistrict.actuals
+				: null;
+		// incumbency = { signs, mean, var, tail } — see simulateOne for
+		// the per-sim per-district application.  Plain object passes
+		// through; simulateOne handles the missing-fields-default path.
+		const incumbency =
+			typeof trackPerDistrict === "object"
+				&& trackPerDistrict.incumbency
+				? trackPerDistrict.incumbency
 				: null;
 		perDistrictTracker = {
 			zSum: new Float64Array(N),
@@ -1112,6 +1211,7 @@ function runSimulations(
 			rWins: new Int32Array(N),
 			actuals,
 			belowActual: actuals ? new Int32Array(N) : null,
+			incumbency,
 		};
 	}
 

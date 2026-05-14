@@ -4,14 +4,14 @@
 		<meta charset="UTF-8" />
 		<title>Median Ideology Simulator</title>
 		<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-		<script src="config.js?v=45"></script>
-		<script src="model.js?v=45"></script>
+		<script src="config.js?v=61"></script>
+		<script src="model.js?v=61"></script>
 		<!-- controls.js exposes restoreSliderState / saveSliderState so the
 		     simulator and the historical page can share slider positions
 		     via localStorage.  The simulator doesn't use CONTROLS.bind()
 		     itself (its inline run() does considerably more than the
 		     historical page's onRun); just the two persistence helpers. -->
-		<script src="controls.js?v=45"></script>
+		<script src="controls.js?v=61"></script>
 		<style>
 			:root {
 				--bg: #fafafa;
@@ -302,6 +302,14 @@
 				margin-top: 8px;
 				line-height: 1.4;
 			}
+			/* Small caption above a chart explaining its colour key etc.
+			   Sits inside the chart's panel, above the plot itself. */
+			.chart-hint {
+				font-size: 11px;
+				color: var(--muted);
+				line-height: 1.4;
+				margin-bottom: 4px;
+			}
 
 			/* "See more plots" collapsible section */
 			.morePlots {
@@ -443,7 +451,6 @@
 						Move both sliders together</label
 					>
 				</div>
-
 				<h3>Candidates</h3>
 				<div class="row">
 					<label>Democratic Ambient Moderation</label>
@@ -538,11 +545,16 @@
 					<label>Election Noise</label>
 					<input type="range" id="sqrtSigmaN" />
 					<span class="hint"
-						>Lower → election outcomes track district partisanship
+						>Lower → election outcomes track district partisan lean
 						and candidate ideology more deterministically. Higher →
 						more random per-district swings.</span
 					>
 				</div>
+
+				<!-- (No Practical Details on the simulator page — the
+				     only knob it ever held was urban Dem-blowout, which
+				     is now historical-page-only.  readParams below
+				     sees no #urbanGerry element and defaults to 0.) -->
 
 				<button id="reset">Reset to defaults</button>
 				<!-- Preset buttons are populated from CONFIG.presets at init().
@@ -567,6 +579,9 @@
 						></div>
 					</div>
 					<div class="panel">
+						<div class="chart-hint">
+							<b>Cell colour = party of victory + margin of victory.</b>
+						</div>
 						<div
 							id="districtHistChart"
 							style="width: 100%; height: 360px"
@@ -583,19 +598,15 @@
 					1st: histogram of the median representative's ideology
 					across 1000 simulations, colored by party (blue = Democrat,
 					red = Republican).<br />
-					2nd: one example chamber — each district's partisanship vs
+					2nd: one example chamber — each district's partisan lean vs
 					the elected representative's ideology. The black star marks
 					the median rep.<br />
-					3rd: histogram of district partisanship across the chamber.
-					Each district is one cell stacked in its partisanship bin;
+					3rd: histogram of district partisan lean across the chamber.
+					Each district is one cell stacked in its partisan lean bin;
 					<b>cell colour = party of victory + margin of victory</b> —
 					blue if the simulator's D candidate is expected to win,
 					red if the R is, with darker shades for larger predicted
-					margins.  Within each column the cells form a spectrum of
-					likely margins (each district contributes a slice of its
-					predicted distribution), so a column that mixes blue and
-					red marks seats the simulator thinks could plausibly go
-					either way.<br />
+					margins.<br />
 					4th: distribution of final Republican seats across the 1000
 					simulations. Bars are red when R holds a majority and blue
 					when D does, split at the chamber's majority threshold.
@@ -734,8 +745,12 @@
 					// analyticDistrictPool for the full definition.
 					rGerry: num("rGerry"),
 					dGerry: num("dGerry"),
+					urbanGerry: document.getElementById("urbanGerry")
+						? num("urbanGerry")
+						: 0,
 					base: cfg.districtBase,
 					gerry: cfg.districtGerry,
+					urban: cfg.districtUrban,
 					muD: -magnitude,
 					muR: +magnitude,
 					wMod: num("qualImp"),
@@ -743,22 +758,40 @@
 					// mean / var / tail values linearly in the slider
 					// position (0 at slider=0, config value at slider=default).
 					safe: resolveBlock(im.safe, bDSafe, bRSafe, safeDef),
-					swing: Object.assign(
-						resolveBlock(im.swing, bDSwing, bRSwing, swingDef),
-						{
-							// Swing bell geometry — fixed across the slider
-							// range (the slider only scales the block's mean
-							// / var / tail).
-							offset: im.swingOffset ?? 0,
-							breadthD: Math.max(0.5, im.swingBreadth ?? 6),
-							breadthR: Math.max(0.5, im.swingBreadth ?? 6),
-						}
-					),
+					swing: (() => {
+						// Per-party effective bell breadth: anchored at
+						// swingBreadth when the slider sits at its default,
+						// then nudged by swingBreadthSlope per unit-slider
+						// above default.  Each party drives its own bell so
+						// an unpinned configuration can be asymmetric.
+						const bAnchor = im.swingBreadth ?? 6;
+						const bSlope = im.swingBreadthSlope ?? 0;
+						const breadth = (b) =>
+							Math.max(0.5, bAnchor + bSlope * (b / swingDef - 1));
+						return Object.assign(
+							resolveBlock(im.swing, bDSwing, bRSwing, swingDef),
+							{
+								offset: im.swingOffset ?? 0,
+								breadthD: breadth(bDSwing),
+								breadthR: breadth(bRSwing),
+							}
+						);
+					})(),
 					opp: Object.assign(
 						resolveBlock(im.opp, bDOpp, bROpp, oppDef),
 						{ saturation: im.oppSaturation ?? 20 }
 					),
 					waveWeight: im.waveWeight ?? 0,
+					// Per-district election-noise modulation — see
+					// `electionNoise` in config.js for the saturating-
+					// ramp formula.  Same shape as opp but symmetric.
+					electionNoise: {
+						safeAmp: cfg.electionNoise?.safeAmp ?? 0,
+						safeSaturation: Math.max(
+							0.5,
+							cfg.electionNoise?.safeSaturation ?? 20,
+						),
+					},
 				};
 			}
 
@@ -767,7 +800,7 @@
 			// ============================================================================
 
 			// Diverging colour scale shared with historical.html so the two
-			// pages' district-partisanship charts read the same way.
+			// pages' district-partisan lean charts read the same way.
 			// Margins map: dark blue = D blowout, light blue near boundary
 			// (D squeaker), light red just past zero (R squeaker), dark red
 			// = R blowout.  Light-but-clearly-partisan shades near the
@@ -785,7 +818,7 @@
 				[1.00, "rgb(103, 0, 13)"],     // +100: darkest red
 			];
 
-			// Spectrum-per-column matrix builder for the district-partisanship
+			// Spectrum-per-column matrix builder for the district-partisan lean
 			// chart.  Each district contributes K vertically-stacked cells
 			// drawn at evenly-spaced quantiles of its predicted Gaussian
 			// N(avgZ, stdZ), so a column shows the distribution of likely
@@ -948,7 +981,7 @@
 						name: "D Winner",
 						marker: { color: "rgba(31,119,180,0.55)", size: 5 },
 						hovertemplate:
-							"partisanship: %{x:.1f}%<br>ideology: %{y:.1f}<extra>D</extra>",
+							"partisan lean: %{x:.1f}%<br>ideology: %{y:.1f}<extra>D</extra>",
 					},
 					{
 						x: xR,
@@ -957,7 +990,7 @@
 						name: "R Winner",
 						marker: { color: "rgba(214,39,40,0.55)", size: 5 },
 						hovertemplate:
-							"partisanship: %{x:.1f}%<br>ideology: %{y:.1f}<extra>R</extra>",
+							"partisan lean: %{x:.1f}%<br>ideology: %{y:.1f}<extra>R</extra>",
 					},
 					{
 						x: [sim.d[sim.medianIdx]],
@@ -971,7 +1004,7 @@
 							line: { color: "#fff", width: 1.5 },
 						},
 						hovertemplate:
-							"partisanship: %{x:.1f}%<br>ideology: %{y:.1f}<extra>median</extra>",
+							"partisan lean: %{x:.1f}%<br>ideology: %{y:.1f}<extra>median</extra>",
 					},
 				];
 				Plotly.react(
@@ -979,12 +1012,12 @@
 					traces,
 					{
 						title: {
-							text: "One Example Chamber: District Partisanship vs Elected Rep Ideology",
+							text: "One Example Chamber: District Partisan Lean vs Elected Rep Ideology",
 							font: { size: 14 },
 						},
 						xaxis: {
 							title: {
-								text: "District Partisanship % &nbsp;&nbsp; (← Democratic · Republican →)",
+								text: "District Partisan Lean % &nbsp;&nbsp; (← Democratic · Republican →)",
 								standoff: 6,
 							},
 							ticksuffix: "%",
@@ -1064,17 +1097,17 @@
 						xgap: 0, ygap: 0,
 						showscale: false,
 						hovertemplate:
-							"partisanship: %{x:.0f}%<br>" +
+							"partisan lean: %{x:.0f}%<br>" +
 							"predicted margin: %{z:.1f}% (R−D)<extra></extra>",
 					}],
 					{
 						title: {
-							text: "Distribution of District Partisanship Across the Chamber",
+							text: "Distribution of Election Results by Partisan Lean",
 							font: { size: 14 },
 						},
 						xaxis: {
 							title: {
-								text: "District Partisanship % &nbsp;&nbsp; (← Democratic · Republican →)",
+								text: "District Partisan Lean % &nbsp;&nbsp; (← Democratic · Republican →)",
 								standoff: 6,
 							},
 							ticksuffix: "%",
@@ -1150,8 +1183,8 @@
 						? margins[(n - 1) >> 1]
 						: (margins[n / 2 - 1] + margins[n / 2]) / 2;
 
-				// Partisanship of the median district, taken as the median across all
-				// simulations (each sim records its own pool's median-district partisanship).
+				// Partisan lean of the median district, taken as the median across all
+				// simulations (each sim records its own pool's median-district partisan lean).
 				// Captures the typical chamber rather than the last-sampled pool's value.
 				const sortedMDP = Array.from(sims.medianDistParts).sort(
 					(a, b) => a - b
@@ -1205,10 +1238,10 @@
 				const rPill = `<span class="pill R">R</span>`;
 				document.getElementById("stats").innerHTML = `
     <div><b>${n} simulations · ${N} districts</b></div>
-    <div>Partisanship of median district: <span class="num">${
+    <div>Partisan lean of median district: <span class="num">${
 		Math.abs(medianDistPart) < 0.05
 			? "EVEN"
-			: (medianDistPart >= 0 ? "R+" : "D+") + Math.abs(medianDistPart).toFixed(1)
+			: (medianDistPart >= 0 ? "R+" : "D+") + Math.abs(medianDistPart).toFixed(1) + "%"
 	}</span></div>
     <div>Chance the median representative is a Republican: <span class="num">${(
 		pR * 100
@@ -1285,7 +1318,7 @@
 					},
 					// marginBinSpec removed — the per-district-margin
 					// histogram in "see more plots" was retired, and the
-					// main district-partisanship chart now shows margins
+					// main district-partisan lean chart now shows margins
 					// per cell directly via the heatmap colour scale.
 					null,
 					null,
@@ -1385,6 +1418,19 @@
 			}
 
 			function resetDefaults() {
+				// Uncheck every pin BEFORE applying defaults, then re-check
+				// after.  Without this, a checked pin clobbers the second-
+				// applied side via delta-propagation when the two sliders
+				// in the pair start out asymmetric (e.g. coming from a
+				// preset like "Approximate 2024 Election" with dGerry=0.165,
+				// rGerry=0.195).  Setting the first to default(=0.16)
+				// drags the partner; then setting the partner drags the
+				// first away from its target.  Unpin → apply → repin
+				// matches the same workaround used for presets.
+				for (const pair of pinnedPairs) {
+					const pin = document.getElementById(pair.pin);
+					if (pin) pin.checked = false;
+				}
 				for (const id of sliderIds) {
 					const range = document.getElementById(id);
 					range.value = range.defaultValue;
@@ -1394,13 +1440,17 @@
 					}
 					range.dispatchEvent(new Event("input"));
 				}
-				// Re-check every "move both sliders together" pin so the chamber
-				// returns to fully-symmetric defaults.  All defaults are equal
-				// across each pinned pair, so re-checking here doesn't change
-				// any slider positions, just restores the linked-drag behaviour.
+				// Re-check every pin so the chamber returns to fully-
+				// symmetric defaults.  Dispatch a 'change' event so the
+				// pin handler resyncs its delta tracker against the
+				// freshly-set default values; otherwise the next user
+				// drag would compute a stale delta.
 				for (const pair of pinnedPairs) {
 					const pin = document.getElementById(pair.pin);
-					if (pin) pin.checked = true;
+					if (pin) {
+						pin.checked = true;
+						pin.dispatchEvent(new Event("change", { bubbles: true }));
+					}
 				}
 				updateVoteDisplay();
 				if (pendingTimer) {
@@ -1688,21 +1738,28 @@
 						btn.style.marginTop = "6px";
 						btn.style.background = "#5b6e80";
 						btn.addEventListener("click", () => {
-							// Step 1: drop pin-pair sync wherever the preset
-							// asks for different D vs R values.
+							// Step 1: temporarily uncheck every pin-pair
+							// so the preset's D / R values land cleanly
+							// (a checked pin clobbers the second-applied
+							// side via delta-propagation, even when the
+							// preset's two values are equal — first side
+							// moves the partner by its own delta, then
+							// the second fires and pulls the first away
+							// from the target).  We re-check the Opp
+							// pin at the end (Step 3) because Opp is
+							// kept symmetric by convention; Gerry /
+							// Safe / Swing are intentionally allowed to
+							// stay asymmetric since the preset (and
+							// auto-fit) explicitly set different D vs R
+							// values for those.  Mirrors controls.js's
+							// wirePresets so the simulator and
+							// historical pages behave the same way.
+							const PINS_TO_REPIN_AFTER = new Set([
+								"dIntModOpp_rIntModOpp_pin",
+							]);
 							for (const pair of pinnedPairs) {
-								const hasD = pair.d in values;
-								const hasR = pair.r in values;
-								if (
-									hasD &&
-									hasR &&
-									values[pair.d] !== values[pair.r]
-								) {
-									const pin = document.getElementById(
-										pair.pin
-									);
-									if (pin) pin.checked = false;
-								}
+								const pin = document.getElementById(pair.pin);
+								if (pin) pin.checked = false;
 							}
 							// Step 2: apply all slider values (skip the
 							// `enabled` metadata key — not a slider id).
@@ -1722,6 +1779,21 @@
 								);
 							}
 							updateVoteDisplay();
+							// Step 3: re-check the pins flagged in
+							// PINS_TO_REPIN_AFTER (currently just Opp).
+							// Resync the pin-pair tracker by dispatching
+							// a 'change' event so the next user drag
+							// computes a clean delta from the just-set
+							// preset values rather than a stale baseline.
+							for (const pinId of PINS_TO_REPIN_AFTER) {
+								const pin = document.getElementById(pinId);
+								if (pin) {
+									pin.checked = true;
+									pin.dispatchEvent(
+										new Event("change", { bubbles: true })
+									);
+								}
+							}
 							if (pendingTimer) {
 								clearTimeout(pendingTimer);
 								pendingTimer = null;
@@ -2052,7 +2124,7 @@
 
 			// (renderDistrictMarginsChart removed — the per-district election-
 			// margin histogram in "see more plots" was retired now that the
-			// main district-partisanship chart shows the full margin spectrum
+			// main district-partisan lean chart shows the full margin spectrum
 			// via heatmap colour.)
 		</script>
 	</body>

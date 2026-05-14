@@ -21,6 +21,37 @@
 .controls h3:first-child {
 	margin-top: 0;
 }
+/* Collapsible "Practical Details" section — opt-in knobs that most
+   users don't need to touch (e.g. the urban-blowout slider, which is
+   off by default).  Styled to read as a peer of <h3> section headers
+   in the panel: same uppercase/spacing/accent colour, plus a chevron
+   that rotates on open.  Children inside use the regular .row layout. */
+.controls .practicalDetails {
+	margin: 14px 0 4px 0;
+}
+.controls .practicalDetails > summary {
+	cursor: pointer;
+	list-style: none;
+	font-size: 12px;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	color: var(--accent);
+	border-bottom: 1px solid var(--border);
+	padding-bottom: 2px;
+	user-select: none;
+}
+.controls .practicalDetails > summary::-webkit-details-marker { display: none; }
+.controls .practicalDetails > summary::after {
+	content: "▸";
+	display: inline-block;
+	margin-left: 6px;
+	font-size: 10px;
+	color: var(--muted);
+	transition: transform 0.15s ease;
+}
+.controls .practicalDetails[open] > summary::after {
+	transform: rotate(90deg);
+}
 .row {
 	display: flex;
 	align-items: center;

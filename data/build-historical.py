@@ -334,15 +334,35 @@ with open("house-winners.csv", "w", newline="") as w_winners, \
         for party, votes in non_cand.items():
             by_party[party] += votes
         total = sum(by_party.values())
-        if total <= 0:
-            # Unopposed race with no recorded vote totals (common in
-            # 538's pre-2010 FL / OK rows tagged unopposed='true' with
-            # an empty votes cell).  We still know who won, so plot it
-            # at the chart's edge (±100) based on the winner's party.
+        d_pct = 100.0 * by_party.get("D", 0) / total if total > 0 else 0.0
+        r_pct = 100.0 * by_party.get("R", 0) / total if total > 0 else 0.0
+        # Effectively-uncontested detection: a race counts as
+        # uncontested for our W² fitting if one major party got less
+        # than 5% of the recorded vote.  Three real-world cases:
+        #   1. No-vote-recorded unopposed (total=0).  538's pre-2010
+        #      FL / OK rows tag these unopposed='true' with empty
+        #      votes cells.
+        #   2. Truly empty side: one party got 0% but third-parties /
+        #      independents got the rest (e.g. NC-3 2024 had R 77%,
+        #      D 0%, third-party 23%).  The 77% margin is meaningless
+        #      as a D-vs-R result.
+        #   3. Token opposition (e.g. AL-4 2024: R 98.79%, D 1.21%).
+        #      The "opposition" was a write-in / ballot artifact that
+        #      tells us nothing about D-vs-R competition.
+        # All three get the ±100 sentinel based on who won, so the
+        # downstream W² filter (Math.abs(margin) < 99.5 in
+        # historical.html) excludes them from the empirical PIT.
+        # The 5% threshold matches political-science convention for
+        # "contested" House races.
+        EFFECTIVELY_UNCONTESTED_THRESHOLD = 5.0
+        is_uncontested = (
+            total <= 0
+            or d_pct < EFFECTIVELY_UNCONTESTED_THRESHOLD
+            or r_pct < EFFECTIVELY_UNCONTESTED_THRESHOLD
+        )
+        if is_uncontested:
             margin = +100.0 if winner_party == "R" else (-100.0 if winner_party == "D" else 0.0)
         else:
-            d_pct = 100.0 * by_party.get("D", 0) / total
-            r_pct = 100.0 * by_party.get("R", 0) / total
             margin = round(r_pct - d_pct, 2)
         wm.writerow([year, state, district, margin, winner_party])
 print("house-winners.csv written")

@@ -23,6 +23,7 @@
 		"v",
 		"rGerry",
 		"dGerry",
+		"urbanGerry",
 		"dIntModSafe",
 		"rIntModSafe",
 		"dIntModSwing",
@@ -31,6 +32,10 @@
 		"rIntModOpp",
 		"qualImp",
 		"sqrtSigmaN",
+		// Historical-only knob (per-district incumbency boost on the
+		// simulator-on-year row).  index.html doesn't render the
+		// slider element so wireSlider just no-ops there.
+		"incumbency",
 	];
 
 	// Pairs of sliders that share a "move both together" pin checkbox.  When
@@ -116,25 +121,45 @@
 			tukeyLambda: CONST.tukey?.lambda ?? 0.14,
 			rGerry: num("rGerry"),
 			dGerry: num("dGerry"),
+			urbanGerry: document.getElementById("urbanGerry") ? num("urbanGerry") : 0,
 			base: cfg.districtBase,
 			gerry: cfg.districtGerry,
+			urban: cfg.districtUrban,
 			muD: -magnitude,
 			muR: +magnitude,
 			wMod: num("qualImp"),
 			safe: resolveBlock(im.safe, bDSafe, bRSafe, safeDef),
-			swing: Object.assign(
-				resolveBlock(im.swing, bDSwing, bRSwing, swingDef),
-				{
-					offset: im.swingOffset ?? 0,
-					breadthD: Math.max(0.5, im.swingBreadth ?? 6),
-					breadthR: Math.max(0.5, im.swingBreadth ?? 6),
-				}
-			),
+			swing: (() => {
+				// Per-party effective bell breadth: anchored at swingBreadth
+				// when the slider sits at its default, then nudged by
+				// swingBreadthSlope per unit-slider above default.  Each
+				// party's slider drives its own bell so an unpinned auto-
+				// fit can reach asymmetric configurations.
+				const bAnchor = im.swingBreadth ?? 6;
+				const bSlope = im.swingBreadthSlope ?? 0;
+				const breadth = (b) => Math.max(0.5, bAnchor + bSlope * (b / swingDef - 1));
+				return Object.assign(
+					resolveBlock(im.swing, bDSwing, bRSwing, swingDef),
+					{
+						offset: im.swingOffset ?? 0,
+						breadthD: breadth(bDSwing),
+						breadthR: breadth(bRSwing),
+					}
+				);
+			})(),
 			opp: Object.assign(
 				resolveBlock(im.opp, bDOpp, bROpp, oppDef),
 				{ saturation: im.oppSaturation ?? 20 }
 			),
 			waveWeight: im.waveWeight ?? 0,
+			// Per-district election-noise modulation: amplify σ in safe
+			// seats via the same saturating-ramp shape as opp, anchored
+			// at medianLean and symmetric (either-party safe).  See
+			// `electionNoise` in config.js for the math.
+			electionNoise: {
+				safeAmp: cfg.electionNoise?.safeAmp ?? 0,
+				safeSaturation: Math.max(0.5, cfg.electionNoise?.safeSaturation ?? 20),
+			},
 		};
 	}
 
@@ -320,13 +345,21 @@
 			btn.style.marginTop = "6px";
 			btn.style.background = "#5b6e80";
 			btn.addEventListener("click", () => {
+				// Uncheck ALL pin-pair checkboxes (not just asymmetric
+				// ones) before applying.  Even when a preset's D/R
+				// values are equal, leaving the pin checked clobbers
+				// the second-applied side: the first side fires the
+				// pin propagation (delta = preset D − current D), the
+				// partner moves by that delta (e.g. 1 → 1.15), then
+				// the second side fires (delta = preset R − new R =
+				// 1 − 1.15 = −0.15) and pulls the first side away from
+				// the preset value (1 + (−0.15) = 0.85).  Unconditionally
+				// unpinning sidesteps the whole tangle.  The user can
+				// re-tick whichever pair they want to keep symmetric
+				// after the preset loads.
 				for (const pair of PINNED_PAIRS) {
-					const hasD = pair.d in values;
-					const hasR = pair.r in values;
-					if (hasD && hasR && values[pair.d] !== values[pair.r]) {
-						const pin = document.getElementById(pair.pin);
-						if (pin) pin.checked = false;
-					}
+					const pin = document.getElementById(pair.pin);
+					if (pin) pin.checked = false;
 				}
 				for (const [id, v] of Object.entries(values)) {
 					if (id === "enabled") continue;
@@ -349,6 +382,15 @@
 	// Reset every slider to its CONFIG-default value and re-check every
 	// pin-pair so the chamber returns to fully-symmetric defaults.
 	function resetDefaults(runNow) {
+		// Uncheck pins BEFORE applying defaults, then re-check after.
+		// A checked pin clobbers the second-applied side via delta
+		// propagation when the pair starts out asymmetric (e.g. coming
+		// from a preset that loaded different D vs R values).  Same
+		// fix as the preset handler in wirePresets above.
+		for (const pair of PINNED_PAIRS) {
+			const pin = document.getElementById(pair.pin);
+			if (pin) pin.checked = false;
+		}
 		for (const id of SLIDER_IDS) {
 			const range = document.getElementById(id);
 			if (!range) continue;
@@ -359,9 +401,16 @@
 			}
 			range.dispatchEvent(new Event("input"));
 		}
+		// Re-check pins; dispatch 'change' so the pin-pair handler
+		// resyncs its dsLast/rsLast tracker against the just-set
+		// default values (otherwise the next user drag computes a
+		// stale delta).
 		for (const pair of PINNED_PAIRS) {
 			const pin = document.getElementById(pair.pin);
-			if (pin) pin.checked = true;
+			if (pin) {
+				pin.checked = true;
+				pin.dispatchEvent(new Event("change", { bubbles: true }));
+			}
 		}
 		updateVoteDisplay();
 		runNow();

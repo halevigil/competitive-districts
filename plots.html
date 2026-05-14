@@ -50,7 +50,7 @@
 <h1>20 Example Chambers</h1>
 <div class="subtitle">
   Each panel is one independent simulation under the current parameters in
-  <code>index.html</code>. District partisanship on x, elected rep ideology on y;
+  <code>index.html</code>. District partisan lean on x, elected rep ideology on y;
   the black star marks the median rep.
 </div>
 <div class="status" id="status">Loading simulator…</div>
@@ -59,18 +59,18 @@
 <h2>Mismatch Distribution by Magnitude</h2>
 <div class="subtitle">
   Average count of "mismatched" reps per chamber, binned by signed district
-  partisanship.  Republicans winning D-lean districts appear on the left
-  (negative partisanship), Democrats winning R-lean districts appear on the
-  right (positive partisanship).  Heights are averages across many simulations.
+  partisan lean.  Republicans winning D-lean districts appear on the left
+  (negative partisan lean), Democrats winning R-lean districts appear on the
+  right (positive partisan lean).  Heights are averages across many simulations.
 </div>
 <div class="mismatchPanel"><div id="mismatchChart"></div></div>
 
 <h2>Mismatches per District (rate)</h2>
 <div class="subtitle">
-  Same as above but normalised: at each partisanship bin, the average number
-  of mismatches divided by the number of districts at that partisanship.
+  Same as above but normalised: at each partisan lean bin, the average number
+  of mismatches divided by the number of districts at that partisan lean.
   Effectively the conditional probability that a district at that
-  partisanship elects the "wrong-party" representative.
+  partisan lean elects the "wrong-party" representative.
 </div>
 <div class="mismatchPanel"><div id="mismatchRateChart"></div></div>
 
@@ -130,24 +130,24 @@ function renderMismatchChart(divId, stats, perDistrict) {
   const valuePrefix = perDistrict ? 'rate' : 'avg';
   const title = perDistrict
     ? `Mismatch Rate per District (${nSims} sims)`
-    : `Avg Mismatches per Chamber by District Partisanship (${nSims} sims)`;
+    : `Avg Mismatches per Chamber by District Partisan Lean (${nSims} sims)`;
   Plotly.newPlot(divId, [
     { x: centres, y: yR, type: 'bar', name: 'R wins D-lean district',
       marker: { color: 'rgba(214,39,40,0.75)' }, width: binSize,
       customdata: ranges,
       hovertemplate:
-        'partisanship: %{customdata[0]:.1f}% to %{customdata[1]:.1f}%<br>' +
+        'partisan lean: %{customdata[0]:.1f}% to %{customdata[1]:.1f}%<br>' +
         `${valuePrefix} R wins: %{y:.3f}<extra></extra>` },
     { x: centres, y: yD, type: 'bar', name: 'D wins R-lean district',
       marker: { color: 'rgba(31,119,180,0.75)' }, width: binSize,
       customdata: ranges,
       hovertemplate:
-        'partisanship: %{customdata[0]:.1f}% to %{customdata[1]:.1f}%<br>' +
+        'partisan lean: %{customdata[0]:.1f}% to %{customdata[1]:.1f}%<br>' +
         `${valuePrefix} D wins: %{y:.3f}<extra></extra>` },
   ], {
     title: { text: title, font: { size: 14 } },
     xaxis: {
-      title: { text: 'District Partisanship %  (← Democratic · Republican →)', standoff: 4 },
+      title: { text: 'District Partisan Lean %  (← Democratic · Republican →)', standoff: 4 },
       ticksuffix: '%', range: [-100, 100], zeroline: true, zerolinecolor: '#888'
     },
     yaxis: { title: ylabel, range: perDistrict ? [0, 1] : undefined },

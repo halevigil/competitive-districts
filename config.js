@@ -32,6 +32,19 @@ window.CONFIG = {
 		// `gerry` is shared by both rGerry and dGerry sliders — edit once.
 		gerry: { min: 0, max: 0.49, step: 0.001, value: 0.16 },
 
+		// Urban Dem-blowout adjustment.  Share of districts that are
+		// naturally-packed urban D blowouts (a small Gaussian centred
+		// at D+60 — see `districtUrban` below).  Distinct from dGerry,
+		// which is "intentional packing"; this one accounts for the
+		// fact that cities geographically concentrate Democratic voters
+		// into a handful of extreme-blowout districts even without
+		// gerrymandering.
+		// Default 0 — the urban-blowout component is opt-in, surfaced
+		// via the "Practical Details" expander in the slider panel.
+		// The blowout centre/spread/weight are configured in
+		// `districtUrban` below; this slider only controls the share.
+		urbanGerry: { min: 0, max: 0.15, step: 0.005, value: 0 },
+
 		// Intentional moderation is split into three sliders per party,
 		// one per district type.  Labels use district COLOUR (blue / red);
 		// the underlying mechanics are per-party (same-party-safe vs
@@ -49,15 +62,88 @@ window.CONFIG = {
 		intModOpp: { max: 3, step: 0.05, value: 1 },
 
 		// How heavily voters punish ideologically extreme candidates relative
-		// to district partisanship.
+		// to district partisan lean.
 		qualImp: { min: 0, max: 0.6, step: 0.05, value: 0.2 },
 
 		// Election noise sqrt(σ) — squaren scales an additive unit-variance noise term that
 		// gets added to the score (di − wMod·(cD+cR)) before the hard cutoff
 		// at z = 0.  Larger values smear the cutoff out; 0 makes the election
 		// fully deterministic given the candidate draws.
-		sqrtSigmaN: { min: 0, max: 3, step: 0.1, value: 1 },
+		sqrtSigmaN: { min: 0, max: 1.5, step: 0.1, value: 0.5 },
+
+		// Incumbency advantage (historical.html only — the simulator
+		// page has no notion of "previous winner" so the slider isn't
+		// rendered there and the value defaults to 0).  Slider value
+		// is the MEAN per-district shift (in pp) applied to the
+		// predicted election score z in favour of the incumbent's
+		// party: +incumbency for R-held seats, −incumbency for D-held
+		// seats, 0 for open seats / unknown.  The "incumbent" is
+		// whoever won the same district in the previous cycle
+		// (matched on state+district string; redistricting boundary
+		// changes are approximated, not modelled).
+		// See `incumbencyMod` below for per-district variance + tail.
+		incumbency: { min: 0, max: 10, step: 0.25, value: 3 },
 	},
+
+	// ---------------- INCUMBENCY (mean / var / tail, historical.html only) ----
+	// Per-district per-sim shift applied to z in favour of the incumbent's
+	// party (sign ∈ {−1, 0, +1}):
+	//   shift_i = sign_i · (mean + var · randn() + tail · laplaceSample())
+	// All three are scaled by the incumbency slider in the same way the
+	// intentional-moderation blocks (safe / swing / opp) are scaled by
+	// their sliders:
+	//   effective = (slider / sliderDefault) · configValue
+	// so slider = sliderDefault (3) → effective = configValue;
+	// slider = 0 → all three zero (incumbency off entirely); slider =
+	// 2·sliderDefault → all three doubled.
+	//
+	// `mean = 3` at the default keeps the slider's numeric value equal
+	// to the effective mean shift in pp (slider=3 → mean=3pp,
+	// slider=6 → mean=6pp), so the slider label "Incumbency Advantage
+	// (pp)" still reads naturally; var and tail default to 0 so by
+	// default the boost is deterministic per district.  Bump var to ~2
+	// and tail to ~1 to capture realistic cycle-to-cycle variation in
+	// incumbency advantage (scandals, retirement quality drops, etc.).
+	incumbencyMod: {
+		mean: 3,
+		var: 1,
+		tail: 0,
+	},
+
+	// ---------------- PVI WEIGHTING (historical.html only) ---------------------
+	// Cook-style PVI is a weighted average of recent presidential margins
+	// minus the same weighted national popular vote.  These weights set
+	// how heavily the MOST RECENT presidential election counts vs the one
+	// before it; both the per-district PVI and the national-vote
+	// subtraction use the same ratio so districts stay national-relative.
+	//   presYear.cur / prev    — used on presidential-year charts.
+	//                            Default 4 / 1 (= 4:1 cur:prev) biases
+	//                            toward the contest actually being
+	//                            analysed; Cook uses 3:1.
+	//   midterm.recent / prev  — used on midterm-year charts.
+	//                            Default 2 / 1 matches Cook's classic
+	//                            midterm PVI methodology.
+	// Where the prior pres isn't available in the year's district lines
+	// (1992 globally, 1994, 2002, 2022, etc.), the PVI collapses to
+	// single-cycle (just the recent margin minus its national).
+	// Edited values take effect on the next page load — historical.html
+	// reads these on init and bakes them into yearStats.
+	pviWeights: {
+		presYear: { cur: 4, prev: 1 },
+		midterm: { recent: 2, prev: 1 },
+	},
+
+	// ---------------- CALIBRATION DIAGNOSTICS (historical.html only) ----------
+	// Three diagnostic charts can appear under the simulator-on-year row:
+	//   1. Per-lean W² contribution (gray bars)
+	//   2. PIT shape histogram (red/blue bars with auto-interpretation)
+	//   3. PIT shape per lean band (2D heatmap)
+	// These are developer-facing tuning aids; not useful for the public-
+	// facing version of the page.  Hidden by default everywhere.  Flip
+	// to true here to expose them locally; the runtime code ALSO hard-
+	// hides them on any fly.dev / fly.io host so a stray `true` left in
+	// config.js doesn't accidentally leak to the deployed site.
+	showCalibrationPlots: false,
 
 	// ---------------- SIMULATION CONSTANTS -------------------------------------
 	constants: {
@@ -116,7 +202,7 @@ window.CONFIG = {
 	candidateMagnitude: 100,
 
 	// ---------------- DISTRICT DISTRIBUTION ------------------------------------
-	// The 435 district partisanships are drawn from an α-mixture:
+	// The 435 district partisan leans are drawn from an α-mixture:
 	//     (1 − α) · base  +  α · gerry
 	// where α is the `districtCompet` slider's value ("proportion of
 	// gerrymandered seats").  The model samples K=50,000 points from this
@@ -141,7 +227,7 @@ window.CONFIG = {
 		// [-100, 100] regardless of this flag — gerry can be skewed by
 		// `gerryAdv`, which is the whole point.
 		enforceSymmetry: true,
-		components: [{ mean: 0, sigma: 30, weight: 1 }],
+		components: [{ mean: 0, sigma: 25, weight: 1 }],
 	},
 	// `gerry` packs two separate component lists — one per party — and the
 	// `gerryAdv` slider blends between them.  Both lists obey the shared
@@ -162,6 +248,16 @@ window.CONFIG = {
 		componentsD: [
 			{ mean: -22, sigma: 7, weight: 1 }, // packed safe-D bump (mirror)
 		],
+	},
+
+	// ---------------- URBAN BLOWOUT --------------------------------------------
+	// Extra D-side mixture component for naturally-packed urban districts —
+	// dense city CDs that produce 70-30 / 80-20 D blowouts because of where
+	// voters live, not because of intentional gerrymandering.  A small Gaussian
+	// centred at D+60 (= -60 in our R−D pp convention).  Weighted by the
+	// `urbanGerry` slider (share of districts drawn from this component).
+	districtUrban: {
+		components: [{ mean: -60, sigma: 8, weight: 1 }],
 	},
 
 	// ---------------- INTENTIONAL MODERATION -----------------------------------
@@ -194,7 +290,19 @@ window.CONFIG = {
 		waveWeight: 0,
 		// Swing bell geometry (shared by mean / var / tail effects).
 		swingOffset: 0, // K — bell peak distance from medianLean
-		swingBreadth: 12, // bell half-decay distance (% points)
+		// Bell half-decay distance (% points) at slider = default.
+		// At slider = default the per-party effective breadth equals
+		// `swingBreadth`, preserving the historical meaning of this knob.
+		swingBreadth: 8,
+		// How much the bell breadth changes per unit of slider above
+		// default (additive, per party — slider on the L side widens the
+		// L bell, R the R bell when the pin is unchecked).  Effective
+		// breadth = swingBreadth + swingBreadthSlope · (slider/default − 1),
+		// floored at 0.5 to keep the bell from collapsing.  Larger values
+		// make the swing slider do more work per click — auto-fit will
+		// settle at a lower slider position because each unit reaches
+		// further out into not-quite-swing districts.
+		swingBreadthSlope: 4,
 		// Opp ramp saturation: stretch distance (% points) at which the
 		// linear "deeper-into-opp-territory" effect plateaus.
 		oppSaturation: 20,
@@ -210,9 +318,35 @@ window.CONFIG = {
 		//   var  — added directly to the Gaussian-core σ of cD / cR.
 		//   tail — added directly to the Laplace-tail scale of cD / cR.
 		// The block's shape function in d_i then multiplies each of these.
-		safe: { mean: 8, var: 8, tail: 0 },
-		swing: { mean: 16, var: 4, tail: 2 },
-		opp: { mean: 2, var: 8, tail: 12 },
+		safe: { mean: 8, var: 4, tail: 4 },
+		swing: { mean: 16, var: 8, tail: 2 },
+		opp: { mean: 2, var: 0, tail: 6 },
+	},
+
+	// ---------------- ELECTION-NOISE PER-DISTRICT MODULATION -------------------
+	// The additive election-noise σ (= the sqrtSigmaN slider squared,
+	// scaling a unit-variance bates / tukey draw added to z) gets dialled
+	// UP in safe seats by a saturating linear ramp on |d_i − medianLean|:
+	//
+	//   sigmaN_i = sigmaN · (1 + safeAmp · min(|d_i − medianLean| / safeSaturation, 1))
+	//
+	// Same saturating-ramp shape as `intentionalMod.opp`'s "stretch from
+	// the median", but symmetric around the median so it applies to safe
+	// seats of EITHER party.  Captures the real-world fact that the
+	// margin of victory in a 70-30 seat fluctuates harder year-to-year
+	// than a 51-49 seat — there's no two-way pressure pulling toward the
+	// observed median, so candidate quirks / turnout swings / generic-
+	// ballot drift hit the actual vote share without being washed out by
+	// the close-race tug-of-war.
+	//
+	// Tunables:
+	//   safeAmp        — multiplier of extra noise at full saturation
+	//                    (0 → off; 0.5 → up to 1.5× σ in fully-safe seats).
+	//   safeSaturation — |d_i − medianLean| (% points) where the ramp
+	//                    plateaus.  Anything past this gets the full bump.
+	electionNoise: {
+		safeAmp: 0,
+		safeSaturation: 20,
 	},
 
 	// ---------------- HISTOGRAMS -----------------------------------------------
@@ -228,7 +362,7 @@ window.CONFIG = {
 			nBins: 40,
 			extendPercentile: 0.01, // 1st / 99th percentile
 		},
-		// District-partisanship histogram (bottom chart): bin width in
+		// District-partisan lean histogram (bottom chart): bin width in
 		// percentage points across the fixed [-100%, 100%] range.
 		district: {
 			binSize: 2,
@@ -262,20 +396,32 @@ window.CONFIG = {
 	// the relevant pin checkbox.
 	presets: {
 		"Approximate 2024 Election": {
-			v: 1.5, // R+1.5% national popular-vote margin
-			rGerry: 0.19,
-			dGerry: 0.15,
-			// Modest D-edge in intentional moderation (Slotkin, Gallego, etc.
-			// ran more aggressively moderate than their R counterparts).
-			// Each party's intMod is split into three sliders: same-party
-			// safe pull, swing-zone pull, and opposite-party tail growth.
-			dIntModSafe: 1.2,
+			// Refreshed via auto-fit on the 2024 chamber after the
+			// model overhaul (per-party swing breadth, urban-blowout
+			// component, election-noise ramp, etc.).  Final fit:
+			// medianΔ=0.02 pp · Δ=4.61 pp · W²=0.18  (well under the
+			// 0.46 calibration ceiling at N=417 contested districts).
+			// v pinned to the year's SHAVE-adjusted House popular-vote
+			// margin (R+2.1%); structural sliders are auto-fit.
+			v: 2.1,
+			rGerry: 0.195,
+			dGerry: 0.165,
+			urbanGerry: 0.005,
+			// Slight asymmetries between D and R reflect the actual
+			// 2024 cycle: Republicans ran further-from-median in
+			// opposite-party districts (rIntModOpp > dIntModOpp), D
+			// front-line incumbents tracked center harder in swing
+			// (dIntModSwing > rIntModSwing).  Pin checkboxes are
+			// auto-unchecked when an asymmetric preset loads.
+			dIntModSafe: 1,
 			rIntModSafe: 1,
-			dIntModSwing: 1.5,
-			rIntModSwing: 0.4,
+			dIntModSwing: 1.4,
+			rIntModSwing: 0.5,
 			dIntModOpp: 1,
 			rIntModOpp: 1,
 			qualImp: 0.2,
+			sqrtSigmaN: 0.5,
+			incumbency: 3,
 		},
 		// Demo of the gerry → less-extreme-median effect.
 		// With ambMod maxed out (very wide candidate spreads), a small
