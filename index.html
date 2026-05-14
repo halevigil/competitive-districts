@@ -387,7 +387,7 @@
 			percentage points. Each simulation = 1000 election runs.
 			&nbsp;·&nbsp;
 			<a href="historical.html"
-				>Compare against historical House results, 2008–2024 →</a
+				>Compare against historical House results, 1992–2024 →</a
 			>
 		</div>
 
@@ -1257,6 +1257,13 @@
 								rGerry: p.rGerry,
 								dGerry: p.dGerry,
 								v: p.v,
+								// Full params + sim count — the historical
+								// page re-runs the simulator with these same
+								// settings on a real-year district pool to
+								// produce a "current sliders on this year's
+								// districts" comparison row.
+								params: p,
+								nsim: p.nsim,
 							})
 						);
 					}
@@ -1271,10 +1278,15 @@
 			}
 			function scheduleRun() {
 				if (pendingTimer) clearTimeout(pendingTimer);
+				// Tunable in config.js as constants.sliderDebounceMs.  Larger
+				// = waits longer for the drag to settle (less render churn);
+				// smaller = updates closer to real-time as you drag (more
+				// CPU). Falls back to 80ms if the field is missing.
+				const ms = window.CONFIG?.constants?.sliderDebounceMs ?? 80;
 				pendingTimer = setTimeout(() => {
 					pendingTimer = null;
 					run();
-				}, 120);
+				}, ms);
 			}
 
 			function resetDefaults() {

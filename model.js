@@ -892,13 +892,31 @@ function simulateOne(
 //
 // `marginBinSpec`, same shape — bins per-district election scores `z`,
 // split by D-won / R-won.  Returned as `marginBins`.
+// `customDistrictPool`, when provided, replaces the analytic pool that
+// `runSimulations` would normally build from (rGerry, dGerry, base, gerry).
+// The historical comparison page uses this to feed real-world per-district
+// partisanships (e.g. 1992 House districts' presidential margins) through the
+// same simulator + slider settings.  Must be a length-N sorted Array /
+// Float64Array of lean values in pp.  Tie-break duplication is skipped when
+// a custom pool is supplied (it's only meaningful for the synthetic
+// "fully-gerrymandered" edge case, which can't occur on real data).
 function runSimulations(
 	p,
 	n,
 	mismatchBinSpec = null,
 	electedBinSpec = null,
-	marginBinSpec = null
+	marginBinSpec = null,
+	customDistrictPool = null
 ) {
+	// If a real-district pool was supplied, use it as-is and let it set N.
+	// Otherwise build the analytic pool from the slider mixture.  Sorted
+	// ascending in both branches — the simulator only ever reads d[i] and
+	// d[(N-1)>>1] (the chamber median), so sort order is what matters.
+	const districtPool = customDistrictPool
+		? customDistrictPool
+		: analyticDistrictPool(2 * p.m + 1, p.rGerry, p.dGerry, p.base, p.gerry);
+	const N = districtPool.length;
+	const m = (N - 1) >> 1;
 	const meds = new Float64Array(n);
 	const p33s = new Float64Array(n);
 	const p67s = new Float64Array(n);
@@ -907,27 +925,18 @@ function runSimulations(
 	const parties = new Uint8Array(n);
 	const seats = new Int32Array(n);
 	const mismatches = new Int32Array(n);
-	const N = 2 * p.m + 1;
-	const m = (N - 1) >> 1;
-	// Analytic pool: i-th district = quantile (i + 0.5) / N of the underlying
-	// mixture's CDF.  No Monte-Carlo noise, deterministic, reused for all `n`
-	// simulations.  Reads as the "expected chamber" given the current sliders.
-	const districtPool = analyticDistrictPool(
-		N,
-		p.rGerry,
-		p.dGerry,
-		p.base,
-		p.gerry
-	);
 	// Tie-break maps: only relevant when the chamber is fully gerrymandered
 	// (rGerry = dGerry = 0.5 → no base contribution at all → no district
 	// naturally lands near the chamber midline; the "boundary district" is
 	// contrived).  Force the boundary seat to ±TIEBREAK_EPS — one map with
 	// D taking it, one with R — and run half the sims on each.  Anywhere
 	// else, the base distribution still puts a real district at the
-	// boundary, so we just use the natural pool for every sim.
+	// boundary, so we just use the natural pool for every sim.  Skipped
+	// entirely when the caller supplied its own pool (real-data path) —
+	// no synthetic "fully-gerried" edge case to worry about.
 	const TIEBREAK_EPS = 0.05;
-	const fullyGerried = p.rGerry >= 0.5 && p.dGerry >= 0.5;
+	const fullyGerried =
+		!customDistrictPool && p.rGerry >= 0.5 && p.dGerry >= 0.5;
 	let poolD, poolR;
 	if (fullyGerried) {
 		poolD = districtPool.slice();
