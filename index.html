@@ -1262,6 +1262,8 @@
 							? Array.from(sims.districtPool) : null;
 						const avgZArr = sims.perDistrict && sims.perDistrict.avgZ
 							? Array.from(sims.perDistrict.avgZ) : null;
+						const stdZArr = sims.perDistrict && sims.perDistrict.stdZ
+							? Array.from(sims.perDistrict.stdZ) : null;
 						localStorage.setItem(
 							"simulator_current_run",
 							JSON.stringify({
@@ -1283,6 +1285,7 @@
 								// district coloured by mean predicted margin).
 								pool: poolArr,
 								perDistrictAvgZ: avgZArr,
+								perDistrictStdZ: stdZArr,
 								rGerry: p.rGerry,
 								dGerry: p.dGerry,
 								v: p.v,

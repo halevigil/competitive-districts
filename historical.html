@@ -397,22 +397,24 @@ function parseCsv(text) {
 }
 
 // Diverging colour scale used by every seats-by-lean chart on the page:
-// each district is a single unit-height cell coloured by its margin of
-// victory (R% − D%, pp).  Dark blue = D blowout, dark red = R blowout.
-// IMPORTANT: NO white midpoint.  Even a 1-point margin needs to read
-// as obviously blue or red — the chart is about who won — so we put a
-// SHARP discontinuity at zero (two stops at 0.5) between a still-clearly-
-// blue "D squeaker" colour and a still-clearly-red "R squeaker" colour.
-// On the D side, even the lightest shade is a recognisable blue; same
-// on the R side with red.  Linear ramps from there out to dark on each end.
+// each cell is coloured by margin of victory (R% − D%, pp).  Dark blue =
+// D blowout, dark red = R blowout, lighter shades for narrow margins —
+// but light-PARTISAN, not white.  The lightest blue (a D squeaker) is
+// still recognisably blue and the lightest red is still recognisably
+// red, so the chart never has a "toss-up" cell that reads as ambiguous.
+// The transition at margin = 0 is a step from the lightest blue to the
+// lightest red, but those two shades are close enough that the boundary
+// feels like a gentle gradient rather than a hard break.
 const HEATMAP_COLORSCALE = [
   [0.00, 'rgb(8, 48, 107)'],      // -100: darkest blue
   [0.20, 'rgb(33, 113, 181)'],    //  -60: strong blue
-  [0.40, 'rgb(66, 146, 198)'],    //  -20: medium blue
-  [0.50, 'rgb(107, 174, 214)'],   //  -0:  light-but-clearly blue (D squeaker)
-  [0.50, 'rgb(251, 106, 74)'],    //  +0:  light-but-clearly red (R squeaker) — SHARP JUMP
-  [0.60, 'rgb(239, 59, 44)'],     //  +20: medium red
-  [0.80, 'rgb(165, 15, 21)'],     //  +60: strong red
+  [0.35, 'rgb(66, 146, 198)'],    //  -30: medium blue
+  [0.45, 'rgb(158, 202, 225)'],   //  -10: light blue (clearly D)
+  [0.50, 'rgb(214, 230, 242)'],   //   0− pale blue, still D-leaning
+  [0.50, 'rgb(252, 220, 210)'],   //   0+ pale red, still R-leaning
+  [0.55, 'rgb(252, 174, 145)'],   //  +10: light red (clearly R)
+  [0.65, 'rgb(251, 106, 74)'],    //  +30: medium red
+  [0.80, 'rgb(203, 24, 29)'],     //  +60: strong red
   [1.00, 'rgb(103, 0, 13)'],      // +100: darkest red
 ];
 
@@ -449,7 +451,58 @@ function buildSeatMatrix(leans, margins) {
   }
   const centres = new Array(nBins);
   for (let i = 0; i < nBins; i++) centres[i] = lo + (i + 0.5) * binSize;
-  return { z, centres, maxStack };
+  // y array: each cell is 1 seat tall, centred at (layer + 0.5).
+  const yArr = new Array(maxStack);
+  for (let i = 0; i < maxStack; i++) yArr[i] = i + 0.5;
+  return { z, centres, yArr, maxStack };
+}
+
+// Simulator variant: each district contributes K vertically-stacked cells
+// sampled at evenly-spaced quantiles of its predicted Gaussian distribution
+// N(avgZ, stdZ), so the column shows the SPECTRUM of likely margins for
+// that bin's seats — not just each seat's mean.  Districts with high σ
+// span more colour range (blue → red), districts with σ ≈ 0 collapse to
+// K identical cells (visually equivalent to the historical view).  Cells
+// are 1/K seats tall so the y-axis remains in "seats" units and the
+// chart aligns with the historical row.  Quantile positions are
+// (k + 0.5) / K for k = 0..K−1 — symmetric around the mean, deterministic
+// (no flicker on slider drag).
+function buildSimulatorSeatMatrix(leans, mus, sigmas, K) {
+  K = K || 10;
+  const lo = -100, hi = 100;
+  const nBins = Math.ceil((hi - lo) / binSize);
+  const byBin = new Array(nBins).fill(null).map(() => []);
+  // Pre-compute quantile offsets in σ-units (probit lives in model.js).
+  const offsets = new Array(K);
+  for (let k = 0; k < K; k++) offsets[k] = probit((k + 0.5) / K);
+  for (let i = 0; i < leans.length; i++) {
+    const mu = mus[i];
+    if (mu == null || !isFinite(mu)) continue;
+    let leanIdx = Math.floor((leans[i] - lo) / binSize);
+    if (leanIdx < 0) leanIdx = 0;
+    else if (leanIdx >= nBins) leanIdx = nBins - 1;
+    const sigma = (sigmas && isFinite(sigmas[i])) ? sigmas[i] : 0;
+    for (let k = 0; k < K; k++) {
+      byBin[leanIdx].push(mu + sigma * offsets[k]);
+    }
+  }
+  for (let b = 0; b < nBins; b++) byBin[b].sort((a, b) => b - a);
+  let maxStack = 0;
+  for (let b = 0; b < nBins; b++) if (byBin[b].length > maxStack) maxStack = byBin[b].length;
+  const z = [];
+  for (let layer = 0; layer < maxStack; layer++) {
+    const row = new Array(nBins);
+    for (let b = 0; b < nBins; b++) {
+      row[b] = layer < byBin[b].length ? byBin[b][layer] : NaN;
+    }
+    z.push(row);
+  }
+  const centres = new Array(nBins);
+  for (let i = 0; i < nBins; i++) centres[i] = lo + (i + 0.5) * binSize;
+  // y array: 1/K seats per cell, so the axis stays in "seats" units.
+  const yArr = new Array(maxStack);
+  for (let i = 0; i < maxStack; i++) yArr[i] = (i + 0.5) / K;
+  return { z, centres, yArr, maxStack };
 }
 
 async function loadAll() {
@@ -633,8 +686,7 @@ function renderYearChart(divId, year, stats, yMax) {
   const ms = matrixIn.map(d => d.margin);
   const m = buildSeatMatrix(xs, ms);
   Plotly.react(divId, [{
-    z: m.z, x: m.centres, type: 'heatmap',
-    y: m.z.map((_, i) => i + 0.5),
+    z: m.z, x: m.centres, y: m.yArr, type: 'heatmap',
     colorscale: HEATMAP_COLORSCALE,
     zmin: -100, zmax: 100, zmid: 0,
     xgap: 0, ygap: 0,
@@ -767,15 +819,20 @@ function renderSimOnYear(year, yearStats, yMax) {
     );
   }
 
-  // Build the heatmap matrix from per-district predicted margins.
+  // Build the spectrum heatmap matrix: each district contributes K
+  // quantile-sampled cells from its predicted distribution N(avgZ, stdZ).
   const avgZ = sims.perDistrict.avgZ;
-  const xs = new Array(N), ms = new Array(N);
-  for (let i = 0; i < N; i++) { xs[i] = pool[i]; ms[i] = avgZ[i]; }
-  const m = buildSeatMatrix(xs, ms);
+  const stdZ = sims.perDistrict.stdZ;
+  const xs = new Array(N), mus = new Array(N), sigmas = new Array(N);
+  for (let i = 0; i < N; i++) {
+    xs[i] = pool[i];
+    mus[i] = avgZ[i];
+    sigmas[i] = stdZ ? stdZ[i] : 0;
+  }
+  const m = buildSimulatorSeatMatrix(xs, mus, sigmas, 10);
 
   Plotly.react('simOnYearChart', [{
-    z: m.z, x: m.centres, type: 'heatmap',
-    y: m.z.map((_, i) => i + 0.5),
+    z: m.z, x: m.centres, y: m.yArr, type: 'heatmap',
     colorscale: HEATMAP_COLORSCALE,
     zmin: -100, zmax: 100, zmid: 0,
     xgap: 0, ygap: 0,
@@ -850,10 +907,18 @@ function renderSimulatorRun(yMax) {
   ];
 
   if (haveDistrictData) {
-    const m = buildSeatMatrix(pool, perDistrictAvgZ);
+    // Per-district stdZ drives the column spectrum (each district
+    // contributes K quantile cells of its predicted Gaussian).  If the
+    // cached blob is from an older simulator-page session that didn't
+    // store stdZ, fall back to a flat per-district matrix (each district
+    // = one cell at its mean predicted margin).
+    const stdZ = saved.perDistrictStdZ;
+    const haveStd = Array.isArray(stdZ) && stdZ.length === pool.length;
+    const m = haveStd
+      ? buildSimulatorSeatMatrix(pool, perDistrictAvgZ, stdZ, 10)
+      : buildSeatMatrix(pool, perDistrictAvgZ);
     Plotly.react('simRunChart', [{
-      z: m.z, x: m.centres, type: 'heatmap',
-      y: m.z.map((_, i) => i + 0.5),
+      z: m.z, x: m.centres, y: m.yArr, type: 'heatmap',
       colorscale: HEATMAP_COLORSCALE,
       zmin: -100, zmax: 100, zmid: 0,
       xgap: 0, ygap: 0,
@@ -911,8 +976,7 @@ function renderYearThumb(divId, year, stats, yMax) {
   const ms = matrixIn.map(d => d.margin);
   const m = buildSeatMatrix(xs, ms);
   Plotly.newPlot(divId, [{
-    z: m.z, x: m.centres, type: 'heatmap',
-    y: m.z.map((_, i) => i + 0.5),
+    z: m.z, x: m.centres, y: m.yArr, type: 'heatmap',
     colorscale: HEATMAP_COLORSCALE,
     zmin: -100, zmax: 100, zmid: 0,
     xgap: 0, ygap: 0,
@@ -1057,6 +1121,8 @@ function renderYearThumb(divId, year, stats, yMax) {
       const poolArr = sims.districtPool ? Array.from(sims.districtPool) : null;
       const avgZArr = sims.perDistrict && sims.perDistrict.avgZ
         ? Array.from(sims.perDistrict.avgZ) : null;
+      const stdZArr = sims.perDistrict && sims.perDistrict.stdZ
+        ? Array.from(sims.perDistrict.stdZ) : null;
       localStorage.setItem('simulator_current_run', JSON.stringify({
         timestamp: Date.now(),
         binSize: mb.binSize, centres: mb.centres, ranges: mb.ranges,
@@ -1064,6 +1130,7 @@ function renderYearThumb(divId, year, stats, yMax) {
         // Per-district arrays drive the heatmap on the bottom row.
         pool: poolArr,
         perDistrictAvgZ: avgZArr,
+        perDistrictStdZ: stdZArr,
         // Legacy margin fields kept null so the simulator page doesn't
         // see a missing key — historical.html doesn't compute them.
         avgDMargin: null,
