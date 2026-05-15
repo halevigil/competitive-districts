@@ -252,7 +252,7 @@ function _componentsKey(components) {
 		.join(";");
 }
 
-function _districtPoolKey(N, rGerry, dGerry, urbanGerry, base, gerry, urban) {
+function _districtPoolKey(N, rGerry, dGerry, base, gerry) {
 	const sym = base.enforceSymmetry ? "S" : "A";
 	return (
 		N +
@@ -260,8 +260,6 @@ function _districtPoolKey(N, rGerry, dGerry, urbanGerry, base, gerry, urban) {
 		rGerry +
 		"|" +
 		dGerry +
-		"|" +
-		(urbanGerry || 0) +
 		"|" +
 		sym +
 		"|" +
@@ -273,9 +271,7 @@ function _districtPoolKey(N, rGerry, dGerry, urbanGerry, base, gerry, urban) {
 		"|" +
 		_componentsKey(gerry.componentsR) +
 		"|" +
-		_componentsKey(gerry.componentsD) +
-		"|" +
-		_componentsKey(urban && urban.components)
+		_componentsKey(gerry.componentsD)
 	);
 }
 
@@ -312,30 +308,25 @@ function _buildMixtureSampler(components) {
 // from base / gerry-R / gerry-D in proportion to (1 − rGerry − dGerry),
 // rGerry, dGerry.  Kept around mostly for diagnostic / debugging use; the
 // main path goes through `analyticDistrictPool` below for noise-free output.
-function sampleDistrictPool(N, rGerry, dGerry, urbanGerry, base, gerry, urban) {
+function sampleDistrictPool(N, rGerry, dGerry, base, gerry) {
 	const enforceSym = !!base.enforceSymmetry;
 	const sampleBaseMix = _buildMixtureSampler(base.components);
 	const sampleGerryRMix = _buildMixtureSampler(gerry.componentsR);
 	const sampleGerryDMix = _buildMixtureSampler(gerry.componentsD);
-	const sampleUrbanMix = urban && urban.components
-		? _buildMixtureSampler(urban.components)
-		: null;
 	const removeLo = gerry.removeRange[0];
 	const removeHi = gerry.removeRange[1];
 
 	// Clamp so weights are valid even if the caller doesn't enforce the cap.
 	const wR = Math.max(0, rGerry);
 	const wD = Math.max(0, dGerry);
-	const wU = Math.max(0, urbanGerry || 0);
-	const wB = Math.max(0, 1 - wR - wD - wU);
+	const wB = Math.max(0, 1 - wR - wD);
 
-	// Deterministic split into nBase / nR / nD / nU.  Match the mixture
+	// Deterministic split into nBase / nR / nD.  Match the mixture
 	// weights in expectation; per-render granularity is 1/N ≈ 0.23%.
-	const wTot = wB + wR + wD + wU || 1;
+	const wTot = wB + wR + wD || 1;
 	const nBase = Math.round((N * wB) / wTot);
 	const nR = Math.round((N * wR) / wTot);
-	const nU = Math.round((N * wU) / wTot);
-	const nD = N - nBase - nR - nU;
+	const nD = N - nBase - nR;
 
 	const pool = new Array(N);
 	let idx = 0;
@@ -380,12 +371,6 @@ function sampleDistrictPool(N, rGerry, dGerry, urbanGerry, base, gerry, urban) {
 		} while (x >= removeLo && x <= removeHi);
 		pool[idx++] = x;
 	}
-	// ---- URBAN-D portion (no removeRange — urban packs are at D+60-ish) ----
-	if (sampleUrbanMix) {
-		for (let i = 0; i < nU; i++) {
-			pool[idx++] = sampleUrbanMix(-100, 100);
-		}
-	}
 
 	pool.sort((a, b) => a - b);
 	return pool;
@@ -423,22 +408,15 @@ function _mixturePdf(x, components) {
 	return w > 0 ? d / w : 0;
 }
 
-function analyticDistrictPool(N, rGerry, dGerry, urbanGerry, base, gerry, urban) {
+function analyticDistrictPool(N, rGerry, dGerry, base, gerry) {
 	const enforceSym = !!base.enforceSymmetry;
 	const baseComps = base.components || [];
 	const gR = gerry.componentsR || [];
 	const gD = gerry.componentsD || [];
-	// Optional urban-D component: a small Gaussian centred at ~D+60 that
-	// represents naturally-packed urban Democratic seats (cities concentrate
-	// D voters geographically into a handful of blowout districts even
-	// without intentional gerrymandering).  Distinct from dGerry, which is
-	// "extra-safe via packing"; this one is "structural city demography".
-	const uComps = urban && urban.components ? urban.components : [];
-	// Clamp into the valid simplex {wB, wR, wD, wU ≥ 0, sum = 1}.
+	// Clamp into the valid simplex {wB, wR, wD ≥ 0, sum = 1}.
 	const wR = Math.max(0, rGerry);
 	const wD = Math.max(0, dGerry);
-	const wU = Math.max(0, urbanGerry || 0);
-	const wB = Math.max(0, 1 - wR - wD - wU);
+	const wB = Math.max(0, 1 - wR - wD);
 	const removeLo = gerry.removeRange[0];
 	const removeHi = gerry.removeRange[1];
 
@@ -454,11 +432,6 @@ function analyticDistrictPool(N, rGerry, dGerry, urbanGerry, base, gerry, urban)
 		if (x >= removeLo && x <= removeHi) return 0;
 		return _mixturePdf(x, gD);
 	}
-	function urbanDens(x) {
-		// Always asymmetric (D-side packing); no removeRange — the urban
-		// bump sits at D+60, well outside any competitive band.
-		return _mixturePdf(x, uComps);
-	}
 
 	// Build the pool's CDF using midpoint-cell integration so the integration
 	// is exactly symmetric around 0 for symmetric densities (no boundary
@@ -472,8 +445,7 @@ function analyticDistrictPool(N, rGerry, dGerry, urbanGerry, base, gerry, urban)
 		const x = ANALYTIC_LO + (i + 0.5) * step;
 		acc += wB * baseDens(x)
 		     + wR * gerryRDens(x)
-		     + wD * gerryDDens(x)
-		     + wU * urbanDens(x);
+		     + wD * gerryDDens(x);
 		cdf[i] = acc;
 	}
 	const total = cdf[ANALYTIC_NCELLS - 1];
@@ -500,13 +472,13 @@ function analyticDistrictPool(N, rGerry, dGerry, urbanGerry, base, gerry, urban)
 }
 
 // Cached wrapper: returns the same pool while (N, rGerry, dGerry,
-// urbanGerry, base, gerry, urban) are unchanged.  The analytic pool is
-// deterministic so caching is a pure speed-up — it's already the same
-// output every call for a given key.
-function buildDistrictPool(N, rGerry, dGerry, urbanGerry, base, gerry, urban) {
-	const key = _districtPoolKey(N, rGerry, dGerry, urbanGerry, base, gerry, urban);
+// base, gerry) are unchanged.  The analytic pool is deterministic so
+// caching is a pure speed-up — it's already the same output every
+// call for a given key.
+function buildDistrictPool(N, rGerry, dGerry, base, gerry) {
+	const key = _districtPoolKey(N, rGerry, dGerry, base, gerry);
 	if (_poolCache.key === key) return _poolCache.pool;
-	const pool = analyticDistrictPool(N, rGerry, dGerry, urbanGerry, base, gerry, urban);
+	const pool = analyticDistrictPool(N, rGerry, dGerry, base, gerry);
 	_poolCache = { key, pool };
 	return pool;
 }
@@ -597,7 +569,7 @@ function simulateOne(
 	// pre-computed pool to avoid regenerating it per simulation.
 	const d =
 		districtPool ||
-		buildDistrictPool(2 * p.m + 1, p.rGerry, p.dGerry, p.urbanGerry, p.base, p.gerry, p.urban);
+		buildDistrictPool(2 * p.m + 1, p.rGerry, p.dGerry, p.base, p.gerry);
 	const N = d.length;
 	const r = returnFull ? new Float64Array(N) : null;
 	const party = returnFull ? new Array(N) : null;
@@ -1059,7 +1031,7 @@ function runSimulations(
 	// d[(N-1)>>1] (the chamber median), so sort order is what matters.
 	const districtPool = customDistrictPool
 		? customDistrictPool
-		: analyticDistrictPool(2 * p.m + 1, p.rGerry, p.dGerry, p.urbanGerry, p.base, p.gerry, p.urban);
+		: analyticDistrictPool(2 * p.m + 1, p.rGerry, p.dGerry, p.base, p.gerry);
 	const N = districtPool.length;
 	const m = (N - 1) >> 1;
 	const meds = new Float64Array(n);

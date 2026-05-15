@@ -7,14 +7,14 @@
 <!-- Cache-bust query keeps the dev server from serving stale JS when
      these files change.  Bump alongside index.html's `?v=` so both
      pages share the same version of the model + controls + config. -->
-<script src="config.js?v=61"></script>
+<script src="config.js?v=67"></script>
 <!-- model.js is loaded so the "sim on this year's districts" middle row
      can re-run the simulator using the live params + a real-data
      district pool built from the selected year's per-CD lean values.
      controls.js mirrors the simulator page's slider panel here so the
      user doesn't have to bounce between pages to retune parameters. -->
-<script src="model.js?v=61"></script>
-<script src="controls.js?v=61"></script>
+<script src="model.js?v=67"></script>
+<script src="controls.js?v=67"></script>
 <link rel="stylesheet" href="controls.css" />
 <style>
   :root {
@@ -238,7 +238,7 @@
     <h3>Voters</h3>
     <div class="row">
       <label>Candidate Quality Importance</label>
-      <input type="range" id="qualImp" />
+      <input type="range" id="sqrtQualImp" />
       <span class="hint">Higher → voters punish ideologically extreme candidates more heavily, relative to how partisan the district is.</span>
     </div>
     <div class="row">
@@ -250,17 +250,11 @@
     <!-- Practical Details: opt-in knobs (urban Dem-blowout adjustment,
          incumbency advantage).  Tucked at the bottom of the panel so
          the main sliders read as a clean list, but EXPANDED by default
-         on the historical page — incumbency lives here and is core to
-         this page's "fit a real cycle" workflow, so users shouldn't
-         have to discover it.  Index.html keeps it collapsed since the
-         only knob there (urbanGerry) is genuinely opt-in. -->
+         since incumbency is core to the "fit a real cycle" workflow
+         and users shouldn't have to discover it.  Sim page (index.html)
+         doesn't render this section at all. -->
     <details class="practicalDetails" open>
       <summary>Practical Details</summary>
-      <div class="row">
-        <label>Urban Dem-Blowout Seats</label>
-        <input type="range" id="urbanGerry" />
-        <span class="hint">Share of districts that are naturally-packed urban D blowouts (centred at D+60 by default — dense city districts that geographically pack Democratic voters even without intentional gerrymandering).</span>
-      </div>
       <div class="row">
         <label>Incumbency Advantage (pp)</label>
         <input type="range" id="incumbency" />
@@ -269,10 +263,24 @@
     </details>
 
     <button id="reset">Reset to defaults</button>
-    <button id="autoFit" style="background:#3a6e3a;margin-top:6px;">
-      Auto-fit to selected year
+    <!-- Per-year preset button: text updates to "Approximate <year>
+         Election" when the user picks a year, click loads that year's
+         pre-baked preset from CONFIG.historicalPresets.  Replaces the
+         old static-named preset buttons (which would have proliferated
+         to one button per cycle) and the auto-fit button (presets are
+         pre-baked offline via window.batchAutoFitYears, see top of
+         file for the recipe). -->
+    <button id="approxYearPreset" style="background:#3a6e3a;margin-top:6px;display:none;">
+      Approximate selected year's election
     </button>
-    <div id="autoFitStatus" class="hint" style="margin-top:6px;font-size:11px;color:var(--muted);"></div>
+    <!-- Hidden hosts kept for backward compat with code that still
+         references autoFit / autoFitStatus IDs (the autoFitToYear
+         function is exposed via window.__autoFitToYear and uses
+         these to display its progress when the batch driver invokes
+         it; rendering them as display:none keeps the UI clean while
+         leaving the function fully functional). -->
+    <button id="autoFit" style="display:none;">Auto-fit to selected year</button>
+    <div id="autoFitStatus" class="hint" style="display:none;"></div>
     <div id="presets"></div>
   </div>
 </div>
@@ -331,14 +339,10 @@
   </div>
 </div>
 
-<!-- Bottom: simulator run on its own analytic district pool, pulled
-     live from localStorage (written by index.html on every render).
-     Hidden when no run is cached yet. -->
-<div id="simRunRow" class="yearRow" style="display: none; margin-top: 12px;">
-  <div class="panel">
-    <div id="simRunChart" class="chart"></div>
-  </div>
-</div>
+<!-- (The simulator-on-its-own-synthetic-chamber row was retired —
+     this page now only renders the real cycle (top) and the simulator
+     run on the cycle's actual districts (middle).  The synthetic-
+     chamber view lives only on the simulator page now.) -->
 
 <!-- (The calibration-scatter row was retired in favour of per-district
      margin colouring on each heatmap above + a goodness-of-fit χ² that
@@ -409,6 +413,87 @@ const YEARS = [
   2012, 2014, 2016, 2018, 2020,
   2022, 2024,
 ];
+
+// =============================================================================
+// BATCH AUTO-FIT RECIPE (regenerate per-year presets)
+// -----------------------------------------------------------------------------
+// Run this from the dev console to regenerate the historicalPresets block in
+// config.js for every cycle 1992–2024.  Each year gets:
+//   1. The thumbnail clicked (sets selectedYear).
+//   2. autoFitToYear() invoked (which seeds sqrtQualImp from
+//      CONFIG.historicalSqrtQualImpByYear, pins v from HOUSE_POPVOTE_MARGIN,
+//      then runs district-map → candidates → noise coordinate descent).
+//   3. Final slider values captured into a preset object.
+// At the end, the full preset map is dumped to console + returned, ready to
+// paste into config.js.
+//
+// Usage:
+//   await window.batchAutoFitYears();              // defaults: nsim=3000, all years
+//   await window.batchAutoFitYears({ nsim: 10000 });
+//   await window.batchAutoFitYears({ years: [2024, 2022, 2020] });
+//
+// To re-run with different qualImp seeds, edit
+// CONFIG.historicalSqrtQualImpByYear and call again.  This function reads
+// the live config at run time.
+// =============================================================================
+window.batchAutoFitYears = async function (opts) {
+  opts = opts || {};
+  const years = opts.years || YEARS.slice();
+  const nsim  = opts.nsim  || 3000;
+  const log   = opts.log   || ((m) => console.log(m));
+
+  if (typeof window.__autoFitToYear !== 'function') {
+    throw new Error('autoFitToYear not exposed yet — wait for page init to finish');
+  }
+  const origNsim = window.CONFIG?.constants?.historicalNsim;
+  window.CONFIG.constants.historicalNsim = nsim;
+  const results = {};
+  const t0 = performance.now();
+
+  for (const y of years) {
+    const yStart = performance.now();
+    log(`[${y}] starting (nsim=${nsim}) …`);
+    // Select the year via the thumbnail click handler so all the side
+    // effects (selectedYear assignment, simOnYear render kick-off, etc.)
+    // fire exactly the same way they would for a real user click.
+    const thumb = Array.from(document.querySelectorAll('.thumb'))
+      .find((el) => +el.dataset.year === y);
+    if (!thumb) { log(`[${y}] no thumbnail — skipping`); continue; }
+    thumb.click();
+    await new Promise((r) => setTimeout(r, 600));
+
+    // Run auto-fit synchronously through the exposed function (don't
+    // depend on the button being present — the recipe survives UI
+    // refactors that remove the button).
+    await window.__autoFitToYear();
+
+    // Capture the final slider values into a preset object.
+    const preset = {};
+    for (const id of window.CONTROLS.sliderIds) {
+      const el = document.getElementById(id);
+      if (el) preset[id] = parseFloat(el.value);
+    }
+    results[y] = preset;
+
+    const elapsed = ((performance.now() - yStart) / 1000).toFixed(1);
+    const status = document.getElementById('autoFitStatus')?.textContent || '';
+    log(`[${y}] ✓ ${elapsed}s — ${status}`);
+  }
+
+  if (origNsim != null) window.CONFIG.constants.historicalNsim = origNsim;
+  const totalElapsed = ((performance.now() - t0) / 1000).toFixed(1);
+  log(`\nAll done in ${totalElapsed}s.  Preset block:`);
+  // Pretty-print as a JS object literal users can paste into config.js.
+  const lines = ['historicalPresets: {'];
+  for (const y of Object.keys(results).sort()) {
+    const entries = Object.entries(results[y])
+      .map(([k, v]) => `${k}: ${v}`).join(', ');
+    lines.push(`\t${y}: { ${entries} },`);
+  }
+  lines.push('},');
+  log(lines.join('\n'));
+  return results;
+};
 
 // National popular vote margin (R% - D%) for each presidential election,
 // kept in sync with build-historical.py's table.  Used to express the
@@ -898,14 +983,23 @@ function renderYearChart(divId, year, stats, yMax) {
 // the cache predates the "save full params" change.
 function renderSimOnYear(year, yearStats, yMax) {
   const row = document.getElementById('simOnYearRow');
-  let saved;
-  try { saved = JSON.parse(localStorage.getItem('simulator_current_run') || 'null'); }
-  catch (_) { saved = null; }
-  if (!saved || !saved.params || typeof runSimulations !== 'function'
+  // Read the live sliders directly via CONTROLS.readParams() — replaces
+  // the old localStorage round-trip from runAndRender (which is gone
+  // along with the synthetic-chamber bottom row).  Direct read also
+  // means a slider drag re-renders this row immediately.  readParams
+  // can throw early in init if CONTROLS.bind() hasn't yet destructured
+  // the per-side slider configs (intModSafe → dIntModSafe / rIntModSafe);
+  // we wrap in try/catch and bail gracefully so selectYear during init
+  // doesn't blow up the whole IIFE.
+  if (typeof runSimulations !== 'function'
+      || typeof window.CONTROLS?.readParams !== 'function'
       || !yearStats || !yearStats.allLeans || yearStats.allLeans.length === 0) {
     row.style.display = 'none';
     return;
   }
+  let liveParams;
+  try { liveParams = window.CONTROLS.readParams(); }
+  catch (_) { row.style.display = 'none'; return; }
   row.style.display = '';
 
   // Sort the year's per-CD leans ASCENDING for the simulator's median-
@@ -969,7 +1063,7 @@ function renderSimOnYear(year, yearStats, yMax) {
   // Re-run the cached parameters on this real-district pool with per-
   // district z tracking AND empirical PIT counting (z < actuals[i]).
   const sims = runSimulations(
-    saved.params, histNsim(), spec, null, null, pool,
+    liveParams, histNsim(), spec, null, null, pool,
     incActive
       ? { actuals, incumbency: { signs: incSigns, mean: incMean, var: incVar, tail: incTail } }
       : { actuals }
@@ -1499,145 +1593,6 @@ function renderSimOnYear(year, yearStats, yMax) {
 // title line, and the heatmap-coloured charts above already convey the
 // per-district margin information the scatter was trying to show.)
 
-// Render the live simulator-run row from data the main page wrote to
-// localStorage on its last render.  Stays hidden if no run is cached.
-// Reuses the year-chart visual style + the shared yMax so the simulator
-// panel sits visually next to the historical ones at the same scale.
-function renderSimulatorRun(yMax, realLeans, year) {
-  let saved;
-  try { saved = JSON.parse(localStorage.getItem('simulator_current_run') || 'null'); }
-  catch (_) { saved = null; }
-  const row = document.getElementById('simRunRow');
-  if (!saved || !saved.centres || !saved.avgDWins) {
-    row.style.display = 'none';
-    return;
-  }
-  row.style.display = '';
-  const { binSize, rGerry, dGerry, v } = saved;
-
-  // Districts-fit metric: 1-Wasserstein distance between the simulator's
-  // sorted synthetic pool and the selected year's sorted real-district
-  // PVI vector.  Concretely, mean |analytic[i] − real[i]| over the rank-
-  // matched pools.  Reads as "on average, the synthetic chamber's
-  // i-th-ranked district lean misses the i-th real one by X pp".
-  // Lower = better fit; 0 would be a perfect quantile match.
-  let districtsFit = null;
-  if (saved.pool && Array.isArray(saved.pool) && saved.pool.length > 0
-      && Array.isArray(realLeans) && realLeans.length > 0) {
-    const a = [...saved.pool].sort((p, q) => p - q);
-    const b = [...realLeans].sort((p, q) => p - q);
-    // If the two vectors are different lengths, sample at evenly-spaced
-    // quantiles of each so we still compare like ranks to like ranks.
-    const n = Math.min(a.length, b.length);
-    let sum = 0;
-    for (let i = 0; i < n; i++) {
-      const ai = a[Math.floor((i + 0.5) * a.length / n)];
-      const bi = b[Math.floor((i + 0.5) * b.length / n)];
-      sum += Math.abs(ai - bi);
-    }
-    districtsFit = sum / n;
-  }
-  const pool = saved.pool;
-  const perDistrictAvgZ = saved.perDistrictAvgZ;
-  // Need both arrays to render a per-district heatmap.  If localStorage
-  // was written by an older simulator-page session that didn't track
-  // per-district data, fall back to a single solid-color cell per bin
-  // using the binned avgDWins/avgRWins counts (graceful degradation
-  // for cross-tab use; same-tab always has the new data).
-  const haveDistrictData = Array.isArray(pool) && Array.isArray(perDistrictAvgZ)
-    && pool.length === perDistrictAvgZ.length && pool.length > 0;
-
-  let totalD, totalR, simMed;
-  if (haveDistrictData) {
-    totalD = 0; totalR = 0;
-    for (const z of perDistrictAvgZ) {
-      if (z > 0) totalR++;
-      else if (z < 0) totalD++;
-      else if (Math.random() < 0.5) totalR++;
-      else totalD++;
-    }
-    const sortedPool = [...pool].sort((a, b) => a - b);
-    simMed = sortedPool[(sortedPool.length - 1) >> 1];
-  } else {
-    totalD = saved.avgDWins.reduce((a,b) => a + b, 0);
-    totalR = saved.avgRWins.reduce((a,b) => a + b, 0);
-    simMed = medianFromBins(saved.centres, saved.avgDWins, saved.avgRWins, binSize);
-  }
-
-  // Title on two lines: header row first, then a smaller-font second
-  // line for any goodness-of-fit metric (mirrors the middle plot's
-  // layout).
-  const headerLine = [
-    `<b>Simulator (current run)</b>`,
-    `D-won ${totalD.toFixed(0)}, R-won ${totalR.toFixed(0)}`,
-    `median lean ${formatLean(simMed)}`,
-    `rGerry ${rGerry?.toFixed?.(2) ?? '—'}, dGerry ${dGerry?.toFixed?.(2) ?? '—'}, v ${v ?? 0}`,
-  ].join(' &nbsp;·&nbsp; ');
-  let titleText = headerLine;
-  if (districtsFit != null) {
-    titleText += '<br>' +
-      `<span style="font-size:11px">` +
-      `districts fit Δ=${districtsFit.toFixed(2)} pp ` +
-      `(mean |Δlean| per matched-rank district vs ${year} real chamber; ` +
-      `lower=better)` +
-      `</span>`;
-  }
-
-  if (haveDistrictData) {
-    // Per-district stdZ drives the column spectrum (each district
-    // contributes K quantile cells of its predicted Gaussian).  If the
-    // cached blob is from an older simulator-page session that didn't
-    // store stdZ, fall back to a flat per-district matrix (each district
-    // = one cell at its mean predicted margin).
-    const stdZ = saved.perDistrictStdZ;
-    const haveStd = Array.isArray(stdZ) && stdZ.length === pool.length;
-    const m = haveStd
-      ? buildSimulatorSeatMatrix(pool, perDistrictAvgZ, stdZ, 10)
-      : buildSeatMatrix(pool, perDistrictAvgZ);
-    Plotly.react('simRunChart', [{
-      z: m.z, x: m.centres, y: m.yArr, type: 'heatmap',
-      colorscale: HEATMAP_COLORSCALE,
-      zmin: -100, zmax: 100, zmid: 0,
-      xgap: 0, ygap: 0,
-      showscale: false,
-      hovertemplate:
-        'partisan lean: %{x:.0f}%<br>' +
-        'predicted margin: %{z:.1f}% (R−D)<extra></extra>',
-    }], {
-      title: { text: titleText, font: { size: 13 }, x: 0.04, xanchor: 'left' },
-      xaxis: {
-        title: { text: 'District partisan lean %  (← Democratic · Republican →)', standoff: 4, font: { size: 11 } },
-        ticksuffix: '%', range: [-100, 100], zeroline: true, zerolinecolor: '#333', zerolinewidth: 1,
-      },
-      yaxis: { title: { text: 'Seats', font: { size: 11 } }, range: [0, yMax], dtick: 5 },
-      // Extra top margin for the two-line title.
-      margin: { l: 50, r: 14, t: 58, b: 50 },
-      showlegend: false, plot_bgcolor: '#fff',
-    }, { displayModeBar: false, responsive: true });
-  } else {
-    // Legacy fallback for cross-tab updates from a pre-heatmap simulator
-    // page: keep the old stacked-bar look so the row still shows something
-    // useful.  The next on-page run will rewrite localStorage with the
-    // pool + perDistrictAvgZ fields and switch over automatically.
-    Plotly.react('simRunChart', [
-      { x: saved.centres, y: saved.avgDWins, type: 'bar', name: 'D-won',
-        marker: { color: 'rgba(31,119,180,0.85)', line: { width: 0 } },
-        width: binSize, hoverinfo: 'skip' },
-      { x: saved.centres, y: saved.avgRWins, type: 'bar', name: 'R-won',
-        marker: { color: 'rgba(214,39,40,0.85)', line: { width: 0 } },
-        width: binSize, hoverinfo: 'skip' },
-    ], {
-      title: { text: titleText, font: { size: 13 }, x: 0.04, xanchor: 'left' },
-      xaxis: {
-        title: { text: 'District partisan lean %  (← Democratic · Republican →)', standoff: 4, font: { size: 11 } },
-        ticksuffix: '%', range: [-100, 100], zeroline: true, zerolinecolor: '#333', zerolinewidth: 1,
-      },
-      yaxis: { title: { text: 'Seats', font: { size: 11 } }, range: [0, yMax] },
-      margin: { l: 50, r: 14, t: 58, b: 50 },
-      showlegend: false, bargap: 0.05, barmode: 'stack', plot_bgcolor: '#fff',
-    }, { displayModeBar: false, responsive: true });
-  }
-}
 
 // Stripped-down version of renderYearChart for the picker thumbnails:
 // same data + colours, but axis labels removed, tick fonts shrunk, and a
@@ -1838,14 +1793,22 @@ function renderYearThumb(divId, year, stats, yMax) {
     document.getElementById('selectedRow').style.display = '';
     renderYearChart('selSeatsChart', y, yearStats[y], yMax);
     // Middle row: simulator on this year's actual districts.  Re-runs
-    // every time the year changes; quietly stays hidden if there's no
-    // cached run with full params yet.
+    // every time the year changes.
     renderSimOnYear(y, yearStats[y], yMax);
-    // Bottom row: same cached run, but refresh the districts-fit number
-    // in the title against the newly-selected year's real chamber.
-    renderSimulatorRun(yMax, yearStats[y]?.allLeans, y);
     for (const card of picker.querySelectorAll('.thumb')) {
       card.classList.toggle('selected', +card.dataset.year === y);
+    }
+    // Update the per-year preset button: text shows the selected year,
+    // shown only when CONFIG.historicalPresets has an entry for that
+    // year (otherwise hidden so the sidebar doesn't flash a no-op
+    // button).  Click handler reads the year off the button at click-
+    // time so it always matches the current selection.
+    const presetBtn = document.getElementById('approxYearPreset');
+    if (presetBtn) {
+      const hasPreset = !!window.CONFIG?.historicalPresets?.[y];
+      presetBtn.style.display = hasPreset ? '' : 'none';
+      presetBtn.textContent = `Approximate ${y} election`;
+      presetBtn.dataset.year = String(y);
     }
   }
 
@@ -1887,70 +1850,17 @@ function renderYearThumb(divId, year, stats, yMax) {
   // change.  Same render path as the cross-tab storage event below —
   // we just write fresh data to localStorage and let the existing
   // renderers re-read it.
-  function runAndRender(p) {
-    // Suppress slider-driven re-renders while auto-fit is running.
-    // Each goldenMin sweep dispatches an `input` event per probe (so the
-    // slider thumbs visibly move), and CONTROLS.bind would otherwise
-    // trigger a full simulator + chart re-render per probe — multiplying
-    // a 7-iteration golden-section over 13 sliders by ~14 probes each
-    // gives ~1300 redundant renders we don't want.  Auto-fit calls
-    // runAndRender once at the end with `autoFitRunning` already cleared
-    // so the gate lets the final render through.
+  function runAndRender(_p) {
+    // Slider-input handler.  With the synthetic-chamber bottom row
+    // gone, the only thing this page needs to re-render on a slider
+    // change is the simulator-on-year row — and that function reads
+    // params live via CONTROLS.readParams(), so we don't pass them
+    // through here.  Auto-fit suppresses these per-probe renders via
+    // the autoFitRunning gate (one final render fires after auto-fit
+    // clears the gate).
     if (autoFitRunning) return;
-    const stats = document.getElementById('stats');
-    if (stats) stats.textContent = 'Running…';
-    const cfg = window.CONFIG.histograms.district;
-    const spec = { binSize: cfg.binSize, lo: -100, hi: 100 };
-    const t0 = performance.now();
-    const nsim = histNsim();
-    // trackPerDistrict: true gives us per-district avgZ so the bottom-
-    // row heatmap can colour each seat by its mean predicted margin.
-    // We also cache the pool (analytic chamber's lean values) so the
-    // heatmap can rebuild even on a cross-tab storage event.
-    const sims = runSimulations(p, nsim, spec, null, null, null, true);
-    const mb = sims.mismatchBins;
-    if (!mb) return;
-    try {
-      const poolArr = sims.districtPool ? Array.from(sims.districtPool) : null;
-      const avgZArr = sims.perDistrict && sims.perDistrict.avgZ
-        ? Array.from(sims.perDistrict.avgZ) : null;
-      const stdZArr = sims.perDistrict && sims.perDistrict.stdZ
-        ? Array.from(sims.perDistrict.stdZ) : null;
-      localStorage.setItem('simulator_current_run', JSON.stringify({
-        timestamp: Date.now(),
-        binSize: mb.binSize, centres: mb.centres, ranges: mb.ranges,
-        avgDWins: mb.avgDWins, avgRWins: mb.avgRWins,
-        // Per-district arrays drive the heatmap on the bottom row.
-        pool: poolArr,
-        perDistrictAvgZ: avgZArr,
-        perDistrictStdZ: stdZArr,
-        // Legacy margin fields kept null so the simulator page doesn't
-        // see a missing key — historical.html doesn't compute them.
-        avgDMargin: null,
-        avgRMargin: null,
-        rGerry: p.rGerry, dGerry: p.dGerry, v: p.v,
-        params: p, nsim,
-      }));
-    } catch (_) { /* private mode / quota — ignore */ }
-    const realLeans = selectedYear != null
-      ? yearStats[selectedYear]?.allLeans
-      : null;
-    renderSimulatorRun(yMax, realLeans, selectedYear);
     if (selectedYear != null) {
       renderSimOnYear(selectedYear, yearStats[selectedYear], yMax);
-    }
-    if (stats) {
-      const totalD = mb.avgDWins.reduce((a,b) => a+b, 0);
-      const totalR = mb.avgRWins.reduce((a,b) => a+b, 0);
-      const simMed = medianFromBins(mb.centres, mb.avgDWins, mb.avgRWins, binSize);
-      const winner = totalR > totalD ? 'R' : 'D';
-      const t1 = performance.now();
-      stats.innerHTML =
-        `<span class="pill ${winner}">${winner} majority</span> ` +
-        `D-won <span class="num">${totalD.toFixed(1)}</span>, ` +
-        `R-won <span class="num">${totalR.toFixed(1)}</span><br>` +
-        `chamber-pivot lean <span class="num">${formatLean(simMed)}</span> &nbsp;·&nbsp; ` +
-        `${nsim} sims in ${(t1 - t0).toFixed(0)}ms`;
     }
   }
   // Pass debounceConfigKey so this page reads `historicalSliderDebounceMs`
@@ -2027,6 +1937,25 @@ function renderYearThumb(divId, year, stats, yMax) {
       }
     }
 
+    // Per-year sqrtQualImp starting point.  When
+    // CONFIG.historicalSqrtQualImpByYear has an entry for the selected
+    // year, override the slider before golden-section kicks off — gets
+    // the optimiser out of local minima on years where the candidate-
+    // ideology weight wants to be unusually high or low and the
+    // default sqrtQualImp = 0.45 (= √0.2) would converge to the wrong
+    // basin.  Years not listed: golden-section starts from whatever
+    // the slider shows.
+    const qiByYear = window.CONFIG?.historicalSqrtQualImpByYear || {};
+    const qiSeed = qiByYear[selectedYear];
+    if (qiSeed != null && isFinite(qiSeed)) {
+      const qiSlider = document.getElementById('sqrtQualImp');
+      if (qiSlider) {
+        const lo = parseFloat(qiSlider.min), hi = parseFloat(qiSlider.max);
+        qiSlider.value = String(Math.max(lo, Math.min(hi, qiSeed)));
+        qiSlider.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    }
+
     // Build the year's pool + actuals once; the optimisation just rotates
     // the sliders.  Same construction as renderSimOnYear, including the
     // optional per-district incumbency boosts.
@@ -2096,7 +2025,7 @@ function renderYearThumb(divId, year, stats, yMax) {
       return w2;
     }
 
-    // The district-map sliders (rGerry, dGerry, urbanGerry) shape the
+    // The district-map sliders (rGerry, dGerry) shape the
     // analytic district-lean pool — they don't influence per-district
     // election noise.  Optimising them against W² is wrong on two
     // counts: (1) W² is computed against `pool` (the year's real
@@ -2121,8 +2050,7 @@ function renderYearThumb(divId, year, stats, yMax) {
     function evalDeltaParts() {
       const p = CONTROLS.readParams();
       const analytic = analyticDistrictPool(
-        2 * p.m + 1, p.rGerry, p.dGerry, p.urbanGerry,
-        p.base, p.gerry, p.urban,
+        2 * p.m + 1, p.rGerry, p.dGerry, p.base, p.gerry,
       );
       const a = Array.from(analytic).sort((x, y) => x - y);
       const b = Array.from(pool).sort((x, y) => x - y);
@@ -2189,7 +2117,7 @@ function renderYearThumb(divId, year, stats, yMax) {
     }
 
     // Two-phase optimisation:
-    //   Phase 1 — district map (rGerry, dGerry, urbanGerry):
+    //   Phase 1 — district map (rGerry, dGerry):
     //     objective is Δ (mean |Δlean| at matched ranks between the
     //     analytic pool and the year's real lean pool).  These sliders
     //     only shape the analytic pool, which the simulator's W² path
@@ -2203,7 +2131,7 @@ function renderYearThumb(divId, year, stats, yMax) {
     // (All pin-pair checkboxes have already been unchecked at the top
     // of auto-fit so each slider moves independently.)  v is intentionally
     // omitted — pinned from HOUSE_POPVOTE_MARGIN above.
-    const districtMapSliders = ['rGerry', 'dGerry', 'urbanGerry'];
+    const districtMapSliders = ['rGerry', 'dGerry'];
     // Candidates run for full multi-cycle coordinate descent; the two
     // free-floating "noise knobs" (qualImp = how strongly noise gets
     // weighted vs candidate ideology, sqrtSigmaN = election randomness
@@ -2236,7 +2164,7 @@ function renderYearThumb(divId, year, stats, yMax) {
       'dIntModOpp', 'rIntModOpp',
       'dIntModSafe', 'rIntModSafe',
     ];
-    const noiseSliders = ['qualImp', 'sqrtSigmaN'];
+    const noiseSliders = ['sqrtQualImp', 'sqrtSigmaN'];
     const cycles = 2;
     let lastDelta = Infinity;
     let lastMedDiff = Infinity;
@@ -2324,22 +2252,57 @@ function renderYearThumb(divId, year, stats, yMax) {
       : `Done · ${summary}`;
     btn.textContent = 'Auto-fit to selected year';
   }
-  document.getElementById('autoFit').addEventListener('click', autoFitToYear);
+  document.getElementById('autoFit')?.addEventListener('click', autoFitToYear);
+  // Expose autoFitToYear + selectYear so the batch-regen helper below
+  // (window.batchAutoFitYears) can drive year selection + auto-fit
+  // programmatically without depending on DOM buttons being present.
+  // This makes the "regenerate the per-year presets" recipe survive
+  // future button-removals.
+  window.__autoFitToYear = autoFitToYear;
+  window.__selectYear = selectYear;
+  window.__yearStats = yearStats;
 
-  // Cross-tab live-update: if the simulator page is still open in another
-  // tab and the user re-runs it there, refresh both sim-driven rows here
-  // from the new cached blob.  The local sidebar sliders stay where they
-  // are — they're independent of the simulator-page sliders.
-  window.addEventListener('storage', (e) => {
-    if (e.key !== 'simulator_current_run') return;
-    const realLeans = selectedYear != null
-      ? yearStats[selectedYear]?.allLeans
-      : null;
-    renderSimulatorRun(yMax, realLeans, selectedYear);
-    if (selectedYear != null) {
-      renderSimOnYear(selectedYear, yearStats[selectedYear], yMax);
+  // Per-year preset button click handler.  Applies the pre-baked
+  // CONFIG.historicalPresets[year] using the same uncheck-→-apply-→
+  // re-check Opp pattern as the simulator page's preset wiring (see
+  // index.html ~line 1730), so an asymmetric preset doesn't get
+  // clobbered by pin-pair delta propagation.  The Opp pin re-checks at
+  // the end because Opp is kept symmetric by convention; Gerry / Safe
+  // / Swing stay unpinned so their D vs R asymmetry survives.
+  document.getElementById('approxYearPreset')?.addEventListener('click', () => {
+    const y = parseInt(document.getElementById('approxYearPreset').dataset.year, 10);
+    const preset = window.CONFIG?.historicalPresets?.[y];
+    if (!preset) return;
+    const PINS_TO_REPIN = new Set(['dIntModOpp_rIntModOpp_pin']);
+    const allPins = [
+      'dGerry_rGerry_pin',
+      'dIntModSafe_rIntModSafe_pin',
+      'dIntModSwing_rIntModSwing_pin',
+      'dIntModOpp_rIntModOpp_pin',
+    ];
+    for (const pinId of allPins) {
+      const pin = document.getElementById(pinId);
+      if (pin) pin.checked = false;
+    }
+    for (const [id, v] of Object.entries(preset)) {
+      const range = document.getElementById(id);
+      if (!range) continue;
+      range.value = String(v);
+      range.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    for (const pinId of allPins) {
+      const pin = document.getElementById(pinId);
+      if (pin && PINS_TO_REPIN.has(pinId)) {
+        pin.checked = true;
+        pin.dispatchEvent(new Event('change', { bubbles: true }));
+      }
     }
   });
+
+  // (The cross-tab storage listener that used to refresh the
+  // synthetic-chamber row from the simulator page's localStorage was
+  // retired with that row.  This page's sliders now drive its own
+  // simulator-on-year render directly via runAndRender → CONTROLS.bind.)
 })();
 </script>
 

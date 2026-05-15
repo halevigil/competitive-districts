@@ -4,14 +4,14 @@
 		<meta charset="UTF-8" />
 		<title>Median Ideology Simulator</title>
 		<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-		<script src="config.js?v=61"></script>
-		<script src="model.js?v=61"></script>
+		<script src="config.js?v=67"></script>
+		<script src="model.js?v=67"></script>
 		<!-- controls.js exposes restoreSliderState / saveSliderState so the
 		     simulator and the historical page can share slider positions
 		     via localStorage.  The simulator doesn't use CONTROLS.bind()
 		     itself (its inline run() does considerably more than the
 		     historical page's onRun); just the two persistence helpers. -->
-		<script src="controls.js?v=61"></script>
+		<script src="controls.js?v=67"></script>
 		<style>
 			:root {
 				--bg: #fafafa;
@@ -534,7 +534,7 @@
 				<h3>Voters</h3>
 				<div class="row">
 					<label>Candidate Quality Importance</label>
-					<input type="range" id="qualImp" />
+					<input type="range" id="sqrtQualImp" />
 					<span class="hint"
 						>Higher → voters punish ideologically extreme candidates
 						more heavily, relative to how partisan the district
@@ -550,11 +550,6 @@
 						more random per-district swings.</span
 					>
 				</div>
-
-				<!-- (No Practical Details on the simulator page — the
-				     only knob it ever held was urban Dem-blowout, which
-				     is now historical-page-only.  readParams below
-				     sees no #urbanGerry element and defaults to 0.) -->
 
 				<button id="reset">Reset to defaults</button>
 				<!-- Preset buttons are populated from CONFIG.presets at init().
@@ -656,7 +651,7 @@
 				"rIntModSwing",
 				"dIntModOpp",
 				"rIntModOpp",
-				"qualImp",
+				"sqrtQualImp",
 				"sqrtSigmaN",
 			];
 
@@ -745,15 +740,14 @@
 					// analyticDistrictPool for the full definition.
 					rGerry: num("rGerry"),
 					dGerry: num("dGerry"),
-					urbanGerry: document.getElementById("urbanGerry")
-						? num("urbanGerry")
-						: 0,
 					base: cfg.districtBase,
 					gerry: cfg.districtGerry,
-					urban: cfg.districtUrban,
 					muD: -magnitude,
 					muR: +magnitude,
-					wMod: num("qualImp"),
+					// wMod = sqrtQualImp²; the slider stores √wMod so its
+					// perceptual scale is linear (same convention as
+					// sqrtSigmaN → sigmaN).
+					wMod: num("sqrtQualImp") ** 2,
 					// Three slider blocks, each producing per-party
 					// mean / var / tail values linearly in the slider
 					// position (0 at slider=0, config value at slider=default).

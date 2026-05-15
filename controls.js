@@ -23,14 +23,13 @@
 		"v",
 		"rGerry",
 		"dGerry",
-		"urbanGerry",
 		"dIntModSafe",
 		"rIntModSafe",
 		"dIntModSwing",
 		"rIntModSwing",
 		"dIntModOpp",
 		"rIntModOpp",
-		"qualImp",
+		"sqrtQualImp",
 		"sqrtSigmaN",
 		// Historical-only knob (per-district incumbency boost on the
 		// simulator-on-year row).  index.html doesn't render the
@@ -121,13 +120,14 @@
 			tukeyLambda: CONST.tukey?.lambda ?? 0.14,
 			rGerry: num("rGerry"),
 			dGerry: num("dGerry"),
-			urbanGerry: document.getElementById("urbanGerry") ? num("urbanGerry") : 0,
 			base: cfg.districtBase,
 			gerry: cfg.districtGerry,
-			urban: cfg.districtUrban,
 			muD: -magnitude,
 			muR: +magnitude,
-			wMod: num("qualImp"),
+			// wMod = sqrtQualImp²; the slider stores √wMod so its
+			// perceptual scale is linear (same convention as
+			// sqrtSigmaN → sigmaN).
+			wMod: num("sqrtQualImp") ** 2,
 			safe: resolveBlock(im.safe, bDSafe, bRSafe, safeDef),
 			swing: (() => {
 				// Per-party effective bell breadth: anchored at swingBreadth
@@ -338,6 +338,11 @@
 	function wirePresets(containerId, runNow) {
 		const presetsContainer = document.getElementById(containerId);
 		if (!presetsContainer || !window.CONFIG.presets) return;
+		// Skip presets entirely on the historical page — that page wires
+		// its own dynamic "Approximate <year> election" button keyed on
+		// the selected thumbnail (CONFIG.historicalPresets).  Detected
+		// by element-id presence (#picker exists only on historical.html).
+		if (document.getElementById('picker')) return;
 		for (const [name, values] of Object.entries(window.CONFIG.presets)) {
 			if (values.enabled === false) continue;
 			const btn = document.createElement("button");

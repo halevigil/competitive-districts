@@ -32,19 +32,6 @@ window.CONFIG = {
 		// `gerry` is shared by both rGerry and dGerry sliders — edit once.
 		gerry: { min: 0, max: 0.49, step: 0.001, value: 0.16 },
 
-		// Urban Dem-blowout adjustment.  Share of districts that are
-		// naturally-packed urban D blowouts (a small Gaussian centred
-		// at D+60 — see `districtUrban` below).  Distinct from dGerry,
-		// which is "intentional packing"; this one accounts for the
-		// fact that cities geographically concentrate Democratic voters
-		// into a handful of extreme-blowout districts even without
-		// gerrymandering.
-		// Default 0 — the urban-blowout component is opt-in, surfaced
-		// via the "Practical Details" expander in the slider panel.
-		// The blowout centre/spread/weight are configured in
-		// `districtUrban` below; this slider only controls the share.
-		urbanGerry: { min: 0, max: 0.15, step: 0.005, value: 0 },
-
 		// Intentional moderation is split into three sliders per party,
 		// one per district type.  Labels use district COLOUR (blue / red);
 		// the underlying mechanics are per-party (same-party-safe vs
@@ -61,9 +48,15 @@ window.CONFIG = {
 		intModSwing: { max: 3, step: 0.05, value: 1 },
 		intModOpp: { max: 3, step: 0.05, value: 1 },
 
-		// How heavily voters punish ideologically extreme candidates relative
-		// to district partisan lean.
-		qualImp: { min: 0, max: 0.6, step: 0.05, value: 0.2 },
+		// How heavily voters punish ideologically extreme candidates
+		// relative to district partisan lean.  Stored as sqrt(wMod) so
+		// the slider's perceptual scale is linear while the underlying
+		// coefficient grows quadratically — same convention as
+		// sqrtSigmaN / sigmaN.  readParams squares it to feed `wMod`
+		// to the model.  Default sqrtQualImp = √0.2 ≈ 0.447 reproduces
+		// the old wMod = 0.2 default; max √1.0 = 1 covers the old
+		// wMod range up to 1.0 (so existing ranges still reach).
+		sqrtQualImp: { min: 0, max: 1, step: 0.01, value: 0.45 },
 
 		// Election noise sqrt(σ) — squaren scales an additive unit-variance noise term that
 		// gets added to the score (di − wMod·(cD+cR)) before the hard cutoff
@@ -131,6 +124,45 @@ window.CONFIG = {
 	pviWeights: {
 		presYear: { cur: 4, prev: 1 },
 		midterm: { recent: 2, prev: 1 },
+	},
+
+	// ---------------- PER-YEAR SQRT-QUAL-IMP STARTING POINTS (auto-fit only) --
+	// Auto-fit uses the sqrtQualImp slider's CURRENT value as its
+	// starting point for golden-section.  When this map has an entry
+	// for the selected year, auto-fit overrides the slider to the
+	// listed value before optimisation kicks off — useful for years
+	// where the optimiser otherwise gets stuck in a local minimum
+	// (e.g. wave years where the effective wMod wants to be high vs
+	// muted-cycle years where it wants to be low).  Slider value isn't
+	// touched outside of auto-fit; manual drags still respect whatever
+	// the user picked.  Years not listed: golden-section starts from
+	// whatever the slider currently shows.
+	// Values are sqrtQualImp (slider units), NOT wMod — multiply
+	// the desired wMod's square root.  Slider runs 0–1, default 0.45
+	// (= sqrt of the old wMod default 0.2).
+	historicalSqrtQualImpByYear: {
+		// Per-cycle baseline: starting from wMod = 0.20 in 2024 and
+		// increasing by 0.05 each cycle going back (so 1992 caps at
+		// wMod = 1.0).  Values stored as sqrtQualImp = √wMod since
+		// that's what the slider holds.  Manually picked, not data-
+		// driven — adjust freely as the historical fit gets refined.
+		2024: 0.45, // wMod = 0.20
+		2022: 0.5, // wMod = 0.25
+		2020: 0.55, // wMod = 0.30
+		2018: 0.59, // wMod = 0.35
+		2016: 0.63, // wMod = 0.40
+		2014: 0.67, // wMod = 0.45
+		2012: 0.71, // wMod = 0.50
+		2010: 0.74, // wMod = 0.55
+		2008: 0.77, // wMod = 0.60
+		2006: 0.81, // wMod = 0.65
+		2004: 0.84, // wMod = 0.70
+		2002: 0.87, // wMod = 0.75
+		2000: 0.89, // wMod = 0.80
+		1998: 0.92, // wMod = 0.85
+		1996: 0.95, // wMod = 0.90
+		1994: 0.97, // wMod = 0.95
+		1992: 1.0, // wMod = 1.00 (slider max)
 	},
 
 	// ---------------- CALIBRATION DIAGNOSTICS (historical.html only) ----------
@@ -248,16 +280,6 @@ window.CONFIG = {
 		componentsD: [
 			{ mean: -22, sigma: 7, weight: 1 }, // packed safe-D bump (mirror)
 		],
-	},
-
-	// ---------------- URBAN BLOWOUT --------------------------------------------
-	// Extra D-side mixture component for naturally-packed urban districts —
-	// dense city CDs that produce 70-30 / 80-20 D blowouts because of where
-	// voters live, not because of intentional gerrymandering.  A small Gaussian
-	// centred at D+60 (= -60 in our R−D pp convention).  Weighted by the
-	// `urbanGerry` slider (share of districts drawn from this component).
-	districtUrban: {
-		components: [{ mean: -60, sigma: 8, weight: 1 }],
 	},
 
 	// ---------------- INTENTIONAL MODERATION -----------------------------------
@@ -384,6 +406,277 @@ window.CONFIG = {
 		nChambers: 20, // example chambers in the grid
 	},
 
+	// ---------------- HISTORICAL PER-YEAR PRESETS (historical.html only) ------
+	// One pre-baked auto-fit preset per cycle 1992-2024.  Wired to the
+	// dynamic "Approximate <year> election" button in the historical
+	// sidebar; the button reads CONFIG.historicalPresets[selectedYear]
+	// and applies it via the same uncheck-→-apply-→-re-pin-Opp flow as
+	// presets on the simulator page.
+	//
+	// Generated by `window.batchAutoFitYears({ nsim: 3000 })` (see the
+	// "Regen historical presets recipe" memory note).  Each preset's
+	// final fit metrics are noted in the trailing comment — all are
+	// well under the 0.46 W² calibration ceiling.  Re-run the recipe
+	// after changing CONFIG.historicalSqrtQualImpByYear (or any
+	// structural model knob) to refresh.
+	historicalPresets: {
+		1992: {
+			v: -5.2,
+			rGerry: 0.21,
+			dGerry: 0.166,
+			urbanGerry: 0.005,
+			dIntModSafe: 1.5,
+			rIntModSafe: 1.35,
+			dIntModSwing: 1.4,
+			rIntModSwing: 1.4,
+			dIntModOpp: 0.8,
+			rIntModOpp: 1.3,
+			sqrtQualImp: 0.99,
+			sqrtSigmaN: 0.7,
+			incumbency: 4,
+		}, // medianΔ=0.00 Δ=7.08 W²=0.05
+		1994: {
+			v: 7,
+			rGerry: 0.21,
+			dGerry: 0.166,
+			urbanGerry: 0.005,
+			dIntModSafe: 1.5,
+			rIntModSafe: 1.4,
+			dIntModSwing: 1.6,
+			rIntModSwing: 1.35,
+			dIntModOpp: 0.35,
+			rIntModOpp: 0.55,
+			sqrtQualImp: 0.95,
+			sqrtSigmaN: 0.3,
+			incumbency: 3.25,
+		}, // medianΔ=0.00 Δ=7.08 W²=0.05
+		1996: {
+			v: 0.4,
+			rGerry: 0.214,
+			dGerry: 0.166,
+			urbanGerry: 0.005,
+			dIntModSafe: 1.6,
+			rIntModSafe: 1.4,
+			dIntModSwing: 1.4,
+			rIntModSwing: 1.5,
+			dIntModOpp: 0.15,
+			rIntModOpp: 1.1,
+			sqrtQualImp: 0.96,
+			sqrtSigmaN: 0.6,
+			incumbency: 1.25,
+		}, // medianΔ=0.01 Δ=6.15 W²=0.07
+		1998: {
+			v: 0.9,
+			rGerry: 0.214,
+			dGerry: 0.164,
+			urbanGerry: 0.005,
+			dIntModSafe: 1.6,
+			rIntModSafe: 1.4,
+			dIntModSwing: 1.7,
+			rIntModSwing: 1.5,
+			dIntModOpp: 0.2,
+			rIntModOpp: 1.6,
+			sqrtQualImp: 0.92,
+			sqrtSigmaN: 0.4,
+			incumbency: 4.5,
+		}, // medianΔ=0.00 Δ=6.39 W²=0.05
+		2000: {
+			v: 0.3,
+			rGerry: 0.214,
+			dGerry: 0.164,
+			urbanGerry: 0.005,
+			dIntModSafe: 1.6,
+			rIntModSafe: 1.4,
+			dIntModSwing: 1.5,
+			rIntModSwing: 1.5,
+			dIntModOpp: 0.75,
+			rIntModOpp: 2.3,
+			sqrtQualImp: 0.89,
+			sqrtSigmaN: 0.4,
+			incumbency: 4.75,
+		}, // medianΔ=0.05 Δ=5.00 W²=0.07
+		2002: {
+			v: 4.6,
+			rGerry: 0.255,
+			dGerry: 0.164,
+			urbanGerry: 0.005,
+			dIntModSafe: 1.6,
+			rIntModSafe: 1.4,
+			dIntModSwing: 1.8,
+			rIntModSwing: 1.5,
+			dIntModOpp: 1.4,
+			rIntModOpp: 2.65,
+			sqrtQualImp: 0.87,
+			sqrtSigmaN: 0.9,
+			incumbency: 6,
+		}, // medianΔ=0.02 Δ=4.14 W²=0.04
+		2004: {
+			v: 2.6,
+			rGerry: 0.255,
+			dGerry: 0.164,
+			urbanGerry: 0.005,
+			dIntModSafe: 1.6,
+			rIntModSafe: 1.4,
+			dIntModSwing: 2,
+			rIntModSwing: 1.6,
+			dIntModOpp: 2.25,
+			rIntModOpp: 2.5,
+			sqrtQualImp: 0.84,
+			sqrtSigmaN: 0.9,
+			incumbency: 3.25,
+		}, // medianΔ=0.05 Δ=4.03 W²=0.19
+		2006: {
+			v: -6.4,
+			rGerry: 0.265,
+			dGerry: 0.164,
+			urbanGerry: 0.005,
+			dIntModSafe: 1.6,
+			rIntModSafe: 1.4,
+			dIntModSwing: 1.5,
+			rIntModSwing: 1.6,
+			dIntModOpp: 1.4,
+			rIntModOpp: 2.85,
+			sqrtQualImp: 0.83,
+			sqrtSigmaN: 0.5,
+			incumbency: 1,
+		}, // medianΔ=0.09 Δ=4.09 W²=0.09
+		2008: {
+			v: -9.5,
+			rGerry: 0.214,
+			dGerry: 0.153,
+			urbanGerry: 0.01,
+			dIntModSafe: 1.4,
+			rIntModSafe: 1.4,
+			dIntModSwing: 1,
+			rIntModSwing: 1.5,
+			dIntModOpp: 1.85,
+			rIntModOpp: 1.15,
+			sqrtQualImp: 0.78,
+			sqrtSigmaN: 1,
+			incumbency: 6.5,
+		}, // medianΔ=0.09 Δ=3.91 W²=0.14
+		2010: {
+			v: 5.1,
+			rGerry: 0.225,
+			dGerry: 0.153,
+			urbanGerry: 0.01,
+			dIntModSafe: 1.4,
+			rIntModSafe: 1.35,
+			dIntModSwing: 1.6,
+			rIntModSwing: 1.45,
+			dIntModOpp: 1.15,
+			rIntModOpp: 0.8,
+			sqrtQualImp: 0.72,
+			sqrtSigmaN: 1.1,
+			incumbency: 2.5,
+		}, // medianΔ=0.00 Δ=3.86 W²=0.03
+		2012: {
+			v: -2.4,
+			rGerry: 0.265,
+			dGerry: 0.153,
+			urbanGerry: 0.01,
+			dIntModSafe: 1.4,
+			rIntModSafe: 1.3,
+			dIntModSwing: 1.75,
+			rIntModSwing: 1.5,
+			dIntModOpp: 0.15,
+			rIntModOpp: 1.05,
+			sqrtQualImp: 0.71,
+			sqrtSigmaN: 1,
+			incumbency: 0.75,
+		}, // medianΔ=0.02 Δ=4.76 W²=0.03
+		2014: {
+			v: 5.1,
+			rGerry: 0.259,
+			dGerry: 0.149,
+			urbanGerry: 0.01,
+			dIntModSafe: 1.4,
+			rIntModSafe: 1.25,
+			dIntModSwing: 1.95,
+			rIntModSwing: 1.6,
+			dIntModOpp: 1.3,
+			rIntModOpp: 2.55,
+			sqrtQualImp: 0.67,
+			sqrtSigmaN: 0.8,
+			incumbency: 0.75,
+		}, // medianΔ=0.07 Δ=4.55 W²=0.05
+		2016: {
+			v: 1.6,
+			rGerry: 0.242,
+			dGerry: 0.16,
+			urbanGerry: 0.005,
+			dIntModSafe: 1.4,
+			rIntModSafe: 1.15,
+			dIntModSwing: 1.65,
+			rIntModSwing: 1.65,
+			dIntModOpp: 1.5,
+			rIntModOpp: 2.3,
+			sqrtQualImp: 0.63,
+			sqrtSigmaN: 1.1,
+			incumbency: 1.5,
+		}, // medianΔ=0.06 Δ=6.18 W²=0.03
+		2018: {
+			v: -7.3,
+			rGerry: 0.252,
+			dGerry: 0.16,
+			urbanGerry: 0.005,
+			dIntModSafe: 1.4,
+			rIntModSafe: 1.2,
+			dIntModSwing: 1.4,
+			rIntModSwing: 1.6,
+			dIntModOpp: 1.05,
+			rIntModOpp: 1.4,
+			sqrtQualImp: 0.58,
+			sqrtSigmaN: 1.4,
+			incumbency: 1.25,
+		}, // medianΔ=0.03 Δ=5.78 W²=0.03
+		2020: {
+			v: -2.1,
+			rGerry: 0.214,
+			dGerry: 0.16,
+			urbanGerry: 0.005,
+			dIntModSafe: 1.4,
+			rIntModSafe: 1.25,
+			dIntModSwing: 1.5,
+			rIntModSwing: 1.6,
+			dIntModOpp: 1.05,
+			rIntModOpp: 1.4,
+			sqrtQualImp: 0.55,
+			sqrtSigmaN: 1.1,
+			incumbency: 7,
+		}, // medianΔ=0.02 Δ=5.95 W²=0.15
+		2022: {
+			v: 1.6,
+			rGerry: 0.214,
+			dGerry: 0.16,
+			urbanGerry: 0.005,
+			dIntModSafe: 1.4,
+			rIntModSafe: 1.2,
+			dIntModSwing: 2,
+			rIntModSwing: 1.5,
+			dIntModOpp: 0.9,
+			rIntModOpp: 1.8,
+			sqrtQualImp: 0.49,
+			sqrtSigmaN: 1,
+			incumbency: 3.25,
+		}, // medianΔ=0.01 Δ=5.62 W²=0.04
+		2024: {
+			v: 2.2,
+			rGerry: 0.194,
+			dGerry: 0.164,
+			urbanGerry: 0.005,
+			dIntModSafe: 1.35,
+			rIntModSafe: 1.15,
+			dIntModSwing: 1.5,
+			rIntModSwing: 1.4,
+			dIntModOpp: 0.45,
+			rIntModOpp: 1.4,
+			sqrtQualImp: 0.45,
+			sqrtSigmaN: 0.6,
+			incumbency: 1.75,
+		}, // medianΔ=0.02 Δ=4.61 W²=0.04
+	},
+
 	// ---------------- PRESETS --------------------------------------------------
 	// Named bundles of slider values — rendered as buttons under the Reset
 	// button.  Clicking applies all listed values, leaves any unlisted slider
@@ -396,32 +689,22 @@ window.CONFIG = {
 	// the relevant pin checkbox.
 	presets: {
 		"Approximate 2024 Election": {
-			// Refreshed via auto-fit on the 2024 chamber after the
-			// model overhaul (per-party swing breadth, urban-blowout
-			// component, election-noise ramp, etc.).  Final fit:
-			// medianΔ=0.02 pp · Δ=4.61 pp · W²=0.18  (well under the
-			// 0.46 calibration ceiling at N=417 contested districts).
-			// v pinned to the year's SHAVE-adjusted House popular-vote
-			// margin (R+2.1%); structural sliders are auto-fit.
+			// Hand-tuned for the simulator page's synthetic-chamber
+			// view (different from CONFIG.historicalPresets[2024],
+			// which is auto-fit to the REAL 2024 districts and uses
+			// incumbency — neither concept exists here).  v pinned to
+			// the year's SHAVE-adjusted House popular-vote margin.
 			v: 2.1,
 			rGerry: 0.195,
 			dGerry: 0.165,
-			urbanGerry: 0.005,
-			// Slight asymmetries between D and R reflect the actual
-			// 2024 cycle: Republicans ran further-from-median in
-			// opposite-party districts (rIntModOpp > dIntModOpp), D
-			// front-line incumbents tracked center harder in swing
-			// (dIntModSwing > rIntModSwing).  Pin checkboxes are
-			// auto-unchecked when an asymmetric preset loads.
 			dIntModSafe: 1,
 			rIntModSafe: 1,
 			dIntModSwing: 1.4,
 			rIntModSwing: 0.5,
 			dIntModOpp: 1,
 			rIntModOpp: 1,
-			qualImp: 0.2,
+			sqrtQualImp: 0.45,
 			sqrtSigmaN: 0.5,
-			incumbency: 3,
 		},
 		// Demo of the gerry → less-extreme-median effect.
 		// With ambMod maxed out (very wide candidate spreads), a small
@@ -448,7 +731,7 @@ window.CONFIG = {
 			rIntModSwing: 0,
 			dIntModOpp: 0,
 			rIntModOpp: 0,
-			qualImp: 0,
+			sqrtQualImp: 0, // wMod = 0 → no candidate-ideology pull on z
 			sigmaN: 5,
 		},
 	},
