@@ -134,6 +134,27 @@
      behind showCalibrationPlots, so prioritise readability over
      vertical-real-estate frugality. */
   .simOnYearScatter { width: 100%; height: 900px; margin-top: 4px; }
+  /* Synthetic-chamber preview: small inset overlaid on the top-right
+     of the simulator-on-year panel.  Gated by JS based on
+     CONFIG.showSimulatorOnSyntheticChamber.  z-index sits above the
+     heatmap so it's readable without intercepting hover events on
+     adjacent area (Plotly modebar is already disabled). */
+  .synthInset {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    /* Match the parent simOnYear panel's wide-and-short aspect so the
+       chamber histogram (-100..+100 wide, ~25 seats tall) doesn't get
+       visually compressed sideways.  ~3:1 outer ratio. */
+    width: 360px;
+    height: 120px;
+    z-index: 5;
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  }
   /* The thumbnail picker: every historical year as a small clickable card
      showing the same two charts in miniature.  Three columns so the nine
      cycles fit on one screen.  The currently-selected card gets an accent
@@ -337,8 +358,33 @@
      predicts on its own analytic chamber.  Hidden until a cached run
      with full params is available. -->
 <div id="simOnYearRow" class="yearRow" style="display: none; margin-top: 12px;">
-  <div class="panel">
-    <div id="simOnYearChart" class="chart"></div>
+  <div class="panel" style="position: relative;">
+    <!-- Chamber-stats summary for the simulator-on-real-districts run.
+         Mirrors the simulator-page stats panel but reframed against the
+         year's actual district pool; skips the median-district-partisan-
+         lean stat since that's fixed by the cycle's pool, not by the
+         sliders.  Placed above the heatmap so the headline numbers
+         (chance of R majority, seat share, etc.) read first. -->
+    <!-- Wrap is position:relative so the synthetic-chamber inset can
+         anchor to the CHART (not the panel — the stats box below
+         would otherwise stretch the inset's reference frame). -->
+    <div class="simOnYearChartWrap" style="position: relative;">
+      <div id="simOnYearChart" class="chart"></div>
+      <!-- Optional inset: simulator on its OWN synthetic chamber, sized
+           small and overlaid on the top-right corner of the main chart.
+           Gated by CONFIG.showSimulatorOnSyntheticChamber (toggled via
+           JS on init).  Renders via renderSimOnSynth(). -->
+      <div id="simOnSynthInset" class="synthInset" style="display:none;">
+        <div id="simOnSynthChart" style="width:100%;height:100%;"></div>
+      </div>
+    </div>
+    <!-- Chamber-stats summary, nested inside the chart panel.  Left
+         margin matches the chart titles' Plotly `x: 0.01` (1% of
+         chart width) so both sit a hair inside the box edge and stay
+         aligned at any viewport width.  Background transparent — no
+         yellow card. -->
+    <div id="simOnYearStats" class="stats"
+         style="margin: 8px 14px 0 1%; background: transparent; padding: 0;">Running…</div>
     <!-- Mean per-district CRPS by district-lean band, x-axis matched to
          the heatmap above.  Tall bars = lean bands the model fits poorly. -->
     <div id="simOnYearW2Chart" class="w2ContribChart"></div>
@@ -351,10 +397,19 @@
   </div>
 </div>
 
-<!-- (The simulator-on-its-own-synthetic-chamber row was retired —
-     this page now only renders the real cycle (top) and the simulator
-     run on the cycle's actual districts (middle).  The synthetic-
-     chamber view lives only on the simulator page now.) -->
+<!-- Chamber-stats summary for the simulator-on-real-districts run.
+     Own panel (sibling of #simOnYearRow), mirroring the simulator
+     page's standalone .panel.stats — sits as its own card under the
+     chart panel rather than nested inside it, which reads more
+     naturally and visually separates the visualization from the
+     numbers it summarises. -->
+<!-- (simOnYearStats now lives inside #simOnYearRow's panel, below the
+     heatmap — see the .stats div there.  Standalone sibling row was
+     retired.) -->
+
+<!-- (simulator-on-synthetic-chamber lives as an inset on the simulator-
+     on-year panel — see #simOnSynthInset above, gated by
+     CONFIG.showSimulatorOnSyntheticChamber.) -->
 
 <!-- (The calibration-scatter row was retired in favour of per-district
      margin colouring on each heatmap above + a goodness-of-fit χ² that
@@ -501,6 +556,12 @@ window.batchAutoFitYears = async function (opts) {
     const elapsed = ((performance.now() - yStart) / 1000).toFixed(1);
     const status = document.getElementById('autoFitStatus')?.textContent || '';
     log(`[${y}] ✓ ${elapsed}s — ${status}`);
+    // Per-year converged slider values, formatted as a paste-ready
+    // config.js historicalPresets row so progress watchers can see the
+    // fit before the whole batch finishes.
+    const presetEntries = Object.entries(preset)
+      .map(([k, v]) => `${k}: ${v}`).join(', ');
+    log(`[${y}] preset: { ${presetEntries} }`);
   }
 
   if (origNsim != null) window.CONFIG.constants.historicalNsim = origNsim;
@@ -990,7 +1051,7 @@ function renderYearChart(divId, year, stats, yMax) {
       leanLabel + ': %{x:.0f}%<br>' +
       'House margin: %{z:.1f}% (R−D)<extra></extra>',
   }], {
-    title: { text: titleParts.join(' &nbsp;·&nbsp; '), font: { size: 13 }, x: 0.04, xanchor: 'left' },
+    title: { text: titleParts.join(' &nbsp;·&nbsp; '), font: { size: 13 }, x: 0.01, xanchor: 'left' },
     xaxis: {
       title: { text: leanLabel + ' %  (← Democratic · Republican →)', standoff: 4, font: { size: 11 } },
       ticksuffix: '%', range: [-100, 100], zeroline: true, zerolinecolor: '#333', zerolinewidth: 1,
@@ -1020,6 +1081,7 @@ function renderYearChart(divId, year, stats, yMax) {
 // the cache predates the "save full params" change.
 function renderSimOnYear(year, yearStats, yMax) {
   const row = document.getElementById('simOnYearRow');
+  const hideAll = () => { if (row) row.style.display = 'none'; };
   // Read the live sliders directly via CONTROLS.readParams() — replaces
   // the old localStorage round-trip from runAndRender (which is gone
   // along with the synthetic-chamber bottom row).  Direct read also
@@ -1031,12 +1093,12 @@ function renderSimOnYear(year, yearStats, yMax) {
   if (typeof runSimulations !== 'function'
       || typeof window.CONTROLS?.readParams !== 'function'
       || !yearStats || !yearStats.allLeans || yearStats.allLeans.length === 0) {
-    row.style.display = 'none';
+    hideAll();
     return;
   }
   let liveParams;
   try { liveParams = window.CONTROLS.readParams(); }
-  catch (_) { row.style.display = 'none'; return; }
+  catch (_) { hideAll(); return; }
   row.style.display = '';
 
   // Sort the year's per-CD leans ASCENDING for the simulator's median-
@@ -1112,7 +1174,7 @@ function renderSimOnYear(year, yearStats, yMax) {
   );
   const mb = sims.mismatchBins;
   if (!mb || !sims.perDistrict || !sims.perDistrict.avgZ) {
-    row.style.display = 'none';
+    hideAll();
     return;
   }
 
@@ -1155,14 +1217,8 @@ function renderSimOnYear(year, yearStats, yMax) {
     }
     if (crpsN > 0) crpsMean = s / crpsN;
   }
-  if (crpsMean != null) {
-    titleText += '<br>' +
-      `<span style="font-size:11px">` +
-      `fit CRPS=${crpsMean.toFixed(2)} pp ` +
-      `(mean per-district CRPS over ${crpsN} contested districts; ` +
-      `lower=better)` +
-      `</span>`;
-  }
+  // (fit CRPS=... was removed from the chart title and moved into the
+  // stats panel under the heatmap; see renderSimOnYearStats below.)
 
   // Build the spectrum heatmap matrix: each district contributes K
   // quantile-sampled cells from its predicted distribution N(avgZ, stdZ).
@@ -1186,7 +1242,7 @@ function renderSimOnYear(year, yearStats, yMax) {
       leanLabel + ': %{x:.0f}%<br>' +
       'predicted margin: %{z:.1f}% (R−D)<extra></extra>',
   }], {
-    title: { text: titleText, font: { size: 13 }, x: 0.04, xanchor: 'left' },
+    title: { text: titleText, font: { size: 13 }, x: 0.01, xanchor: 'left' },
     xaxis: {
       title: { text: leanLabel + ' %  (← Democratic · Republican →)', standoff: 4, font: { size: 11 } },
       ticksuffix: '%', range: [-100, 100], zeroline: true, zerolinecolor: '#333', zerolinewidth: 1,
@@ -1196,6 +1252,34 @@ function renderSimOnYear(year, yearStats, yMax) {
     margin: { l: 50, r: 14, t: 58, b: 50 },
     showlegend: false, plot_bgcolor: '#fff',
   }, { displayModeBar: false, responsive: true });
+
+  // Chamber-stats summary — same data shape the simulator page shows,
+  // computed from this run's sims object.  CRPS line piggybacks here
+  // (was originally part of the Plotly title's second line).
+  // Also pass the cycle's REAL-election aggregates so the seat-share,
+  // majority-margin, and mismatched-reps stats can be shown side-by-
+  // side with what actually happened that year.
+  const realR = yearStats.nR ?? 0;
+  const realD = yearStats.nD ?? 0;
+  const realTotalSeats = realR + realD || N;
+  const halfChamber = (N - 1) / 2;
+  const realMajorityMargin = Math.max(realR, realD) - (halfChamber - 1);
+  let realMismatch = 0;
+  if (Array.isArray(yearStats.allLeansWithMargin)) {
+    for (const row of yearStats.allLeansWithMargin) {
+      if (!row || !isFinite(row.lean) || !isFinite(row.margin)) continue;
+      if ((row.margin > 0 && row.lean < 0) || (row.margin < 0 && row.lean > 0)) {
+        realMismatch++;
+      }
+    }
+  }
+  const realStats = {
+    rSeats: realR,
+    rShare: realTotalSeats > 0 ? realR / realTotalSeats : 0,
+    majorityMargin: realMajorityMargin,
+    mismatch: realMismatch,
+  };
+  renderSimOnYearStats(sims, N, crpsMean, crpsN, realStats);
 
   // ---- calibration diagnostics (gated) ----------------------------------
   // The two charts below (per-lean mean-CRPS bar chart + predicted-vs-
@@ -1265,7 +1349,7 @@ function renderSimOnYear(year, yearStats, yMax) {
           `<span style="color:#888;font-weight:normal">` +
           `· dotted line = chamber-mean CRPS (${crpsMean.toFixed(2)} pp)` +
           `</span>`,
-        font: { size: 11 }, x: 0.04, xanchor: 'left',
+        font: { size: 11 }, x: 0.01, xanchor: 'left',
       },
       xaxis: {
         ticksuffix: '%', range: [-100, 100], showticklabels: false,
@@ -1386,7 +1470,7 @@ function renderSimOnYear(year, yearStats, yMax) {
           `· dot colour = signed bias (red = model too R-friendly, blue = too D-friendly)` +
           ` · dot size = confidence (bigger = narrower predictive σ)` +
           `</span>`,
-        font: { size: 11 }, x: 0.04, xanchor: 'left',
+        font: { size: 11 }, x: 0.01, xanchor: 'left',
       },
       xaxis: {
         title: { text: 'Actual margin (pp, R+)', font: { size: 10 }, standoff: 4 },
@@ -1421,6 +1505,159 @@ function renderSimOnYear(year, yearStats, yMax) {
 // per-district margin information the scatter was trying to show.)
 
 
+// Chamber-stats summary for the simulator-on-real-districts run.
+// Mirrors the simulator page's renderStats but reframed for the
+// historical context: skips "partisan lean of median district" (fixed
+// by the cycle's pool, not by sliders), keeps the chance-of-R-median /
+// median-ideology / mismatch / seat-share rows.  Reads everything off
+// the `sims` object that runSimulations already produces — no extra
+// simulator passes needed.
+function renderSimOnYearStats(sims, N, crpsMean, crpsN, realStats) {
+  const el = document.getElementById('simOnYearStats');
+  if (!el) return;
+  const n = sims.meds.length;
+  let pR = 0;
+  const medsR = [], medsD = [];
+  for (let i = 0; i < n; i++) {
+    if (sims.parties[i]) { pR++; medsR.push(sims.meds[i]); }
+    else medsD.push(sims.meds[i]);
+  }
+  pR /= n;
+  const sortedSeats = Array.from(sims.seats).sort((a, b) => a - b);
+  const medianSeats = n % 2
+    ? sortedSeats[(n - 1) >> 1]
+    : (sortedSeats[n / 2 - 1] + sortedSeats[n / 2]) / 2;
+  const medianRShare = medianSeats / N;
+  const sortedMis = Array.from(sims.mismatches).sort((a, b) => a - b);
+  const medianMismatch = n % 2
+    ? sortedMis[(n - 1) >> 1]
+    : (sortedMis[n / 2 - 1] + sortedMis[n / 2]) / 2;
+  // Majority margin = (winning party's seats) − (m − 1).  With N = 2m+1
+  // the majority threshold is m+1, so a bare majority gives margin 2.
+  const m = (N - 1) / 2;
+  const margins = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const r = sims.seats[i];
+    margins[i] = Math.max(r, N - r) - (m - 1);
+  }
+  margins.sort((a, b) => a - b);
+  const medianMajority = n % 2
+    ? margins[(n - 1) >> 1]
+    : (margins[n / 2 - 1] + margins[n / 2]) / 2;
+  const medOfArray = (arr) => {
+    const a = Array.from(arr).sort((x, y) => x - y);
+    return n % 2 ? a[(n - 1) >> 1] : (a[n / 2 - 1] + a[n / 2]) / 2;
+  };
+  const medOfFiniteArray = (arr) => {
+    const a = Array.from(arr).filter(Number.isFinite).sort((x, y) => x - y);
+    if (!a.length) return NaN;
+    const k = a.length;
+    return k % 2 ? a[(k - 1) >> 1] : (a[k / 2 - 1] + a[k / 2]) / 2;
+  };
+  const medianAbsMed = medOfArray(Array.from(sims.meds, (x) => Math.abs(x)));
+  const medianMedD = medsD.length ? medOfFiniteArray(medsD) : NaN;
+  const medianMedR = medsR.length ? medOfFiniteArray(medsR) : NaN;
+  const median33 = medOfArray(sims.p33s);
+  const median67 = medOfArray(sims.p67s);
+  const medianDMed = medOfFiniteArray(sims.dMeds);
+  const medianRMed = medOfFiniteArray(sims.rMeds);
+  const dPill = `<span class="pill D">D</span>`;
+  const rPill = `<span class="pill R">R</span>`;
+  el.innerHTML = `
+    <div>${n} simulations <span style="color:var(--muted);font-size:11px">(on real cycle pool)</span></div>
+    ${crpsMean != null ? `<div>Fit CRPS: <span class="num">${crpsMean.toFixed(2)}%</span> <span style="color:var(--muted);font-size:11px">(mean CRPS over ${crpsN} contested districts; jointly measures predictive accuracy + calibration of the simulator's margin distributions; lower=better)</span></div>` : ''}
+    <div>Chance the median representative is a Republican: <span class="num">${(pR * 100).toFixed(1)}%</span> ${pR > 0.5 ? rPill : dPill}</div>
+    <div>Median absolute ideology of median representative: <span class="num">${medianAbsMed.toFixed(1)}</span>
+      &nbsp;|&nbsp; when median is D: <span class="num">${Number.isFinite(medianMedD) ? medianMedD.toFixed(1) : '–'}</span>
+      &nbsp;|&nbsp; when median is R: <span class="num">${Number.isFinite(medianMedR) ? medianMedR.toFixed(1) : '–'}</span></div>
+    <div>Median ideology of 33rd-percentile representative: <span class="num">${median33.toFixed(1)}</span>
+      &nbsp;|&nbsp; Median ideology of 67th-percentile representative: <span class="num">${median67.toFixed(1)}</span></div>
+    <div>Median ideology of median Democratic representative: <span class="num">${Number.isFinite(medianDMed) ? medianDMed.toFixed(1) : '–'}</span>
+      &nbsp;|&nbsp; Median ideology of median Republican representative: <span class="num">${Number.isFinite(medianRMed) ? medianRMed.toFixed(1) : '–'}</span>
+      <span style="color:var(--muted);font-size:11px">(Hastert-rule pivot)</span></div>
+    <div>Median Republican seat share: <span class="num">${(medianRShare * 100).toFixed(1)}%</span>${realStats ? ` (vs <span class="num">${(realStats.rShare * 100).toFixed(1)}%</span> for real election)` : ''}
+      &nbsp;|&nbsp; Median majority seat margin: <span class="num">${medianMajority.toFixed(1)}</span>${realStats ? ` (vs <span class="num">${realStats.majorityMargin}</span> for real election)` : ''}</div>
+    <div>Median "mismatched" reps per chamber: <span class="num">${medianMismatch.toFixed(1)}</span>${realStats ? ` (vs <span class="num">${realStats.mismatch}</span> for real election)` : ''}
+      <span style="color:var(--muted);font-size:11px">(R in D-lean districts or D in R-lean districts)</span></div>
+  `;
+}
+
+
+// Optional simulator-on-synthetic-chamber preview (gated by
+// CONFIG.showSimulatorOnSyntheticChamber).  Same params the rest of
+// the page uses, but the simulator builds its OWN analytic pool from
+// rGerry/dGerry/base/gerry instead of getting the year's real pool.
+// Rendered as a small inset overlaid on the top-right of the
+// simulator-on-year panel (see .synthInset CSS) so it's a quick
+// reference without taking a full row of vertical space.
+function renderSimOnSynth(_yMax) {
+  const inset = document.getElementById('simOnSynthInset');
+  if (!inset || typeof runSimulations !== 'function'
+      || !window.CONTROLS?.readParams) {
+    return;
+  }
+  const p = window.CONTROLS.readParams();
+  const spec = { binSize, lo: -100, hi: 100 };
+  // No customDistrictPool → analyticDistrictPool kicks in.  No actuals
+  // → no CRPS / PIT work.  Just per-district z stats for the heatmap.
+  const sims = runSimulations(p, histNsim(), spec, null, null, null, true);
+  if (!sims.mismatchBins || !sims.perDistrict?.avgZ || !sims.districtPool) {
+    inset.style.display = 'none';
+    return;
+  }
+  inset.style.display = '';
+  const mb = sims.mismatchBins;
+  const totalD = mb.avgDWins.reduce((a, b) => a + b, 0);
+  const totalR = mb.avgRWins.reduce((a, b) => a + b, 0);
+  const pool = sims.districtPool;
+  const N = pool.length;
+  const med = pool[(N - 1) >> 1];
+  const avgZ = sims.perDistrict.avgZ;
+  const stdZ = sims.perDistrict.stdZ;
+  const xs = new Array(N), mus = new Array(N), sigmas = new Array(N);
+  for (let i = 0; i < N; i++) {
+    xs[i] = pool[i];
+    mus[i] = avgZ[i];
+    sigmas[i] = stdZ ? stdZ[i] : 0;
+  }
+  const m = buildSimulatorSeatMatrix(xs, mus, sigmas, 10);
+  // Compact single-line title for the small footprint.
+  const titleText = `<b>Synthetic chamber</b> · `
+    + `${totalD.toFixed(0)}D / ${totalR.toFixed(0)}R · `
+    + `med ${formatLean(med)}`;
+  // Local yMax sized for the synthetic chamber alone — the main row's
+  // yMax (sized for the full picker grid) over-reserves vertical space
+  // in this 150px inset.  Use the bin counts directly.
+  let synthYMax = 0;
+  if (mb.avgDWins && mb.avgRWins) {
+    for (let i = 0; i < mb.avgDWins.length; i++) {
+      if (mb.avgDWins[i] > synthYMax) synthYMax = mb.avgDWins[i];
+      if (mb.avgRWins[i] > synthYMax) synthYMax = mb.avgRWins[i];
+    }
+  }
+  synthYMax = Math.max(5, Math.ceil(synthYMax / 5) * 5 + 2);
+  Plotly.react('simOnSynthChart', [{
+    z: m.z, x: m.centres, y: m.yArr, type: 'heatmap',
+    colorscale: HEATMAP_COLORSCALE,
+    zmin: -100, zmax: 100, zmid: 0,
+    xgap: 0, ygap: 0,
+    showscale: false,
+    hoverinfo: 'skip',
+  }], {
+    title: { text: titleText, font: { size: 10 }, x: 0.01, xanchor: 'left', y: 0.96 },
+    xaxis: {
+      range: [-100, 100], zeroline: true, zerolinecolor: '#333', zerolinewidth: 1,
+      showticklabels: false, showgrid: false, fixedrange: true,
+    },
+    yaxis: {
+      range: [0, synthYMax], showticklabels: false, showgrid: false, fixedrange: true,
+    },
+    margin: { l: 4, r: 4, t: 16, b: 4 },
+    showlegend: false, plot_bgcolor: '#fff',
+  }, { displayModeBar: false, responsive: true, staticPlot: true });
+}
+
+
 // Stripped-down version of renderYearChart for the picker thumbnails:
 // same data + colours, but axis labels removed, tick fonts shrunk, and a
 // compact title.  Keeps the same yMax so visual area is comparable to the
@@ -1442,7 +1679,7 @@ function renderYearThumb(divId, year, stats, yMax) {
     xgap: 0, ygap: 0,
     showscale: false, hoverinfo: 'skip',
   }], {
-    title: { text: title, font: { size: 10 }, x: 0.04, xanchor: 'left', y: 0.97 },
+    title: { text: title, font: { size: 10 }, x: 0.01, xanchor: 'left', y: 0.97 },
     xaxis: { range: [-100, 100], showticklabels: false, zeroline: true,
              zerolinecolor: '#666', zerolinewidth: 1, showgrid: false, fixedrange: true },
     yaxis: { range: [0, yMax], showticklabels: false, showgrid: false, fixedrange: true },
@@ -1753,6 +1990,9 @@ function renderYearThumb(divId, year, stats, yMax) {
     if (selectedYear != null) {
       renderSimOnYear(selectedYear, yearStats[selectedYear], yMax);
     }
+    if (window.CONFIG?.showSimulatorOnSyntheticChamber) {
+      renderSimOnSynth(yMax);
+    }
   }
   // Pass debounceConfigKey so this page reads `historicalSliderDebounceMs`
   // from config.js (with a fallback to the shared `sliderDebounceMs`) —
@@ -1790,7 +2030,8 @@ function renderYearThumb(divId, year, stats, yMax) {
   // — which only needs ordinal comparisons, not derivatives — converges
   // more reliably than finite-difference SGD would.
   // (autoFitRunning is hoisted above runAndRender — see comment there.)
-  async function autoFitToYear() {
+  async function autoFitToYear(opts) {
+    const skipDistrictMap = !!(opts && opts.skipDistrictMap);
     const btn = document.getElementById('autoFit');
     const status = document.getElementById('autoFitStatus');
     if (autoFitRunning) {
@@ -2118,36 +2359,47 @@ function renderYearThumb(divId, year, stats, yMax) {
     const N_DM_SAMPLES = rsCfg.districtMapSamples ?? 300;
     const N_CAND_SAMPLES = rsCfg.candidateSamples ?? 60;
 
-    // Stage A.1 — district map random sampling.
-    {
+    // Stage A.1 — district map grid search over (rGerry, dGerry).
+    // Inner step is ~3 ms (analytic-pool build + sort/compare against
+    // the year's real lean pool), so even a dense grid finishes in
+    // sub-second wall time.  Grid resolution: √N_DM_SAMPLES per axis so
+    // the budget knob (CONFIG.autoFitRandomSearch.districtMapSamples)
+    // keeps the same meaning across random/grid implementations.
+    //
+    // Skipped when opts.skipDistrictMap is true — used by the
+    // "Recompute preset" button to re-run only the CMA-ES candidate
+    // stage on top of an already-converged rGerry / dGerry.
+    if (!skipDistrictMap) {
       const ids = ['rGerry', 'dGerry'];
       const cfgs = ids.map(id => window.CONFIG.sliders[id]).filter(Boolean);
       if (cfgs.length === ids.length) {
-        // Probe current values first so we never adopt a sample worse
-        // than the seed (which may already be at a sensible default).
+        // Probe current values first so we never adopt a grid point
+        // worse than the seed (which may already be at a sensible default).
         let bestObj = evalDelta();
         let bestVals = ids.map(id => parseFloat(document.getElementById(id).value));
-        // Yield interval: the inner step is ~3 ms (just an analytic-pool
-        // build + sort/compare), so yielding every iteration would burn
-        // most of the time on event-loop overhead.  Yield every
-        // YIELD_EVERY samples; in background tabs setTimeout(0) gets
-        // throttled (Chrome intensive-throttling can clamp to ~1 Hz),
-        // so each yield costs ~1 s — bigger batches between yields keep
-        // wall-clock proportional to inner-step time, not yield latency.
+        const stepsPerAxis = Math.max(2, Math.round(Math.sqrt(N_DM_SAMPLES)));
+        const total = stepsPerAxis * stepsPerAxis;
         const YIELD_EVERY = 200;
-        for (let s = 0; s < N_DM_SAMPLES; s++) {
-          if (!autoFitRunning) break;
-          const trial = cfgs.map(c => c.min + Math.random() * (c.max - c.min));
-          for (let i = 0; i < ids.length; i++) setSliderRaw(ids[i], trial[i]);
-          const obj = evalDelta();
-          if (obj < bestObj) { bestObj = obj; bestVals = trial.slice(); }
-          if (s % YIELD_EVERY === 0) {
-            const parts = evalDeltaParts();
-            status.textContent =
-              `Random search · district map · ${s + 1}/${N_DM_SAMPLES}` +
-              ` · best medianΔ=${parts.medDiff.toFixed(2)} pp · Δ=${parts.delta.toFixed(2)} pp`;
-            await new Promise(r => setTimeout(r, 0));
+        let s = 0;
+        for (let i = 0; i < stepsPerAxis; i++) {
+          const rg = cfgs[0].min + (cfgs[0].max - cfgs[0].min) * i / (stepsPerAxis - 1);
+          for (let j = 0; j < stepsPerAxis; j++) {
+            if (!autoFitRunning) break;
+            const dg = cfgs[1].min + (cfgs[1].max - cfgs[1].min) * j / (stepsPerAxis - 1);
+            setSliderRaw(ids[0], rg);
+            setSliderRaw(ids[1], dg);
+            const obj = evalDelta();
+            if (obj < bestObj) { bestObj = obj; bestVals = [rg, dg]; }
+            if (s % YIELD_EVERY === 0) {
+              const parts = evalDeltaParts();
+              status.textContent =
+                `Grid search · district map · ${s + 1}/${total}` +
+                ` · best medianΔ=${parts.medDiff.toFixed(2)} pp · Δ=${parts.delta.toFixed(2)} pp`;
+              await new Promise(r => setTimeout(r, 0));
+            }
+            s++;
           }
+          if (!autoFitRunning) break;
         }
         // Apply best through the full setSlider so the UI catches up
         // (thumb position, number readout, pin propagation are all
@@ -2383,7 +2635,10 @@ function renderYearThumb(divId, year, stats, yMax) {
       status.textContent = `Auto-fitting ${y} (nsim=${histNsim()})…`;
     }
     try {
-      await autoFitToYear();
+      // Skip the district-map grid search — the rGerry/dGerry values
+      // from the existing preset are already converged and that stage
+      // takes a non-trivial chunk of the per-year time.
+      await autoFitToYear({ skipDistrictMap: true });
       // autoFitToYear leaves every slider at its converged (or
       // partially converged, on cancel) value — the user can read the
       // new positions off the panel and decide whether to copy them
