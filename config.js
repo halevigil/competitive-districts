@@ -263,7 +263,7 @@ window.CONFIG = {
 				1994: 7.0,
 				1998: 0.9,
 				2002: 4.6,
-				2006: -6.4,
+				2006: -8,
 				2010: 7,
 				2014: 5.06,
 				2018: -8,
@@ -381,7 +381,7 @@ window.CONFIG = {
 	// to true here to expose them locally; the runtime code ALSO hard-
 	// hides them on any fly.dev / fly.io host so a stray `true` left in
 	// config.js doesn't accidentally leak to the deployed site.
-	showCalibrationPlots: false,
+	showCalibrationPlots: true,
 
 	// ---------------- SIMULATION CONSTANTS -------------------------------------
 	constants: {
@@ -701,17 +701,17 @@ window.CONFIG = {
 			midtermPrevWeight: 0.33,
 		},
 		2006: {
-			v: -6.4,
+			v: -8,
 			rGerry: 0.221,
 			dGerry: 0.105,
-			dIntModSafe: 2.5,
-			rIntModSafe: 2.3,
-			dIntModSwing: 0.65,
-			rIntModSwing: 1.45,
-			dIntModOpp: 0.95,
-			rIntModOpp: 1.35,
-			qualImp: 0.55,
-			sqrtSigmaN: 0.4,
+			dIntModSafe: 2.65,
+			rIntModSafe: 2.15,
+			dIntModSwing: 0.95,
+			rIntModSwing: 1.85,
+			dIntModOpp: 2.35,
+			rIntModOpp: 0.9,
+			qualImp: 0.5,
+			sqrtSigmaN: 0.5,
 			incumbency: 3,
 			presPrevWeight: 0.2,
 			midtermPrevWeight: 0.33,
