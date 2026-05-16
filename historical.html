@@ -7,14 +7,17 @@
 <!-- Cache-bust query keeps the dev server from serving stale JS when
      these files change.  Bump alongside index.html's `?v=` so both
      pages share the same version of the model + controls + config. -->
-<script src="config.js?v=67"></script>
+<script src="config.js?v=104"></script>
 <!-- model.js is loaded so the "sim on this year's districts" middle row
      can re-run the simulator using the live params + a real-data
      district pool built from the selected year's per-CD lean values.
      controls.js mirrors the simulator page's slider panel here so the
      user doesn't have to bounce between pages to retune parameters. -->
-<script src="model.js?v=67"></script>
-<script src="controls.js?v=67"></script>
+<script src="model.js?v=104"></script>
+<script src="controls.js?v=104"></script>
+<!-- sep-CMA-ES used by historical.html's auto-fit candidate stage.  Pure
+     JS, no dependencies; defines window.cmaesMinimize. -->
+<script src="cmaes.js?v=104"></script>
 <link rel="stylesheet" href="controls.css" />
 <style>
   :root {
@@ -119,21 +122,18 @@
     padding: 6px;
   }
   .chart { width: 100%; height: 300px; }
-  /* Per-lean W² contribution chart: short, sits flush under the
+  /* Per-lean mean-CRPS bar chart: short, sits flush under the
      simulator-on-year heatmap, shares the same x-axis range so bars
      align with the heatmap columns above. */
   .w2ContribChart { width: 100%; height: 110px; margin-top: -6px; }
-  /* PIT-shape diagnostic: SAME shape as the W² chart but on a [0, 1]
-     PIT axis instead of district lean.  Reads the SHAPE of the W²
-     mismatch (U, hump, skew, flat) so the user can tell WHAT kind of
-     miscalibration to fix. */
-  .pitShapeChart { width: 100%; height: 130px; margin-top: -6px; }
-  /* Per-lean PIT heatmap: 2D view with x=district lean (matched to
-     the heatmap above) and y=PIT bin (0..1).  Shows whether bias /
-     U / hump live in specific lean bands (e.g. swing has bias but
-     safe is calibrated, or vice versa).  Tall enough to fit the
-     two-line title + multi-line y-axis label + visible x-ticks. */
-  .pitByLeanChart { width: 100%; height: 220px; margin-top: -6px; }
+  /* Predicted-vs-actual scatter coloured by CRPS.  Forced 1:1 axis
+     aspect (yaxis.scaleanchor='x'), so the chart needs roughly the
+     same height as width to actually display the full ±100pp range
+     without collapsing.  Generous height keeps every district dot
+     visible at typical chamber sizes — this is a tuning aid, gated
+     behind showCalibrationPlots, so prioritise readability over
+     vertical-real-estate frugality. */
+  .simOnYearScatter { width: 100%; height: 900px; margin-top: 4px; }
   /* The thumbnail picker: every historical year as a small clickable card
      showing the same two charts in miniature.  Three columns so the nine
      cycles fit on one screen.  The currently-selected card gets an accent
@@ -238,7 +238,7 @@
     <h3>Voters</h3>
     <div class="row">
       <label>Candidate Quality Importance</label>
-      <input type="range" id="sqrtQualImp" />
+      <input type="range" id="qualImp" />
       <span class="hint">Higher → voters punish ideologically extreme candidates more heavily, relative to how partisan the district is.</span>
     </div>
     <div class="row">
@@ -247,20 +247,28 @@
       <span class="hint">Lower → election outcomes track district partisan lean and candidate ideology more deterministically. Higher → more random per-district swings.</span>
     </div>
 
-    <!-- Practical Details: opt-in knobs (urban Dem-blowout adjustment,
-         incumbency advantage).  Tucked at the bottom of the panel so
-         the main sliders read as a clean list, but EXPANDED by default
-         since incumbency is core to the "fit a real cycle" workflow
-         and users shouldn't have to discover it.  Sim page (index.html)
-         doesn't render this section at all. -->
-    <details class="practicalDetails" open>
-      <summary>Practical Details</summary>
-      <div class="row">
-        <label>Incumbency Advantage (pp)</label>
-        <input type="range" id="incumbency" />
-        <span class="hint">Per-district shift applied to the predicted election score in favour of the incumbent's party (whoever won the same state+district last cycle). Only active on this page; the simulator page has no "previous winner" concept.</span>
-      </div>
-    </details>
+    <!-- Historical-only opt-in knobs (incumbency, live PVI weights).
+         All hidden by default; revealed via the corresponding CONFIG
+         flag.  Sim page (index.html) doesn't render these at all. -->
+    <div class="row" id="incumbencyRow" style="display:none;">
+      <label>Incumbency Advantage (pp)</label>
+      <input type="range" id="incumbency" />
+      <span class="hint">Per-district shift applied to the predicted election score in favour of the incumbent's party (whoever won the same state+district last cycle). Only active on this page; the simulator page has no "previous winner" concept.</span>
+    </div>
+    <!-- Live PVI-weight sliders (only shown when CONFIG.pviWeightSliders.
+         enabled is true; toggled via JS on init).  prev share of the
+         PVI denominator: 0 = ignore prior cycle entirely, 0.5 =
+         equal weight with current cycle. -->
+    <div class="row pviWeightRow" id="presPrevWeightRow" style="display:none;">
+      <label>Prev-pres weight (presidential years)</label>
+      <input type="range" id="presPrevWeight" />
+      <span class="hint">Share of the PRIOR presidential election in the PVI for presidential-year charts. Default 0.2 (= 4:1 cur:prev).  Changes rebuild the lean pool for the selected year.</span>
+    </div>
+    <div class="row pviWeightRow" id="midtermPrevWeightRow" style="display:none;">
+      <label>Older-pres weight (midterm years)</label>
+      <input type="range" id="midtermPrevWeight" />
+      <span class="hint">Share of the OLDER prior-pres election in the PVI for midterm-year charts. Default 0.333 (= 2:1 recent:older).  Changes rebuild the lean pool for the selected year.</span>
+    </div>
 
     <button id="reset">Reset to defaults</button>
     <!-- Per-year preset button: text updates to "Approximate <year>
@@ -273,6 +281,18 @@
     <button id="approxYearPreset" style="background:#3a6e3a;margin-top:6px;display:none;">
       Approximate selected year's election
     </button>
+    <!-- Dev-only "recompute this preset" button — gated behind
+         CONFIG.showCalibrationPlots so it never appears in prod (and
+         the fly.dev/fly.io hostname filter still wins regardless).
+         Runs autoFitToYear on the currently-selected year, updates
+         CONFIG.historicalPresets[year] in memory so the
+         "Approximate <year> election" button immediately picks up the
+         new values, and dumps a copy-pasteable config.js row to
+         console for permanent persistence. -->
+    <button id="recomputeYearPreset" style="background:#8a5a3a;margin-top:6px;display:none;">
+      Recompute preset for selected year
+    </button>
+    <div id="recomputeYearStatus" class="hint" style="margin-top:6px;font-size:11px;color:var(--muted);display:none;"></div>
     <!-- Hidden hosts kept for backward compat with code that still
          references autoFit / autoFitStatus IDs (the autoFitToYear
          function is exposed via window.__autoFitToYear and uses
@@ -319,23 +339,15 @@
 <div id="simOnYearRow" class="yearRow" style="display: none; margin-top: 12px;">
   <div class="panel">
     <div id="simOnYearChart" class="chart"></div>
-    <!-- Per-lean W² contribution bar chart, sits directly under the
-         heatmap with a matched x-axis so the reader can see WHICH
-         lean band drives the W² total.  Empty (zero-bar) at every
-         lean if the model is calibrated; tall bars where the actual
-         margins keep falling outside the simulator's predicted
-         distribution for that band. -->
+    <!-- Mean per-district CRPS by district-lean band, x-axis matched to
+         the heatmap above.  Tall bars = lean bands the model fits poorly. -->
     <div id="simOnYearW2Chart" class="w2ContribChart"></div>
-    <!-- PIT shape diagnostic: histogram of u_i values across contested
-         districts.  Tells the reader WHAT KIND of miscalibration drives
-         the W² total — the shape of the distribution is the diagnosis
-         (U = too narrow, hump = too wide, skew = biased, flat = good). -->
-    <div id="simOnYearPITChart" class="pitShapeChart"></div>
-    <!-- PIT shape PER LEAN BAND: same diagnosis as the histogram above
-         but conditioned on district lean, so the user can see WHICH
-         lean bands carry the bias / U / hump (e.g. the swing band might
-         be biased while safe seats look calibrated, or vice versa). -->
-    <div id="simOnYearPITByLeanChart" class="pitByLeanChart"></div>
+    <!-- Predicted-vs-actual scatter, one dot per contested district.
+         Color = per-district CRPS, size = predictive σ.  Reads at a
+         glance: hot small dots far from the diagonal = confidently
+         wrong; cool big dots far from the diagonal = wide intervals
+         saved them; near the diagonal = fine. -->
+    <div id="simOnYearScatter" class="simOnYearScatter"></div>
   </div>
 </div>
 
@@ -420,7 +432,7 @@ const YEARS = [
 // Run this from the dev console to regenerate the historicalPresets block in
 // config.js for every cycle 1992–2024.  Each year gets:
 //   1. The thumbnail clicked (sets selectedYear).
-//   2. autoFitToYear() invoked (which seeds sqrtQualImp from
+//   2. autoFitToYear() invoked (which seeds qualImp from
 //      CONFIG.historicalSqrtQualImpByYear, pins v from HOUSE_POPVOTE_MARGIN,
 //      then runs district-map → candidates → noise coordinate descent).
 //   3. Final slider values captured into a preset object.
@@ -453,6 +465,17 @@ window.batchAutoFitYears = async function (opts) {
   for (const y of years) {
     const yStart = performance.now();
     log(`[${y}] starting (nsim=${nsim}) …`);
+    // Reset every slider to its CONFIG default before this year's
+    // auto-fit so each year starts from the same clean baseline
+    // instead of inheriting the previous year's converged values.
+    // qualImp is reset too, but autoFitToYear immediately re-seeds
+    // it from CONFIG.historicalSqrtQualImpByYear[y] (which is what the
+    // user means by "except qualImp" — the per-year seed wins).
+    // Click the Reset button rather than calling CONTROLS.resetDefaults
+    // (which is exposed only on bind()'s return object, not on the
+    // global) — same code path, same side effects.
+    document.getElementById('reset')?.click();
+    await new Promise((r) => setTimeout(r, 250));
     // Select the year via the thumbnail click handler so all the side
     // effects (selectedYear assignment, simOnYear render kick-off, etc.)
     // fire exactly the same way they would for a real user click.
@@ -548,17 +571,31 @@ const PREV_PRES_FOR_PRES_PVI = {
   2020: 2016,
   2024: 2020,
 };
-// PVI weights — read from CONFIG.pviWeights at load time.  Edit the
-// values in config.js and reload to change the lean axis; nothing in
-// here is reactive to mid-page changes.
+// PVI weights — by default reads from CONFIG.pviWeights at load time,
+// but when CONFIG.pviWeightSliders.enabled is true and the sliders are
+// present in the DOM, the slider values override (interpreted as the
+// PREV-share = prev / (cur + prev), so cur = 1 − prev).  This makes the
+// lean axis live: changing the slider triggers a PVI rebuild and pool
+// reflow for the selected year.
 function pviWeights() {
   const w = window.CONFIG?.pviWeights || {};
-  return {
-    presCur:   w.presYear?.cur    ?? 4,
-    presPrev:  w.presYear?.prev   ?? 1,
-    midRecent: w.midterm?.recent  ?? 2,
-    midPrev:   w.midterm?.prev    ?? 1,
-  };
+  let presCur   = w.presYear?.cur    ?? 4;
+  let presPrev  = w.presYear?.prev   ?? 1;
+  let midRecent = w.midterm?.recent  ?? 2;
+  let midPrev   = w.midterm?.prev    ?? 1;
+  if (window.CONFIG?.pviWeightSliders?.enabled) {
+    const ps = document.getElementById('presPrevWeight');
+    if (ps) {
+      const x = parseFloat(ps.value);
+      if (isFinite(x)) { presCur = 1 - x; presPrev = x; }
+    }
+    const ms = document.getElementById('midtermPrevWeight');
+    if (ms) {
+      const x = parseFloat(ms.value);
+      if (isFinite(x)) { midRecent = 1 - x; midPrev = x; }
+    }
+  }
+  return { presCur, presPrev, midRecent, midPrev };
 }
 
 // Calibration-diagnostics gate.  Returns true only when the config flag
@@ -1033,7 +1070,12 @@ function renderSimOnYear(year, yearStats, yMax) {
   // = 0 → all effects off) so the model can skip the inner-loop
   // branch entirely.
   const incSliderEl = document.getElementById('incumbency');
-  const incSliderVal = incSliderEl ? parseFloat(incSliderEl.value) : 0;
+  // When CONFIG.showIncumbencySlider is off, ignore the slider entirely
+  // (treat as zero) — the slider is hidden, but Reset / preset clicks
+  // can still write to its underlying DOM element, and we don't want
+  // those values to leak into the simulator.
+  const incSliderVal = (incSliderEl && window.CONFIG?.showIncumbencySlider)
+    ? parseFloat(incSliderEl.value) : 0;
   const incSliderDef = window.CONFIG?.sliders?.incumbency?.value ?? 3;
   const incMult = incSliderVal / incSliderDef;
   const incModCfg = window.CONFIG?.incumbencyMod || {};
@@ -1065,8 +1107,8 @@ function renderSimOnYear(year, yearStats, yMax) {
   const sims = runSimulations(
     liveParams, histNsim(), spec, null, null, pool,
     incActive
-      ? { actuals, incumbency: { signs: incSigns, mean: incMean, var: incVar, tail: incTail } }
-      : { actuals }
+      ? { actuals, crps: true, incumbency: { signs: incSigns, mean: incMean, var: incVar, tail: incTail } }
+      : { actuals, crps: true }
   );
   const mb = sims.mismatchBins;
   if (!mb || !sims.perDistrict || !sims.perDistrict.avgZ) {
@@ -1085,83 +1127,40 @@ function renderSimOnYear(year, yearStats, yMax) {
     ? 'PVI (prior 2 pres elections)'
     : 'PVI (current + prior pres elections)';
 
-  // ---- empirical-PIT goodness-of-fit (Cramér–von Mises) -------------------
-  // For each district the simulator already counted the number of sims
-  // in which predicted z fell BELOW the actual margin; dividing by n_sims
-  // gives the empirical PIT u_i ∈ [0, 1].  Under perfect calibration the
-  // u_i are uniform on [0, 1] across districts.
-  //
-  // We test that hypothesis with the Cramér–von Mises (W²) statistic:
-  //   W² = 1/(12n) + Σᵢ ( (2i−1)/(2n) − u_(i) )²
-  // where u_(1) ≤ … ≤ u_(n) is the sorted PIT.  W² compares the empirical
-  // CDF of u to the uniform CDF (a straight line from 0 to 1), integrating
-  // squared deviation across the whole [0, 1] range.  Two big wins over
-  // the previous χ²-on-binned-PIT metric:
-  //   1. No bin choice — much less run-to-run noise.  χ² with 20 bins
-  //      had std √(2·df) ≈ 6 even at perfect calibration; W² is far
-  //      smoother because every u_i contributes its exact rank.
-  //   2. Distribution-agnostic — no Gaussian assumption on the per-
-  //      district predicted distribution (which has slight skew /
-  //      heavier tails than Gaussian).
-  // Non-gameable: widening σ shifts u_i toward 0.5 (clusters mid-CDF
-  // → bend in empirical CDF → W² up); narrowing piles them at 0 and 1
-  // (steps at edges → W² up).  Has a real optimum.
-  // Reference points (asymptotic):
-  //   W² ≈ 0.17  → expected under calibration
-  //   W² ≤ 0.46 → can't reject calibration at p = 0.05
-  //   W² ≫ 0.46 → predicted distributions visibly miscalibrated
-  const ePIT = sims.perDistrict.empiricalPIT;
-  let pitFit = null;
-  let pitN = 0;
-  // Per-district squared deviation in PIT-rank units: w2Contrib[i] is
-  // ((2*rank_i − 1)/(2N) − u_(rank_i))² for the contested districts, and
-  // NaN for skipped (uncontested) ones.  Indexed by pool position so it
-  // can be binned by district lean below.
-  let w2Contrib = null;
-  // Raw sorted PIT values for the SHAPE diagnostic chart (PIT histogram).
-  let pitSorted = null;
-  if (ePIT) {
-    // Build (poolIdx, u) pairs, sort ascending by u to assign PIT ranks,
-    // then walk back and compute each contested district's contribution.
-    const pairs = [];
-    for (let i = 0; i < ePIT.length; i++) {
-      const u = ePIT[i];
-      if (u === u) pairs.push({ idx: i, u });
-    }
-    pitN = pairs.length;
-    if (pitN > 0) {
-      pairs.sort((a, b) => a.u - b.u);
-      w2Contrib = new Float64Array(ePIT.length);
-      for (let k = 0; k < ePIT.length; k++) w2Contrib[k] = NaN;
-      let w2 = 1 / (12 * pitN);
-      pitSorted = new Float64Array(pitN);
-      for (let r = 0; r < pitN; r++) {
-        const expected = (2 * (r + 1) - 1) / (2 * pitN);
-        const diff = expected - pairs[r].u;
-        const sq = diff * diff;
-        w2 += sq;
-        w2Contrib[pairs[r].idx] = sq;
-        pitSorted[r] = pairs[r].u;
-      }
-      pitFit = w2;
-    }
-  }
+  // (W² + per-district PIT-contribution computation was retired — auto-
+  // fit now optimises mean CRPS directly via sims.perDistrict.crps, and
+  // the calibration-only PIT diagnostics that used these intermediates
+  // were removed too.)
 
-  // Title: two lines so the fit-W² parenthetical doesn't overflow into
+  // Title: two lines so the fit-loss parenthetical doesn't overflow into
   // the chart at typical viewport widths.  Line 1 is the summary (year +
-  // seat counts + median lean); line 2 is the goodness-of-fit metric.
+  // seat counts + median lean); line 2 is the goodness-of-fit metric —
+  // mean CRPS over contested districts (units: pp), which is also what
+  // the auto-fit optimiser is minimising.
   const headerLine = [
     `<b>Simulator on ${year} districts</b>`,
     `D-won ${totalD.toFixed(1)}, R-won ${totalR.toFixed(1)}`,
     `median lean ${formatLean(med)}`,
   ].join(' &nbsp;·&nbsp; ');
   let titleText = headerLine;
-  if (pitFit != null) {
+  // Mean CRPS over contested districts (NaN-skipping).  This is the
+  // headline goodness-of-fit number now that auto-fit optimises CRPS.
+  let crpsMean = null, crpsN = 0;
+  const crpsArr = sims.perDistrict?.crps;
+  if (crpsArr) {
+    let s = 0;
+    for (let i = 0; i < crpsArr.length; i++) {
+      const c = crpsArr[i];
+      if (c === c) { s += c; crpsN++; }
+    }
+    if (crpsN > 0) crpsMean = s / crpsN;
+  }
+  if (crpsMean != null) {
     titleText += '<br>' +
       `<span style="font-size:11px">` +
-      `fit W²=${pitFit.toFixed(2)} ` +
-      `(goodness of fit on ${pitN} contested districts; ` +
-      `lower=better, ≲0.46 if calibrated)` +
+      `fit CRPS=${crpsMean.toFixed(2)} pp ` +
+      `(mean per-district CRPS over ${crpsN} contested districts; ` +
+      `lower=better)` +
       `</span>`;
   }
 
@@ -1199,62 +1198,60 @@ function renderSimOnYear(year, yearStats, yMax) {
   }, { displayModeBar: false, responsive: true });
 
   // ---- calibration diagnostics (gated) ----------------------------------
-  // The three charts below (per-lean W² contribution, PIT shape histogram,
-  // PIT shape per lean band) are developer-facing tuning aids.  Hidden by
-  // default everywhere; togglable via CONFIG.showCalibrationPlots, and
-  // hard-hidden on fly.dev / fly.io regardless of the flag.  When hidden
-  // we set display:none on each div AND skip the (somewhat expensive)
+  // The two charts below (per-lean mean-CRPS bar chart + predicted-vs-
+  // actual scatter) are developer-facing tuning aids.  Hidden by default
+  // everywhere; togglable via CONFIG.showCalibrationPlots, and hard-
+  // hidden on fly.dev / fly.io regardless of the flag.  When hidden we
+  // set display:none on each div AND skip the (somewhat expensive)
   // binning + Plotly.react path entirely.
   if (!calibrationPlotsVisible()) {
-    for (const id of ['simOnYearW2Chart', 'simOnYearPITChart', 'simOnYearPITByLeanChart']) {
+    for (const id of ['simOnYearW2Chart', 'simOnYearScatter']) {
       const el = document.getElementById(id);
       if (el) el.style.display = 'none';
     }
     return;
   }
 
-  // ---- per-lean W² contribution chart -----------------------------------
-  // Sum each contested district's PIT squared-deviation into the same
-  // 2pp bins as the heatmap above so the bars line up with the heatmap
-  // columns, then draw a small bar chart immediately under the heatmap.
-  // Lets the reader see at a glance which lean band is throwing W² off:
-  // a tall bar at, say, lean +12% means the actual margins in that band
-  // kept landing far inside the simulator's predicted-distribution tail.
+  // ---- per-lean CRPS contribution chart ---------------------------------
+  // Bin contested districts' per-district CRPS into the same 2pp lean
+  // bins as the heatmap above and plot the MEAN CRPS in each bin as a
+  // small bar chart aligned to the heatmap columns.  Lets the reader see
+  // at a glance which lean band is dragging the fit: a tall bar at, say,
+  // lean +12% means the simulator's predicted margin distributions in
+  // that band were systematically far from the actual margins (large
+  // E|X−y|) without commensurate spread (small E|X−X′|).
   const w2DivId = 'simOnYearW2Chart';
-  if (w2Contrib && pitFit != null) {
-    const W2_BIN = binSize; // share the heatmap's bin geometry
+  if (crpsArr && crpsMean != null) {
+    const W2_BIN = binSize;
     const nW2Bins = Math.ceil((hi - lo) / W2_BIN);
     const w2Centres = new Array(nW2Bins);
     const w2Sums = new Array(nW2Bins).fill(0);
     const w2Counts = new Array(nW2Bins).fill(0);
     for (let i = 0; i < nW2Bins; i++) w2Centres[i] = lo + (i + 0.5) * W2_BIN;
     for (let i = 0; i < pool.length; i++) {
-      const sq = w2Contrib[i];
-      if (!(sq === sq)) continue; // skip NaN (uncontested / unmatched)
+      const c = crpsArr[i];
+      if (!(c === c)) continue; // skip NaN (uncontested / unmatched)
       let bi = Math.floor((pool[i] - lo) / W2_BIN);
       if (bi < 0) bi = 0;
       else if (bi >= nW2Bins) bi = nW2Bins - 1;
-      w2Sums[bi] += sq;
+      w2Sums[bi] += c;
       w2Counts[bi]++;
     }
-    // Reference: under perfect calibration with N=pitN, the EXPECTED
-    // total W² is asymptotically 1/6 ≈ 0.167.  Spread evenly across
-    // contested districts that's 0.167/pitN per district; spread evenly
-    // across the bins gives a per-bin baseline of (0.167/pitN) * mean
-    // seats per bin.  We render that as a faint dashed line so the user
-    // can see which bars exceed "this is just sample noise".
-    const expectedPerDistrict = (1 / 6) / pitN;
-    const yRefArr = w2Counts.map(c => c * expectedPerDistrict);
+    // Per-bin mean CRPS (NaN where no contested districts in the bin).
+    const w2Means = w2Sums.map((s, i) => w2Counts[i] > 0 ? s / w2Counts[i] : NaN);
+    // Reference: the chamber-mean CRPS line so each bar is visually
+    // anchored to the headline number in the title.
+    const yRefArr = w2Centres.map(() => crpsMean);
     const customCounts = w2Counts.map(c => c);
     Plotly.react(w2DivId, [
       {
-        x: w2Centres, y: w2Sums, type: 'bar',
+        x: w2Centres, y: w2Means, type: 'bar',
         width: W2_BIN,
         marker: { color: 'rgba(120,120,120,0.85)', line: { width: 0 } },
         customdata: customCounts,
         hovertemplate:
           leanLabel + ': %{x:.0f}%<br>' +
-          'W² contribution: %{y:.3f}<br>' +
+          'mean CRPS: %{y:.2f} pp<br>' +
           '(%{customdata} contested districts in this bin)<extra></extra>',
       },
       {
@@ -1264,329 +1261,159 @@ function renderSimOnYear(year, yearStats, yMax) {
       },
     ], {
       title: {
-        text: `W² contribution by district lean ` +
+        text: `mean CRPS by district lean ` +
           `<span style="color:#888;font-weight:normal">` +
-          `· dotted line = per-bin baseline under perfect calibration` +
+          `· dotted line = chamber-mean CRPS (${crpsMean.toFixed(2)} pp)` +
           `</span>`,
         font: { size: 11 }, x: 0.04, xanchor: 'left',
       },
       xaxis: {
-        // Match the heatmap's range exactly so bars align with columns.
         ticksuffix: '%', range: [-100, 100], showticklabels: false,
         zeroline: true, zerolinecolor: '#333', zerolinewidth: 1,
       },
       yaxis: {
-        title: { text: 'W² contrib.', font: { size: 10 } },
+        title: { text: 'CRPS (pp)', font: { size: 10 } },
         rangemode: 'tozero', tickfont: { size: 9 },
       },
-      // Match left/right margins to the heatmap's so the x-axis lines up.
       margin: { l: 50, r: 14, t: 22, b: 6 },
       showlegend: false, plot_bgcolor: '#fff', bargap: 0,
     }, { displayModeBar: false, responsive: true });
     document.getElementById(w2DivId).style.display = '';
   } else {
-    // No PIT (e.g. no contested districts) — hide the bar chart.
     const el = document.getElementById(w2DivId);
     if (el) el.style.display = 'none';
   }
 
-  // ---- PIT shape diagnostic ---------------------------------------------
-  // Histogram of u_i across contested districts on a [0, 1] axis with a
-  // flat reference line at the uniform-expectation height (pitN /
-  // nPitBins).  The SHAPE of this histogram is the diagnosis:
-  //   • Flat        → predicted distributions calibrated (good)
-  //   • U-shaped    → predicted σ TOO SMALL (actuals fall in the tails);
-  //                   need more variance / Laplace tails / election noise
-  //   • Hump (peak  → predicted σ TOO LARGE (actuals cluster near
-  //     at 0.5)       predicted mean); cut variance / noise
-  //   • Skew left   → predicted means biased TOWARD R (actuals smaller);
-  //                   model overshoots R wins
-  //   • Skew right  → predicted means biased TOWARD D (actuals larger);
-  //                   model overshoots D wins
-  // We auto-detect the shape from {mean(u), variance(u), skew(u)} and
-  // print a one-line interpretation in the title so the user doesn't
-  // have to read the plot themselves.  Tolerances chosen so the
-  // "calibrated" label only fires when the deviations sit inside what
-  // sample noise alone would produce at the observed N.
-  const pitDivId = 'simOnYearPITChart';
-  if (pitSorted && pitSorted.length >= 10) {
-    const N_PIT_BINS = 20;
-    const pitBins = new Array(N_PIT_BINS).fill(0);
-    let sumU = 0, sumU2 = 0, sumU3 = 0;
-    for (let i = 0; i < pitSorted.length; i++) {
-      const u = pitSorted[i];
-      let bi = Math.floor(u * N_PIT_BINS);
-      if (bi < 0) bi = 0;
-      else if (bi >= N_PIT_BINS) bi = N_PIT_BINS - 1;
-      pitBins[bi]++;
-      sumU += u; sumU2 += u * u; sumU3 += u * u * u;
+  // ---- predicted-vs-actual scatter, coloured by CRPS, sized by σ -------
+  // One dot per contested district.  X = actual margin (pp), Y = the
+  // simulator's predicted MEAN margin (pp) for that district.  Diagonal
+  // y=x = model nailed the central prediction.  Dot colour = per-
+  // district CRPS (hot = high loss).  Dot diameter = predictive σ
+  // (big = wide interval).  The combination reads as:
+  //   • near diagonal                    → fine
+  //   • far + small + hot                → confidently wrong
+  //   • far + big + cool-ish             → wide interval saved it
+  //   • on diagonal but big              → calibrated but unsharp
+  // Replaces the previous PIT histogram + per-lean PIT heatmap, which
+  // diagnosed only calibration; the scatter directly shows where CRPS
+  // (the optimisation objective) is coming from across the chamber.
+  const scatterDivId = 'simOnYearScatter';
+  if (crpsArr && crpsN > 0) {
+    // Color by SIGNED bias: predicted_mean − actual.  Positive (model
+    // predicted more R than reality) → red.  Negative (model predicted
+    // more D than reality) → blue.  White = on the diagonal.  Symmetric
+    // diverging scale anchored at zero so the colour reads
+    // unambiguously as direction-of-error.
+    const xsA = [], ysM = [], bias = [], crps = [], sigma = [], txt = [];
+    let biasMax = 5;  // floor so a perfect-fit chart still has visible saturation
+    let sigmaMax = 0;
+    for (let i = 0; i < pool.length; i++) {
+      const c = crpsArr[i];
+      if (!(c === c)) continue;
+      const a = actuals[i];
+      if (!(a === a)) continue;
+      const b = avgZ[i] - a;
+      xsA.push(a);
+      ysM.push(avgZ[i]);
+      bias.push(b);
+      crps.push(c);
+      sigma.push(stdZ[i]);
+      const st = yearStats.allStates?.[order[i]] ?? '';
+      const ds = yearStats.allDistricts?.[order[i]] ?? '';
+      txt.push(`${st}-${ds} · lean ${pool[i].toFixed(1)}pp`);
+      const ab = Math.abs(b);
+      if (ab > biasMax) biasMax = ab;
+      if (stdZ[i] > sigmaMax) sigmaMax = stdZ[i];
     }
-    const meanU = sumU / pitSorted.length;
-    const varU = sumU2 / pitSorted.length - meanU * meanU;
-    // Standardised third moment (skewness): positive = right-tailed.
-    const sigmaU = Math.sqrt(Math.max(varU, 1e-12));
-    let m3 = 0;
-    for (let i = 0; i < pitSorted.length; i++) {
-      const z = (pitSorted[i] - meanU) / sigmaU;
-      m3 += z * z * z;
-    }
-    const skewU = m3 / pitSorted.length;
-    // Reference under perfect uniform: mean=0.5, var=1/12≈0.0833, skew=0.
-    // Sampling-noise tolerance bands at N=pitSorted.length:
-    //   meanU SE = sqrt(1/12 / N)
-    //   varU  SE ≈ sqrt(8/180 / N) (variance of uniform-sample variance)
-    //   skewU SE ≈ sqrt(6/N)
-    const meanSE = Math.sqrt((1 / 12) / pitSorted.length);
-    const varSE  = Math.sqrt((8 / 180) / pitSorted.length);
-    const skewSE = Math.sqrt(6 / pitSorted.length);
-    const meanZ = (meanU - 0.5) / meanSE;
-    const varZ  = (varU - 1 / 12) / varSE;
-    const skewZ = skewU / skewSE;
-    // Build a human-readable interpretation.  Bias dominates: when the
-    // mean is far from 0.5, the apparent variance shrinks just because
-    // mass clusters on one side (not because predicted σ is "too wide").
-    // Same with skewness — a one-sided distribution looks skewed even
-    // if the underlying spread is right.  So gate variance / skew on
-    // mean being approximately correct; otherwise report ONLY mean and
-    // tell the user to fix the bias first before chasing dispersion.
-    const findings = [];
-    const meanCalibrated = Math.abs(meanZ) <= 2;
-    if (!meanCalibrated) {
-      findings.push(meanU > 0.5
-        ? `mean=${meanU.toFixed(2)} > 0.5 (predicted z too LOW vs actuals → model biased TOWARD D / undershoots R) — fix this first; variance / skew are unreliable signals while mean is off`
-        : `mean=${meanU.toFixed(2)} < 0.5 (predicted z too HIGH vs actuals → model biased TOWARD R / undershoots D) — fix this first; variance / skew are unreliable signals while mean is off`);
-    } else {
-      // Mean is OK — now we can trust variance and skew.
-      if (Math.abs(varZ) > 2) {
-        findings.push(varZ > 0
-          ? `variance=${varU.toFixed(3)} > 1/12 (U-shape → predicted σ TOO NARROW; raise spread / tails / election noise)`
-          : `variance=${varU.toFixed(3)} < 1/12 (hump → predicted σ TOO WIDE; cut spread / noise)`);
-      }
-      if (Math.abs(skewZ) > 2.5) {
-        findings.push(skewU > 0
-          ? `skew=+${skewU.toFixed(2)} (long right tail → asymmetric miss, more under-prediction of R than D)`
-          : `skew=${skewU.toFixed(2)} (long left tail → asymmetric miss, more under-prediction of D than R)`);
-      }
-    }
-    const interp = findings.length === 0
-      ? `<span style="color:#2e7d32">looks calibrated — deviations all within sample noise at N=${pitSorted.length}</span>`
-      : `<span style="color:#b71c1c">${findings.join(' · ')}</span>`;
-    // Histogram x-axis: bin centres at (k + 0.5) / N_PIT_BINS.
-    const pitCentres = new Array(N_PIT_BINS);
-    for (let k = 0; k < N_PIT_BINS; k++) pitCentres[k] = (k + 0.5) / N_PIT_BINS;
-    const refHeight = pitSorted.length / N_PIT_BINS;
-    // Colour bars red when they overshoot the calibrated height by more
-    // than ~2 × sample-noise SE per bin so the deviations stand out.
-    const binSE = Math.sqrt(refHeight * (1 - 1 / N_PIT_BINS));
-    const barColours = pitBins.map(c =>
-      c > refHeight + 2 * binSE ? 'rgba(214,39,40,0.85)' :
-      c < refHeight - 2 * binSE ? 'rgba(31,119,180,0.85)' :
-      'rgba(120,120,120,0.7)');
-    Plotly.react(pitDivId, [
+    // Map σ → dot diameter in INVERSE: more confident (smaller σ) →
+    // bigger dot, so the eye is drawn to confidently-mispredicted
+    // districts (small σ AND saturated colour).  Linear inverse with
+    // a small floor keeps every district visible:
+    //   diameter = max(SIZE_MIN, sigmaMax + SIZE_PAD − σ)
+    // so the chamber's most-confident district renders at the largest
+    // size and the most-uncertain at SIZE_MIN.
+    const SIZE_MIN = 3;
+    const SIZE_PAD = 4;
+    const sz = sigma.map(s => Math.max(SIZE_MIN, sigmaMax + SIZE_PAD - s));
+    // Per-district customdata bundle for the hover (σ, CRPS, bias).
+    const cdata = sigma.map((s, i) => [s, crps[i], bias[i]]);
+    Plotly.react(scatterDivId, [
       {
-        x: pitCentres, y: pitBins, type: 'bar',
-        width: 1 / N_PIT_BINS,
-        marker: { color: barColours, line: { width: 0 } },
-        hovertemplate:
-          'PIT u ∈ [%{x:.2f}±%{width:.2f})<br>' +
-          '%{y} contested districts<extra></extra>',
+        x: [-100, 100], y: [-100, 100],
+        type: 'scatter', mode: 'lines',
+        line: { color: 'rgba(80,80,80,0.55)', width: 1, dash: 'dot' },
+        hoverinfo: 'skip', showlegend: false,
       },
       {
-        x: [0, 1], y: [refHeight, refHeight],
-        type: 'scatter', mode: 'lines',
-        line: { color: 'rgba(80,80,80,0.65)', width: 1, dash: 'dot' },
-        hoverinfo: 'skip',
+        x: xsA, y: ysM, type: 'scatter', mode: 'markers',
+        marker: {
+          color: bias,
+          // Symmetric diverging scale: blue (D-friendly miss) → white
+          // (on diagonal) → red (R-friendly miss).  Bands are slightly
+          // off Plotly's built-in RdBu so the white midpoint is more
+          // distinct against the page background.
+          colorscale: [
+            [0.00, 'rgb(33, 102, 172)'],
+            [0.25, 'rgb(146, 197, 222)'],
+            [0.50, 'rgb(247, 247, 247)'],
+            [0.75, 'rgb(244, 165, 130)'],
+            [1.00, 'rgb(178, 24, 43)'],
+          ],
+          cmin: -biasMax, cmax: biasMax, cmid: 0,
+          size: sz,
+          // Map σ (pp) directly to pixel diameter: dot radius ≈ 1× σ in
+          // pixels (sizemode=diameter, sizeref=1), with a 3px floor so
+          // tiny-σ districts stay visible.
+          sizemode: 'diameter', sizeref: 1, sizemin: 3,
+          colorbar: {
+            title: { text: 'predicted − actual<br>(pp, R+)', font: { size: 10 } },
+            thickness: 8, len: 0.85, x: 1.02, tickfont: { size: 9 },
+          },
+          line: { width: 0.5, color: 'rgba(0,0,0,0.4)' },
+        },
+        text: txt,
+        customdata: cdata,
+        hovertemplate:
+          '%{text}<br>' +
+          'actual=%{x:+.1f} pp · predicted mean=%{y:+.1f} pp<br>' +
+          'bias=%{customdata[2]:+.1f} pp · CRPS=%{customdata[1]:.2f} pp · σ=%{customdata[0]:.1f} pp' +
+          '<extra></extra>',
       },
     ], {
       title: {
-        text: `PIT shape (what kind of miscalibration drives W²) — ${interp}`,
+        text: `Predicted-mean vs actual margin ` +
+          `<span style="color:#888;font-weight:normal">` +
+          `· dot colour = signed bias (red = model too R-friendly, blue = too D-friendly)` +
+          ` · dot size = confidence (bigger = narrower predictive σ)` +
+          `</span>`,
         font: { size: 11 }, x: 0.04, xanchor: 'left',
       },
       xaxis: {
-        title: { text: 'PIT u (P(z_sim < actual))  ·  flat=calibrated, U=too narrow, hump=too wide', standoff: 4, font: { size: 10 } },
-        range: [0, 1], tickfont: { size: 9 },
+        title: { text: 'Actual margin (pp, R+)', font: { size: 10 }, standoff: 4 },
+        range: [-100, 100], zeroline: true, zerolinecolor: '#333', zerolinewidth: 1,
+        ticksuffix: '%', tickfont: { size: 9 }, dtick: 25,
       },
       yaxis: {
-        title: { text: 'Districts', font: { size: 10 } },
-        rangemode: 'tozero', tickfont: { size: 9 },
+        title: { text: 'Predicted mean (pp)', font: { size: 10 } },
+        range: [-100, 100], zeroline: true, zerolinecolor: '#333', zerolinewidth: 1,
+        ticksuffix: '%', tickfont: { size: 9 }, dtick: 25,
+        scaleanchor: 'x', scaleratio: 1,
       },
-      margin: { l: 50, r: 14, t: 22, b: 36 },
-      showlegend: false, plot_bgcolor: '#fff', bargap: 0,
-    }, { displayModeBar: false, responsive: true });
-    document.getElementById(pitDivId).style.display = '';
-  } else {
-    const el = document.getElementById(pitDivId);
-    if (el) el.style.display = 'none';
-  }
-
-  // ---- per-lean PIT heatmap --------------------------------------------
-  // 2D view: x = district lean (matched to the heatmap above), y = PIT
-  // bin in [0, 1], colour = (observed − expected) / expected for that
-  // (lean-bin, PIT-bin) cell, where expected = districtsInLeanBin /
-  // nPitBins.  Diverging blue→red colour scale: red cells are
-  // overrepresented (actuals kept landing here), blue underrepresented.
-  // Lets the reader see WHICH lean bands carry the bias / U / hump:
-  //   • A lean-band column with a vertical red→blue gradient (top hot,
-  //     bottom cold) = predicted z TOO LOW in this lean band
-  //     (model biased toward D here).
-  //   • Top + bottom both red, middle blue = U-shape in this band
-  //     (predicted σ too narrow).
-  //   • Middle red, top + bottom blue = hump (predicted σ too wide).
-  //   • All cells near white = calibrated in this lean band.
-  // Lean bins are coarser than the heatmap above (10pp instead of 2pp)
-  // so each cell averages ~4 districts even at sparse leans.
-  const pitByLeanDivId = 'simOnYearPITByLeanChart';
-  if (ePIT && pool.length > 0) {
-    // Use the same 2pp lean bin size as the heatmap + W²-by-lean chart
-    // above, so columns line up exactly with the chart columns the
-    // reader is comparing against.  Each cell is sparse (avg <1
-    // district per cell with 399 contested over 100 lean bins × 5 PIT
-    // bins) — that's the price of strict column alignment; the colour
-    // scale still reads as "extra districts vs uniform" per cell.
-    const PBL_LEAN_BIN = binSize;
-    const PBL_PIT_BINS = 5;   // 0-0.2, 0.2-0.4, 0.4-0.6, 0.6-0.8, 0.8-1.0
-    const nLeanBins = Math.ceil((hi - lo) / PBL_LEAN_BIN);
-    // counts[leanBin][pitBin]
-    const counts = Array.from({ length: nLeanBins }, () =>
-      new Array(PBL_PIT_BINS).fill(0));
-    const colTotals = new Array(nLeanBins).fill(0);
-    for (let i = 0; i < pool.length; i++) {
-      const u = ePIT[i];
-      if (!(u === u)) continue; // NaN = uncontested / unmatched
-      let lb = Math.floor((pool[i] - lo) / PBL_LEAN_BIN);
-      if (lb < 0) lb = 0;
-      else if (lb >= nLeanBins) lb = nLeanBins - 1;
-      let pb = Math.floor(u * PBL_PIT_BINS);
-      if (pb < 0) pb = 0;
-      else if (pb >= PBL_PIT_BINS) pb = PBL_PIT_BINS - 1;
-      counts[lb][pb]++;
-      colTotals[lb]++;
-    }
-    // Build z matrix (rows = PIT bins, cols = lean bins).  Cell value
-    // is (observed − expected) so colour reads as "extra districts in
-    // this PIT band beyond what uniform would predict for this lean".
-    // Empty lean columns (no contested districts) → row of NaN so they
-    // render as transparent, not zero (zero would imply "calibrated").
-    const z = [];
-    const customCounts = [];
-    const customExpected = [];
-    for (let pb = 0; pb < PBL_PIT_BINS; pb++) {
-      const zRow = new Array(nLeanBins);
-      const cRow = new Array(nLeanBins);
-      const eRow = new Array(nLeanBins);
-      for (let lb = 0; lb < nLeanBins; lb++) {
-        const total = colTotals[lb];
-        if (total === 0) {
-          zRow[lb] = NaN;
-          cRow[lb] = 0;
-          eRow[lb] = 0;
-        } else {
-          const expected = total / PBL_PIT_BINS;
-          zRow[lb] = counts[lb][pb] - expected;
-          cRow[lb] = counts[lb][pb];
-          eRow[lb] = expected;
-        }
-      }
-      z.push(zRow);
-      customCounts.push(cRow);
-      customExpected.push(eRow);
-    }
-    // Diverging colour scale: blue (deficit) → white (calibrated) → red
-    // (excess).  Cap symmetric at the largest |excess| so the scale
-    // adapts to the run.  Min cap 2 districts so a single-district
-    // outlier doesn't desaturate the colour.
-    let maxAbs = 2;
-    for (const row of z) for (const v of row) {
-      if (v === v && Math.abs(v) > maxAbs) maxAbs = Math.abs(v);
-    }
-    const xCentres = new Array(nLeanBins);
-    for (let lb = 0; lb < nLeanBins; lb++) xCentres[lb] = lo + (lb + 0.5) * PBL_LEAN_BIN;
-    const yCentres = new Array(PBL_PIT_BINS);
-    for (let pb = 0; pb < PBL_PIT_BINS; pb++) yCentres[pb] = (pb + 0.5) / PBL_PIT_BINS;
-    // Hover helper: convert a (lean, pitBin, observed, expected) tuple
-    // into a plain-language interpretation so the user doesn't have to
-    // remember the convention.
-    const PIT_BAND_TEXT = [
-      'sim TOO R-favorable<br>(actual was more D than predicted)',
-      'sim mildly R-favorable',
-      'CALIBRATED middle<br>(actual near predicted centre)',
-      'sim mildly D-favorable',
-      'sim TOO D-favorable<br>(actual was more R than predicted)',
-    ];
-    const customdata = customCounts.map((row, pi) => row.map((c, li) => [
-      c, customExpected[pi][li], PIT_BAND_TEXT[pi],
-    ]));
-    Plotly.react(pitByLeanDivId, [{
-      z, x: xCentres, y: yCentres, type: 'heatmap',
-      colorscale: [
-        [0.0, 'rgb(33, 102, 172)'],   // deficit
-        [0.5, 'rgb(247, 247, 247)'],  // calibrated
-        [1.0, 'rgb(178, 24, 43)'],    // excess
-      ],
-      zmin: -maxAbs, zmax: maxAbs, zmid: 0,
-      xgap: 1, ygap: 1,
-      showscale: false,
-      customdata,
-      hovertemplate:
-        '<b>' + leanLabel + ' %{x:.0f}%</b><br>' +
-        '%{customdata[2]}<br>' +
-        '<b>%{customdata[0]:d}</b> districts here ' +
-        '(expected %{customdata[1]:.1f} if calibrated, ' +
-        '%{z:+.1f} excess)' +
-        '<extra></extra>',
-    }], {
-      title: {
-        text:
-          `<b>PIT shape per lean band</b> ` +
-          `<span style="color:#666;font-weight:normal;font-size:10px">` +
-          `· each cell = (districts that landed here) − (expected if calibrated). ` +
-          `Red = surplus, blue = deficit, white = calibrated.` +
-          `</span><br>` +
-          `<span style="color:#666;font-weight:normal;font-size:10px">` +
-          `Read a column: red on top → model too D-favorable in this lean band ` +
-          `· red on bottom → too R-favorable ` +
-          `· red top+bottom → predicted σ too narrow ` +
-          `· red middle → predicted σ too wide</span>`,
-        font: { size: 11 }, x: 0.04, xanchor: 'left',
-      },
-      xaxis: {
-        // Match the heatmap's x range so columns line up with the chart above.
-        ticksuffix: '%', range: [-100, 100],
-        showticklabels: true, tickfont: { size: 9 },
-        dtick: 25,
-        zeroline: true, zerolinecolor: '#333', zerolinewidth: 1,
-      },
-      yaxis: {
-        title: { text: 'PIT u<br>(actual percentile<br>in predicted dist.)', font: { size: 9 } },
-        range: [0, 1], tickfont: { size: 8 },
-        tickvals: [0.1, 0.3, 0.5, 0.7, 0.9],
-        // Y-axis labels carry the semantic meaning of each PIT band so
-        // the user can read the chart without remembering the convention.
-        ticktext: [
-          '0–.2 sim too R',
-          '.2–.4',
-          '.4–.6 calibrated',
-          '.6–.8',
-          '.8–1 sim too D',
-        ],
-      },
-      // Annotations: split the y-axis into two halves with a labelled
-      // dividing line at u=0.5 to make the "calibrated middle vs biased
-      // halves" geometry visually obvious.
-      shapes: [{
-        type: 'line', xref: 'x', yref: 'y',
-        x0: -100, x1: 100, y0: 0.5, y1: 0.5,
-        line: { color: '#333', width: 1, dash: 'dot' },
-      }],
-      margin: { l: 90, r: 14, t: 38, b: 26 },
+      margin: { l: 60, r: 60, t: 26, b: 36 },
       showlegend: false, plot_bgcolor: '#fff',
     }, { displayModeBar: false, responsive: true });
-    document.getElementById(pitByLeanDivId).style.display = '';
+    document.getElementById(scatterDivId).style.display = '';
   } else {
-    const el = document.getElementById(pitByLeanDivId);
+    const el = document.getElementById(scatterDivId);
     if (el) el.style.display = 'none';
   }
 }
+
+// (PIT shape histogram + per-lean PIT heatmap blocks were retired —
+// PIT diagnostics measure calibration only, which is orthogonal to the
+// CRPS objective auto-fit now optimises.  The predicted-vs-actual
+// scatter above shows where CRPS is coming from directly.)
+
 
 // (renderScatter / the calibration scatter row were retired — the
 // goodness-of-fit χ² is now shown in the "Simulator on YYYY districts"
@@ -1810,6 +1637,17 @@ function renderYearThumb(divId, year, stats, yMax) {
       presetBtn.textContent = `Approximate ${y} election`;
       presetBtn.dataset.year = String(y);
     }
+    // Same dance for the dev-only "recompute preset" button: only
+    // visible when calibration plots are visible (config flag + non-
+    // fly-host check), and the year-text + dataset are kept in sync.
+    const recomputeBtn = document.getElementById('recomputeYearPreset');
+    if (recomputeBtn) {
+      const visible = typeof calibrationPlotsVisible === 'function'
+        && calibrationPlotsVisible();
+      recomputeBtn.style.display = visible ? '' : 'none';
+      recomputeBtn.textContent = `Recompute preset for ${y}`;
+      recomputeBtn.dataset.year = String(y);
+    }
   }
 
   // Build the picker: one small card per cycle, click selects it.
@@ -1845,6 +1683,58 @@ function renderYearThumb(divId, year, stats, yMax) {
   // binding regardless of definition order.
   let autoFitRunning = false;
 
+  // Live PVI-weight sliders (opt-in via CONFIG.pviWeightSliders.enabled).
+  // Show the rows + cache last-known slider values so we only rebuild
+  // PVI when the values ACTUALLY change (every slider input fires
+  // runAndRender, but most events leave PVI alone).
+  let lastPresPrev = null, lastMidPrev = null;
+  if (window.CONFIG?.pviWeightSliders?.enabled) {
+    for (const id of ['presPrevWeightRow', 'midtermPrevWeightRow']) {
+      const r = document.getElementById(id);
+      if (r) r.style.display = '';
+    }
+  }
+
+  // Incumbency slider — opt-in via CONFIG.showIncumbencySlider.  When
+  // off (default), reveal-vs-hide is handled here; the actual slider
+  // value gets forced to 0 AFTER CONTROLS.bind below (any earlier
+  // override gets clobbered by restoreSliderState rehydrating from
+  // localStorage).  We DO NOT touch CONFIG.sliders.incumbency.value
+  // here — renderSimOnYear divides by that value, so zeroing it would
+  // poison the per-district incumbency bundle with NaN.  The autoFit
+  // candidate list filters incumbency out further so CMA-ES doesn't
+  // sample a knob the user can't see.
+  if (window.CONFIG?.showIncumbencySlider) {
+    const r = document.getElementById('incumbencyRow');
+    if (r) r.style.display = '';
+  }
+  function rebuildSelectedYearStats() {
+    if (selectedYear == null) return;
+    rebuildPviData();
+    const isMidterm = MIDTERM_YEARS.has(selectedYear);
+    const old = yearStats[selectedYear];
+    const fresh = isMidterm
+      ? buildYear(selectedYear, data.midtermPvi, 'margin', houseIdx)
+      : buildYear(selectedYear, data.presPvi, 'margin', houseIdx);
+    fresh.isMidterm = isMidterm;
+    // Preserve the per-year side-tables that don't depend on PVI.
+    fresh.marginByKey = old.marginByKey;
+    fresh.incumbentByKey = old.incumbentByKey;
+    yearStats[selectedYear] = fresh;
+  }
+  function maybeRebuildForLivePVI() {
+    if (!window.CONFIG?.pviWeightSliders?.enabled) return false;
+    const ps = document.getElementById('presPrevWeight');
+    const ms = document.getElementById('midtermPrevWeight');
+    const presNow = ps ? parseFloat(ps.value) : null;
+    const midNow  = ms ? parseFloat(ms.value) : null;
+    if (presNow === lastPresPrev && midNow === lastMidPrev) return false;
+    lastPresPrev = presNow;
+    lastMidPrev  = midNow;
+    rebuildSelectedYearStats();
+    return true;
+  }
+
   // Slider-driven simulator run.  Triggered once at bind() time (so the
   // initial chart state matches the panel) and again on every slider
   // change.  Same render path as the cross-tab storage event below —
@@ -1859,6 +1749,7 @@ function renderYearThumb(divId, year, stats, yMax) {
     // the autoFitRunning gate (one final render fires after auto-fit
     // clears the gate).
     if (autoFitRunning) return;
+    maybeRebuildForLivePVI();
     if (selectedYear != null) {
       renderSimOnYear(selectedYear, yearStats[selectedYear], yMax);
     }
@@ -1870,6 +1761,19 @@ function renderYearThumb(divId, year, stats, yMax) {
     onRun: runAndRender,
     debounceConfigKey: 'historicalSliderDebounceMs',
   });
+
+  // Post-bind: if the incumbency slider is hidden, force its value to
+  // 0 again — restoreSliderState() inside bind() may have rehydrated a
+  // non-zero value from a previous session's localStorage.  We
+  // dispatch input so the wrap-fill / number-readout / debounced
+  // render all see the override.
+  if (!window.CONFIG?.showIncumbencySlider) {
+    const incEl = document.getElementById('incumbency');
+    if (incEl && parseFloat(incEl.value) !== 0) {
+      incEl.value = '0';
+      incEl.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  }
 
   // ---- Auto-fit: coordinate descent + golden-section on W² ---------------
   // For each slider in order, find the value that minimises the goodness-
@@ -1902,19 +1806,19 @@ function renderYearThumb(divId, year, stats, yMax) {
     // obvious the optimiser is busy and not just waiting on input.
     btn.innerHTML = '<span class="spinner"></span>Auto-fitting… (click to stop)';
 
-    // Unpin every "Move both sliders together" pair before optimising —
-    // otherwise dragging one half drags the other and the optimiser
-    // can never explore asymmetric configurations (e.g. dGerry slightly
-    // higher than rGerry for a year where one party was more efficient
-    // with packing).  Pins are left unchecked after auto-fit completes;
-    // re-tick whichever pair you want to keep symmetric and the panel
-    // resumes its usual paired-drag behaviour.
-    for (const pinId of [
+    // Pin-pair management: random search + coordinate descent both
+    // need each side of every pinned pair to move independently, so
+    // unconditionally UNCHECK every pin up front.  (Earlier versions
+    // ran a "pinned warmup" stage that optimised pairs as a single
+    // coupled DOF first; that was retired in favour of broad random
+    // sampling, which explores the asymmetric joint space directly.)
+    const ALL_PINS = [
       'dGerry_rGerry_pin',
       'dIntModSafe_rIntModSafe_pin',
       'dIntModSwing_rIntModSwing_pin',
       'dIntModOpp_rIntModOpp_pin',
-    ]) {
+    ];
+    for (const pinId of ALL_PINS) {
       const cb = document.getElementById(pinId);
       if (cb && cb.checked) {
         cb.checked = false;
@@ -1922,107 +1826,197 @@ function renderYearThumb(divId, year, stats, yMax) {
       }
     }
 
-    // Pin v to the year's actual SHAVE-adjusted House popular-vote margin
-    // up front and DON'T optimise it — the popular vote isn't a knob,
-    // we know what it was for the cycle.  This frees the optimiser to
-    // tune the structural sliders against a fixed-and-correct national
-    // wave, instead of folding wave error into rGerry / candidate noise.
-    const hpv = HOUSE_POPVOTE_MARGIN[selectedYear];
-    if (hpv != null) {
-      const vSlider = document.getElementById('v');
-      if (vSlider) {
-        const lo = parseFloat(vSlider.min), hi = parseFloat(vSlider.max);
-        vSlider.value = String(Math.max(lo, Math.min(hi, hpv)));
-        vSlider.dispatchEvent(new Event('input', { bubbles: true }));
+    // (The popular-vote slider `v` used to be hard-pinned to the cycle's
+    // SHAVE / Brookings margin here.  It's now in autoFitRegularization
+    // with the SHAVE values as priorByYear — the optimiser can move it,
+    // the weight pulls it back.  See CONFIG.autoFitRegularization.v.)
+
+    // Seed every regularised slider AT its resolved prior so coordinate
+    // descent starts where the regularisation pulls it (rather than
+    // golden-sectioning from the global default and paying penalty
+    // mass to swim back).  Prior resolution mirrors evalW2:
+    // priorByYear[selectedYear] → prior → slider's CONFIG default.
+    // Only sliders with weight > 0 are seeded; weight = 0 leaves the
+    // slider at whatever value it currently has (consistent with the
+    // "regularisation off" interpretation).
+    const reg = window.CONFIG?.autoFitRegularization;
+    if (reg) {
+      for (const id of Object.keys(reg)) {
+        const entry = reg[id] || {};
+        if (!entry.weight) continue;  // unregularised: leave slider alone
+        const slider = document.getElementById(id);
+        if (!slider) continue;
+        const fallback = window.CONFIG?.sliders?.[id]?.value;
+        const prior = entry.priorByYear?.[selectedYear]
+          ?? entry.prior
+          ?? fallback;
+        if (prior == null) continue;
+        const lo = parseFloat(slider.min), hi = parseFloat(slider.max);
+        slider.value = String(Math.max(lo, Math.min(hi, prior)));
+        slider.dispatchEvent(new Event('input', { bubbles: true }));
       }
     }
 
-    // Per-year sqrtQualImp starting point.  When
-    // CONFIG.historicalSqrtQualImpByYear has an entry for the selected
-    // year, override the slider before golden-section kicks off — gets
-    // the optimiser out of local minima on years where the candidate-
-    // ideology weight wants to be unusually high or low and the
-    // default sqrtQualImp = 0.45 (= √0.2) would converge to the wrong
-    // basin.  Years not listed: golden-section starts from whatever
-    // the slider shows.
-    const qiByYear = window.CONFIG?.historicalSqrtQualImpByYear || {};
-    const qiSeed = qiByYear[selectedYear];
-    if (qiSeed != null && isFinite(qiSeed)) {
-      const qiSlider = document.getElementById('sqrtQualImp');
-      if (qiSlider) {
-        const lo = parseFloat(qiSlider.min), hi = parseFloat(qiSlider.max);
-        qiSlider.value = String(Math.max(lo, Math.min(hi, qiSeed)));
-        qiSlider.dispatchEvent(new Event('input', { bubbles: true }));
-      }
-    }
-
-    // Build the year's pool + actuals once; the optimisation just rotates
-    // the sliders.  Same construction as renderSimOnYear, including the
-    // optional per-district incumbency boosts.
+    // Build the year's pool + actuals; with live PVI sliders enabled the
+    // optimiser may sweep the lean axis itself, so we re-fill these
+    // arrays in place via fillPoolArrays() whenever evalW2 detects the
+    // PVI sliders moved.  Without live PVI, fillPoolArrays runs exactly
+    // once below and the buffers stay frozen for the whole fit (same
+    // behaviour as before).
     const N = ys.allLeans.length;
     const order = Array.from({ length: N }, (_, i) => i);
-    order.sort((a, b) => ys.allLeans[a] - ys.allLeans[b]);
     const pool = new Float64Array(N);
     const actuals = new Float64Array(N);
-    // Incumbency: per-district signs (immutable per year — built once)
-    // plus (mean, var, tail) bundle that's REFRESHED on every evalW2
-    // call from the live slider value.  Auto-fit now includes the
-    // incumbency slider in its candidates phase, so the bundle has to
-    // pick up the slider's new position on each goldenMin probe; if we
-    // baked mean/var/tail into trackBag at setup time the optimiser
-    // would silently ignore its own slider moves.
-    const incSliderEl = document.getElementById('incumbency');
+    // Incumbency: only consider the slider when its visibility flag is
+    // on; otherwise treat as fully off (signs = null → no incumbency
+    // bundle in trackBag).
+    const incSliderEl = window.CONFIG?.showIncumbencySlider
+      ? document.getElementById('incumbency') : null;
     const incSliderDef = window.CONFIG?.sliders?.incumbency?.value ?? 3;
     const incModCfg = window.CONFIG?.incumbencyMod || {};
     const incCfgMean = incModCfg.mean ?? 0;
     const incCfgVar  = incModCfg.var  ?? 0;
     const incCfgTail = incModCfg.tail ?? 0;
-    // Pre-compute district signs in pool order so the per-probe bundle
-    // build is O(1) instead of O(N).  Null when no slider element on
-    // page or the year has no incumbency map.
     const incSigns = (incSliderEl && ys.incumbentByKey) ? new Int8Array(N) : null;
-    for (let i = 0; i < N; i++) {
-      pool[i] = ys.allLeans[order[i]];
-      const key = ys.allStates[order[i]] + '|' + ys.allDistricts[order[i]];
-      const info = ys.marginByKey?.get(key);
-      actuals[i] = (info && isFinite(info.margin) && Math.abs(info.margin) < 99.5)
-        ? info.margin : NaN;
-      if (incSigns) {
-        incSigns[i] = ys.incumbentByKey.get(key) || 0;
+    const actualWinIsR = new Float64Array(N);
+    function fillPoolArrays() {
+      // Read fresh — yearStats[selectedYear] gets reassigned by
+      // rebuildSelectedYearStats() when PVI sliders move.
+      const ysL = yearStats[selectedYear];
+      for (let i = 0; i < N; i++) order[i] = i;
+      order.sort((a, b) => ysL.allLeans[a] - ysL.allLeans[b]);
+      for (let i = 0; i < N; i++) {
+        pool[i] = ysL.allLeans[order[i]];
+        const key = ysL.allStates[order[i]] + '|' + ysL.allDistricts[order[i]];
+        const info = ysL.marginByKey?.get(key);
+        actuals[i] = (info && isFinite(info.margin) && Math.abs(info.margin) < 99.5)
+          ? info.margin : NaN;
+        if (incSigns) incSigns[i] = ysL.incumbentByKey.get(key) || 0;
+        const winner = info?.winner_party;
+        actualWinIsR[i] = winner === 'R' ? 1
+          : winner === 'D' ? 0
+          : (info && isFinite(info.margin)) ? (info.margin > 0 ? 1 : 0)
+          : NaN;
       }
     }
+    fillPoolArrays();
+    // Live-PVI guard: when the flag is on, evalW2 watches these two
+    // sliders and triggers a rebuild + refill when either has moved
+    // since the last evaluation.  Initialised to whatever the sliders
+    // read right now so the first probe doesn't trigger a redundant
+    // rebuild.
+    const livePVIEnabled = !!window.CONFIG?.pviWeightSliders?.enabled;
+    let lastPVIPresW = livePVIEnabled
+      ? parseFloat(document.getElementById('presPrevWeight')?.value)
+      : null;
+    let lastPVIMidW = livePVIEnabled
+      ? parseFloat(document.getElementById('midtermPrevWeight')?.value)
+      : null;
     const spec = { binSize, lo: -100, hi: 100 };
     function buildTrackBag() {
-      if (!incSigns) return { actuals };
+      const bag = { actuals, crps: true };
+      if (!incSigns) return bag;
       const sliderVal = parseFloat(incSliderEl.value);
       const mult = sliderVal / incSliderDef;
       const mean = mult * incCfgMean;
       const v    = mult * incCfgVar;
       const tail = mult * incCfgTail;
-      if (mean === 0 && v === 0 && tail === 0) return { actuals };
-      return { actuals, incumbency: { signs: incSigns, mean, var: v, tail } };
+      if (mean === 0 && v === 0 && tail === 0) return bag;
+      bag.incumbency = { signs: incSigns, mean, var: v, tail };
+      return bag;
     }
 
+    // Auto-fit objective.  Despite the historical name `evalW2`, the loss is
+    // now mean per-district CRPS (Continuous Ranked Probability Score) over
+    // contested districts — a strictly proper scoring rule that captures
+    // calibration AND sharpness AND winner accuracy in one number, in pp
+    // units.  W² (calibration only) was replaced because it was insensitive
+    // to spread: a wide well-calibrated predictive distribution scored the
+    // same as a tight one.  Components:
+    //   1. mean CRPS  — primary loss, the per-district closed-form CRPS
+    //                   computed by runSimulations from each district's
+    //                   sorted M margin samples (M = nsim).  Magnitude is
+    //                   in pp, typically ~5-15 for this problem.
+    //   2. Brier (optional, weight `autoFitWinnerLoss.weight`) — extra
+    //                   penalty for wrong winner predictions, redundant
+    //                   with CRPS in principle but sharper on the discrete
+    //                   correctness signal.  Magnitude ~0-1.  NOTE: when
+    //                   migrating from W² (~0.1-2) to CRPS (~5-15) you may
+    //                   want to ~10× the winner weight to keep the same
+    //                   relative pull.
+    //   3. Regularization (per-slider quadratic pull toward a prior) —
+    //                   same magnitudes as before; the autoFitRegularization
+    //                   weights may also need ~10× rescale since they were
+    //                   tuned against W², not CRPS.
     function evalW2() {
+      // Live-PVI: when the optimiser perturbs presPrevWeight /
+      // midtermPrevWeight, rebuild the year's PVI + refill the pool /
+      // actuals / incSigns / actualWinIsR arrays before sampling.  Skip
+      // the work when nothing moved (cheap value-equality check).
+      if (livePVIEnabled) {
+        const ps = parseFloat(document.getElementById('presPrevWeight')?.value);
+        const ms = parseFloat(document.getElementById('midtermPrevWeight')?.value);
+        if (ps !== lastPVIPresW || ms !== lastPVIMidW) {
+          lastPVIPresW = ps;
+          lastPVIMidW = ms;
+          rebuildSelectedYearStats();
+          fillPoolArrays();
+        }
+      }
       const p = CONTROLS.readParams();
       const nsim = histNsim();
       const sims = runSimulations(p, nsim, spec, null, null, pool, buildTrackBag());
-      const ePIT = sims.perDistrict?.empiricalPIT;
-      if (!ePIT) return Infinity;
-      const uVals = [];
-      for (let i = 0; i < ePIT.length; i++) {
-        const u = ePIT[i];
-        if (u === u) uVals.push(u);
+      const crps = sims.perDistrict?.crps;
+      if (!crps) return Infinity;
+      let crpsSum = 0, crpsN = 0;
+      for (let i = 0; i < crps.length; i++) {
+        const c = crps[i];
+        if (c === c) { crpsSum += c; crpsN++; }
       }
-      if (uVals.length < 2) return Infinity;
-      uVals.sort((a, b) => a - b);
-      let w2 = 1 / (12 * uVals.length);
-      for (let i = 0; i < uVals.length; i++) {
-        const expected = (2 * (i + 1) - 1) / (2 * uVals.length);
-        const diff = expected - uVals[i];
-        w2 += diff * diff;
+      if (crpsN === 0) return Infinity;
+      let loss = crpsSum / crpsN;
+      const winnerW = window.CONFIG?.autoFitWinnerLoss?.weight ?? 0;
+      if (winnerW > 0 && sims.perDistrict?.rWinProb) {
+        const rWinProb = sims.perDistrict.rWinProb;
+        let brierSum = 0, brierN = 0;
+        for (let i = 0; i < N; i++) {
+          const actR = actualWinIsR[i];
+          if (!(actR === actR)) continue;  // skip NaN (winner unknown)
+          const d = rWinProb[i] - actR;
+          brierSum += d * d;
+          brierN++;
+        }
+        if (brierN > 0) loss += winnerW * (brierSum / brierN);
       }
-      return w2;
+      // Regularization: pull listed sliders back toward a configured
+      // prior, so the optimiser can't over-rely on them to absorb
+      // structural mismatches.  Per slider:
+      //   penalty = weight · (current − prior)²
+      // Each entry in CONFIG.autoFitRegularization is { weight, prior?,
+      // priorByYear? }.  Resolve the prior in this order:
+      //   1. priorByYear[selectedYear]  (year-specific)
+      //   2. prior                       (scalar)
+      //   3. slider's CONFIG default     (fallback)
+      // Read live each call so weights / priors can be tuned without
+      // reload.
+      const reg = window.CONFIG?.autoFitRegularization;
+      if (reg) {
+        for (const id of Object.keys(reg)) {
+          const entry = reg[id] || {};
+          const w = entry.weight ?? 0;
+          if (!w) continue;
+          const el = document.getElementById(id);
+          if (!el) continue;
+          const fallback = window.CONFIG?.sliders?.[id]?.value;
+          const prior = entry.priorByYear?.[selectedYear]
+            ?? entry.prior
+            ?? fallback;
+          if (prior == null) continue;
+          const dev = parseFloat(el.value) - prior;
+          loss += w * dev * dev;
+        }
+      }
+      return loss;
     }
 
     // The district-map sliders (rGerry, dGerry) shape the
@@ -2083,156 +2077,216 @@ function renderYearThumb(divId, year, stats, yMax) {
       r.dispatchEvent(new Event('input', { bubbles: true }));
     }
 
-    // Golden-section search on a single slider over [a, b].  Returns the
-    // value that minimised `objective` on the swept points (within
-    // tolerance).  Objective is supplied per call so the district-map
-    // phase can target Δ while the rest target W².
-    async function goldenMin(id, a, b, tol, maxIter, objective) {
-      const phi = (Math.sqrt(5) - 1) / 2;
-      let c = b - phi * (b - a);
-      let d = a + phi * (b - a);
-      setSlider(id, c); let fc = objective();
-      setSlider(id, d); let fd = objective();
-      let best = fc < fd ? { v: c, f: fc } : { v: d, f: fd };
-      for (let i = 0; i < maxIter; i++) {
-        if (!autoFitRunning) break;
-        if (fc < fd) {
-          b = d; d = c; fd = fc;
-          c = b - phi * (b - a);
-          setSlider(id, c); fc = objective();
-          if (fc < best.f) best = { v: c, f: fc };
-        } else {
-          a = c; c = d; fc = fd;
-          d = a + phi * (b - a);
-          setSlider(id, d); fd = objective();
-          if (fd < best.f) best = { v: d, f: fd };
-        }
-        // Yield to the event loop so the slider thumb visibly moves and
-        // the user can hit "Stop auto-fit".
-        await new Promise(r => setTimeout(r, 0));
-        if (Math.abs(b - a) < tol) break;
-      }
-      setSlider(id, best.v);
-      return best.f;
+    // Fast-path slider write for the random-search inner loops.  Skips
+    // the `input` event dispatch (no wrap-fill, no number-readout, no
+    // pin propagation, no debounced render kick-off) — `readParams()`
+    // reads slider.value directly so evalDelta / evalW2 still see the
+    // new value.  This was the dominant cost in batch runs: dispatching
+    // input events thousands of times per year drove the inner loop
+    // ~300× slower than the underlying eval, especially in background
+    // tabs where the input-handler chain (which schedules a setTimeout
+    // for the debounced render gate-check) gets clamped by Chrome's
+    // intensive-throttling.  bestVals is applied through the full
+    // setSlider at the end of each stage so the UI catches up.
+    function setSliderRaw(id, v) {
+      const r = document.getElementById(id);
+      if (!r) return;
+      const lo = parseFloat(r.min), hi = parseFloat(r.max);
+      const clamped = Math.max(lo, Math.min(hi, v));
+      r.value = String(clamped);
     }
 
-    // Two-phase optimisation:
-    //   Phase 1 — district map (rGerry, dGerry):
-    //     objective is Δ (mean |Δlean| at matched ranks between the
-    //     analytic pool and the year's real lean pool).  These sliders
-    //     only shape the analytic pool, which the simulator's W² path
-    //     doesn't even use (we feed the real `pool` as
-    //     customDistrictPool there), so W² is the wrong target.  Δ is
-    //     also far cheaper to evaluate (no simulator run needed — just
-    //     a sorted-pool comparison), so this phase runs in ms.
-    //   Phase 2 — voters + candidates:
-    //     objective is W² as before, evaluated against the year's real
-    //     chamber via the empirical PIT.
-    // (All pin-pair checkboxes have already been unchecked at the top
-    // of auto-fit so each slider moves independently.)  v is intentionally
-    // omitted — pinned from HOUSE_POPVOTE_MARGIN above.
-    const districtMapSliders = ['rGerry', 'dGerry'];
-    // Candidates run for full multi-cycle coordinate descent; the two
-    // free-floating "noise knobs" (qualImp = how strongly noise gets
-    // weighted vs candidate ideology, sqrtSigmaN = election randomness
-    // scale) get exactly ONE pass at the very end.
-    //
-    // Why one pass at the end:
-    //   - If they move first they soak up structural mismatches that
-    //     ought to be absorbed by the candidate sliders.
-    //   - If we let them re-fit AFTER moving them once, the optimiser
-    //     starts pulling the candidate sliders to compensate for the
-    //     new noise level, then re-fits noise against those new
-    //     candidate values, and so on — that's the overfitting loop:
-    //     the noise knobs end up encoding year-specific election
-    //     fluctuations rather than anything model-meaningful.
-    //   - Settling them once on the residual unexplained variance —
-    //     after structure is locked — gives a clean read of "how much
-    //     of the chamber's variance is genuinely noise, given a
-    //     correct structural model" with no opportunity to chase the
-    //     specific draw.
-    // Incumbency leads the candidates phase — it's a structural per-
-    // district z shift derived from prior-cycle winners (deterministic
-    // signal, not noise), so we want it locked in before the candidate-
-    // ideology sliders fit residuals against it.  Same multi-cycle
-    // treatment as the rest of the candidate block so it can co-adapt
-    // with safe / swing / opp on the second pass.  Skipped (no-op) if
-    // the slider element isn't on the page (i.e. the simulator).
-    const candidateSliders = [
-      'incumbency',
-      'dIntModSwing', 'rIntModSwing',
-      'dIntModOpp', 'rIntModOpp',
-      'dIntModSafe', 'rIntModSafe',
-    ];
-    const noiseSliders = ['sqrtQualImp', 'sqrtSigmaN'];
-    const cycles = 2;
+    // Random-search optimisation.  v is intentionally omitted — pinned
+    // from HOUSE_POPVOTE_MARGIN above.  All pin-pair checkboxes have
+    // already been unchecked at the top of auto-fit so each slider
+    // moves independently.
     let lastDelta = Infinity;
     let lastMedDiff = Infinity;
     let lastW2 = Infinity;
 
-    // Phase 1: district map → median-then-Δ.  Two passes since
-    // rGerry/dGerry/urban interact (extra urban-blowout mass shifts
-    // the rank-quantiles that dGerry would otherwise occupy).
-    for (let cycle = 0; cycle < cycles; cycle++) {
-      for (let i = 0; i < districtMapSliders.length; i++) {
-        if (!autoFitRunning) break;
-        const id = districtMapSliders[i];
-        const cfg = window.CONFIG.sliders[id];
-        if (!cfg) continue;
-        const tol = (cfg.max - cfg.min) * 0.02;
-        status.textContent =
-          `District map ${cycle + 1}/${cycles} · ${id}` +
-          (isFinite(lastDelta)
-            ? ` · best medianΔ=${lastMedDiff.toFixed(2)} pp · Δ=${lastDelta.toFixed(2)} pp`
-            : '');
-        // goldenMin returns the combined objective; pull the components
-        // out separately for the user-facing readout.  Slider is left
-        // at the optimiser's best value, so evalDeltaParts() reports
-        // the components AT that best setting.
-        await goldenMin(id, cfg.min, cfg.max, tol, 7, evalDelta);
+    // Two parallel random-search loops because the sliders split
+    // cleanly by objective:
+    //   - district-map sliders (rGerry, dGerry) only feed the
+    //     analytic pool, optimised against medianΔ + Δ — evaluation
+    //     is just a sorted-pool comparison (microseconds), so we can
+    //     afford lots of samples.
+    //   - candidate sliders feed the simulator directly, optimised
+    //     against W² (+ regularisation + optional winner-Brier) —
+    //     each evaluation is a full nsim run, so the budget is
+    //     deliberately tighter.
+    const rsCfg = window.CONFIG?.autoFitRandomSearch || {};
+    const N_DM_SAMPLES = rsCfg.districtMapSamples ?? 300;
+    const N_CAND_SAMPLES = rsCfg.candidateSamples ?? 60;
+
+    // Stage A.1 — district map random sampling.
+    {
+      const ids = ['rGerry', 'dGerry'];
+      const cfgs = ids.map(id => window.CONFIG.sliders[id]).filter(Boolean);
+      if (cfgs.length === ids.length) {
+        // Probe current values first so we never adopt a sample worse
+        // than the seed (which may already be at a sensible default).
+        let bestObj = evalDelta();
+        let bestVals = ids.map(id => parseFloat(document.getElementById(id).value));
+        // Yield interval: the inner step is ~3 ms (just an analytic-pool
+        // build + sort/compare), so yielding every iteration would burn
+        // most of the time on event-loop overhead.  Yield every
+        // YIELD_EVERY samples; in background tabs setTimeout(0) gets
+        // throttled (Chrome intensive-throttling can clamp to ~1 Hz),
+        // so each yield costs ~1 s — bigger batches between yields keep
+        // wall-clock proportional to inner-step time, not yield latency.
+        const YIELD_EVERY = 200;
+        for (let s = 0; s < N_DM_SAMPLES; s++) {
+          if (!autoFitRunning) break;
+          const trial = cfgs.map(c => c.min + Math.random() * (c.max - c.min));
+          for (let i = 0; i < ids.length; i++) setSliderRaw(ids[i], trial[i]);
+          const obj = evalDelta();
+          if (obj < bestObj) { bestObj = obj; bestVals = trial.slice(); }
+          if (s % YIELD_EVERY === 0) {
+            const parts = evalDeltaParts();
+            status.textContent =
+              `Random search · district map · ${s + 1}/${N_DM_SAMPLES}` +
+              ` · best medianΔ=${parts.medDiff.toFixed(2)} pp · Δ=${parts.delta.toFixed(2)} pp`;
+            await new Promise(r => setTimeout(r, 0));
+          }
+        }
+        // Apply best through the full setSlider so the UI catches up
+        // (thumb position, number readout, pin propagation are all
+        // skipped during the inner loop for speed).
+        for (let i = 0; i < ids.length; i++) setSlider(ids[i], bestVals[i]);
         const parts = evalDeltaParts();
         lastDelta = parts.delta;
         lastMedDiff = parts.medDiff;
-        await new Promise(r => setTimeout(r, 0));
-      }
-      if (!autoFitRunning) break;
-    }
-
-    // Phase 2a: candidate sliders → W², full coordinate descent for
-    // `cycles` passes so cross-coupling between safe/swing/opp settles.
-    for (let cycle = 0; cycle < cycles; cycle++) {
-      if (!autoFitRunning) break;
-      for (let i = 0; i < candidateSliders.length; i++) {
-        if (!autoFitRunning) break;
-        const id = candidateSliders[i];
-        const cfg = window.CONFIG.sliders[id];
-        if (!cfg) continue;
-        const tol = (cfg.max - cfg.min) * 0.02;
-        status.textContent =
-          `Candidates ${cycle + 1}/${cycles} · slider ${i + 1}/${candidateSliders.length}: ${id}` +
-          (isFinite(lastW2) ? ` · best W²=${lastW2.toFixed(2)}` : '');
-        lastW2 = await goldenMin(id, cfg.min, cfg.max, tol, 7, evalW2);
-        await new Promise(r => setTimeout(r, 0));
       }
     }
 
-    // Phase 2b: noise knobs → W², EXACTLY ONE PASS.  No further
-    // adjustments after this — going back to candidates would re-fit
-    // them against the new noise level and turn into the standard
-    // noise/structure-trade overfitting loop.  See the candidateSliders
-    // / noiseSliders comment above for the reasoning.
-    for (let i = 0; i < noiseSliders.length; i++) {
-      if (!autoFitRunning) break;
-      const id = noiseSliders[i];
-      const cfg = window.CONFIG.sliders[id];
-      if (!cfg) continue;
-      const tol = (cfg.max - cfg.min) * 0.02;
-      status.textContent =
-        `Noise (final pass) · slider ${i + 1}/${noiseSliders.length}: ${id}` +
-        (isFinite(lastW2) ? ` · best W²=${lastW2.toFixed(2)}` : '');
-      lastW2 = await goldenMin(id, cfg.min, cfg.max, tol, 7, evalW2);
-      await new Promise(r => setTimeout(r, 0));
+    // Stage A.2 — candidate sliders: sep-CMA-ES with COMMON RANDOM NUMBERS.
+    //
+    // CRN: setModelRNGSeed(CRN_SEED) before every evalW2 so the simulator's
+    // noise stream is identical at every probe point.  Without this, two
+    // evaluations at the same slider settings give different W² values, and
+    // the optimiser can't tell whether a small step is a real improvement
+    // or a lucky noise draw — coordinate descent and CMA-ES both behave
+    // ~10-100× worse on a noisy objective than a deterministic one of the
+    // same shape.  CRN turns evalW2 into a function of slider values alone
+    // (within a single autoFit run); restoring system noise after the fit
+    // keeps the live simulator unbiased.
+    //
+    // sep-CMA-ES: Hansen's diagonal-covariance variant.  Adapts a per-axis
+    // step size via an evolution path on the search distribution; ~5-10×
+    // fewer evals to converge than uniform random sampling for our smooth-
+    // ish low-D problem.  Box-clipped to per-slider [lo, hi] ranges (or a
+    // [prior−radius, prior+radius] window when CONFIG.autoFitRegularization
+    // narrows the search).  Pinned sliders (radius=0) are dropped from the
+    // search space entirely and stay at their prior.
+    {
+      const ids = [
+        'v',  // popular vote — pulled toward SHAVE prior via autoFitRegularization
+        'dIntModSwing', 'rIntModSwing',
+        'dIntModOpp', 'rIntModOpp',
+        'dIntModSafe', 'rIntModSafe',
+        // Incumbency only sampled when its slider is shown (default
+        // off); otherwise it's hard-zeroed at init and CMA-ES skips it.
+        ...(window.CONFIG?.showIncumbencySlider ? ['incumbency'] : []),
+        'qualImp', 'sqrtSigmaN',
+        // PVI weighting sliders, only included when CONFIG.
+        // pviWeightSliders.enabled (otherwise the elements aren't in
+        // the DOM and the activeBounds loop would skip them anyway,
+        // but better not to advertise them to CMA-ES at all).
+        ...(livePVIEnabled ? ['presPrevWeight', 'midtermPrevWeight'] : []),
+      ];
+      const cfgs = ids.map(id => window.CONFIG.sliders[id]);
+      if (cfgs.every(Boolean) && typeof window.cmaesMinimize === 'function') {
+        // Build the active sub-space (skip radius=0 pinned sliders) +
+        // each active slider's box bounds.
+        const reg = window.CONFIG?.autoFitRegularization || {};
+        const activeIds = [];
+        const activeBounds = [];
+        for (let idx = 0; idx < ids.length; idx++) {
+          const id = ids[idx];
+          const cfg = cfgs[idx];
+          const entry = reg[id];
+          if (entry && entry.radius === 0) continue;
+          if (!entry || entry.radius == null) {
+            activeIds.push(id);
+            activeBounds.push({ lo: cfg.min, hi: cfg.max });
+            continue;
+          }
+          const fallback = window.CONFIG?.sliders?.[id]?.value;
+          const prior = entry.priorByYear?.[selectedYear]
+            ?? entry.prior
+            ?? fallback;
+          if (prior == null) {
+            activeIds.push(id);
+            activeBounds.push({ lo: cfg.min, hi: cfg.max });
+            continue;
+          }
+          activeIds.push(id);
+          activeBounds.push({
+            lo: Math.max(cfg.min, prior - entry.radius),
+            hi: Math.min(cfg.max, prior + entry.radius),
+          });
+        }
+
+        // CRN: lock the seed for the whole CMA-ES run.  Any non-zero int
+        // works; pick something stable so reruns at the same year+config
+        // are reproducible.
+        const CRN_SEED = 1;
+        const evalW2CRN = (xVec) => {
+          for (let i = 0; i < activeIds.length; i++) {
+            setSliderRaw(activeIds[i], xVec[i]);
+          }
+          window.setModelRNGSeed(CRN_SEED);
+          return evalW2();
+        };
+
+        // Initial mean = prior-seeded slider values; initial sigma = 1/3
+        // of the smallest box dimension so the first generation samples
+        // span the local neighbourhood without immediately bouncing off
+        // the box walls.
+        const x0 = activeIds.map(id => parseFloat(document.getElementById(id).value));
+        let minRange = Infinity;
+        for (const b of activeBounds) {
+          const r = b.hi - b.lo;
+          if (r > 0 && r < minRange) minRange = r;
+        }
+        const sigma0 = minRange === Infinity ? 0.3 : minRange / 3;
+
+        try {
+          const result = await window.cmaesMinimize({
+            x0,
+            sigma0,
+            bounds: activeBounds,
+            evalFn: evalW2CRN,
+            maxEvals: N_CAND_SAMPLES,
+            shouldStop: () => !autoFitRunning,
+            onProgress: ({ gen, evals, lambda, bestObj, sigma }) => {
+              status.textContent =
+                `CMA-ES · candidates · gen ${gen}` +
+                ` · ${evals}/${N_CAND_SAMPLES} evals (λ=${lambda})` +
+                ` · best loss=${bestObj.toFixed(3)}` +
+                ` · σ=${sigma.toExponential(2)}`;
+            },
+          });
+
+          // Apply best through full setSlider so the UI catches up
+          // (thumb position, number readout, pin propagation).
+          for (let i = 0; i < activeIds.length; i++) {
+            setSlider(activeIds[i], result.x[i]);
+          }
+          lastW2 = result.obj;
+        } finally {
+          // Restore unseeded RNG so the post-fit live simulator and any
+          // future on-page interaction get fresh system noise per run.
+          window.clearModelRNGSeed();
+        }
+      }
     }
+
+    // (Coordinate descent / golden-section refinement was retired in
+    // favour of pure random search; the broader sampling explores the
+    // joint space well enough that the local-greedy refinement was
+    // mostly noise-fighting.  Regularisation in evalW2 keeps qualImp /
+    // sqrtSigmaN / incumbency from drifting away from their priors.)
 
     // Done (or cancelled).  Capture cancel-vs-finished state, then
     // CLEAR the autoFitRunning gate before the final runAndRender so
@@ -2245,7 +2299,7 @@ function renderYearThumb(divId, year, stats, yMax) {
     const summary = [
       isFinite(lastMedDiff) ? `medianΔ=${lastMedDiff.toFixed(2)} pp` : null,
       isFinite(lastDelta) ? `Δ=${lastDelta.toFixed(2)} pp` : null,
-      isFinite(lastW2) ? `W²=${lastW2.toFixed(2)}` : null,
+      isFinite(lastW2) ? `loss=${lastW2.toFixed(3)}` : null,
     ].filter(Boolean).join(' · ');
     status.textContent = cancelled
       ? `Stopped · ${summary}`
@@ -2296,6 +2350,69 @@ function renderYearThumb(divId, year, stats, yMax) {
         pin.checked = true;
         pin.dispatchEvent(new Event('change', { bubbles: true }));
       }
+    }
+  });
+
+  // Dev-only "Recompute preset for <year>" button (gated behind
+  // CONFIG.showCalibrationPlots, see calibrationPlotsVisible).  Runs
+  // autoFitToYear on the currently-selected year, captures the
+  // resulting slider values, mutates CONFIG.historicalPresets[y] in
+  // memory so the regular "Approximate <year> election" button picks
+  // up the new preset immediately, and dumps a copy-pasteable
+  // config.js row to console for permanent persistence.  Uses
+  // historicalNsim from CONFIG.constants — bump that beforehand if
+  // you want a higher-fidelity recompute than the live-render value.
+  let recomputeInProgress = false;
+  document.getElementById('recomputeYearPreset')?.addEventListener('click', async () => {
+    const btn = document.getElementById('recomputeYearPreset');
+    const status = document.getElementById('recomputeYearStatus');
+    // Second click while a recompute is in flight: cancel the running
+    // auto-fit by flipping the shared gate.  autoFitToYear's inner
+    // loops poll `autoFitRunning` and bail cleanly, the first
+    // handler's `await` resumes, and finally{} restores the button.
+    if (recomputeInProgress) {
+      if (autoFitRunning) autoFitRunning = false;
+      return;
+    }
+    const y = parseInt(btn.dataset.year, 10);
+    const origLabel = `Recompute preset for ${y}`;
+    recomputeInProgress = true;
+    btn.textContent = `Recomputing ${y}… (click to stop)`;
+    if (status) {
+      status.style.display = '';
+      status.textContent = `Auto-fitting ${y} (nsim=${histNsim()})…`;
+    }
+    try {
+      await autoFitToYear();
+      // autoFitToYear leaves every slider at its converged (or
+      // partially converged, on cancel) value — the user can read the
+      // new positions off the panel and decide whether to copy them
+      // into CONFIG.historicalPresets manually.  We still dump a
+      // paste-ready config.js row to console for convenience.
+      const preset = {};
+      for (const id of window.CONTROLS.sliderIds) {
+        const el = document.getElementById(id);
+        if (el) preset[id] = parseFloat(el.value);
+      }
+      const entries = Object.entries(preset)
+        .map(([k, v]) => `${k}: ${v}`).join(', ');
+      const fitMetrics = document.getElementById('autoFitStatus')?.textContent || '';
+      const cancelled = fitMetrics.startsWith('Stopped');
+      const cleanMetrics = fitMetrics.replace(/^(Done|Stopped) · /, '');
+      const configRow = `\t\t${y}: { ${entries} }, // ${cleanMetrics}`;
+      console.log('[recompute]', y, cancelled ? 'CANCELLED, partial' : 'final', 'slider values:', preset);
+      console.log('[recompute] paste-ready config.js row:');
+      console.log(configRow);
+      if (status) {
+        status.textContent = (cancelled ? 'Stopped · ' : 'Done · ')
+          + cleanMetrics + ' · sliders updated · row dumped to console';
+      }
+    } catch (e) {
+      console.error('[recompute] error:', e);
+      if (status) status.textContent = `Error: ${e.message}`;
+    } finally {
+      recomputeInProgress = false;
+      btn.textContent = origLabel;
     }
   });
 

@@ -14,11 +14,32 @@
 // ---------------------------------------------------------------------------
 // RNG / MATH HELPERS
 // ---------------------------------------------------------------------------
+
+// Seedable PRNG (Mulberry32) used for COMMON RANDOM NUMBERS during auto-
+// fit: setModelRNGSeed(s) before each evalW2 call → identical noise stream
+// across slider perturbations → optimizer can distinguish a real
+// improvement from a lucky noise draw.  Default state is null, in which
+// case rand() falls through to Math.random — the historical / simulator
+// pages never seed, so their behaviour is unchanged.
+let _rngState = null;
+function rand() {
+	if (_rngState === null) return Math.random();
+	_rngState = (_rngState + 0x6D2B79F5) | 0;
+	let t = _rngState;
+	t = Math.imul(t ^ (t >>> 15), t | 1);
+	t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+	return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+if (typeof window !== 'undefined') {
+	window.setModelRNGSeed = (s) => { _rngState = (s | 0); };
+	window.clearModelRNGSeed = () => { _rngState = null; };
+}
+
 function randn() {
 	let u = 0,
 		v = 0;
-	while (u === 0) u = Math.random();
-	while (v === 0) v = Math.random();
+	while (u === 0) u = rand();
+	while (v === 0) v = rand();
 	return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
 }
 
@@ -28,10 +49,27 @@ function randn() {
 // few times per chamber instead of essentially never.
 function laplaceSample() {
 	// Inverse-CDF method: u ~ Uniform(0, 1), x = -sign(u − 0.5)·log(1 − 2|u − 0.5|).
-	const u = Math.random() - 0.5;
+	const u = rand() - 0.5;
 	return u >= 0
 		? -Math.log(Math.max(1 - 2 * u, 1e-300))
 		: Math.log(Math.max(1 + 2 * u, 1e-300));
+}
+
+// Tunable-heaviness tail draw.  Built on top of Laplace so heaviness=1
+// reproduces the historical behaviour exactly:
+//   heaviness = 1.0 → Laplace (P(|x|>t) = exp(-t))
+//   heaviness > 1   → heavier; |x| is raised to `heaviness` keeping
+//                     sign — extreme draws get amplified non-linearly,
+//                     so heaviness=2 gives stretched-exponential tail
+//                     P(|x|>t) = exp(-√t), much heavier than Laplace
+//   heaviness < 1   → lighter (toward Gaussian-like as heaviness → 0)
+// Caller applies the usual `tail` scale on top, so the config knob
+// controls SHAPE; the per-block `tail` configs control AMPLITUDE.
+function tailSample(heaviness) {
+	const l = laplaceSample();
+	if (heaviness == null || heaviness === 1) return l;
+	const abs = Math.abs(l);
+	return l < 0 ? -Math.pow(abs, heaviness) : Math.pow(abs, heaviness);
 }
 
 // Bates(3) — sum of three Uniform(-1, +1) draws.  Unit variance, bell-shaped
@@ -39,10 +77,10 @@ function laplaceSample() {
 // beyond), so the tails are thinner than randn().
 function boundedRandn() {
 	return (
-		Math.random() * 2 -
+		rand() * 2 -
 		1 +
-		(Math.random() * 2 - 1) +
-		(Math.random() * 2 - 1)
+		(rand() * 2 - 1) +
+		(rand() * 2 - 1)
 	);
 }
 
@@ -50,7 +88,7 @@ function boundedRandn() {
 // Stuart's "boost" trick for shape < 1: G(k) = G(k+1) · U^(1/k).
 function gammaSample(shape) {
 	if (shape < 1) {
-		const u = Math.max(Math.random(), 1e-300);
+		const u = Math.max(rand(), 1e-300);
 		return gammaSample(shape + 1) * Math.pow(u, 1 / shape);
 	}
 	const d = shape - 1 / 3;
@@ -64,7 +102,7 @@ function gammaSample(shape) {
 			v = 1 + c * x;
 		} while (v <= 0);
 		v = v * v * v;
-		const u = Math.random();
+		const u = rand();
 		if (u < 1 - 0.0331 * x * x * x * x) return d * v;
 		if (Math.log(u) < 0.5 * x * x + d * (1 - v + Math.log(v))) return d * v;
 	}
@@ -78,46 +116,8 @@ function gammaSample(shape) {
 //   β → ∞ → Uniform(−α, +α)
 function subbotinSample(alpha, beta) {
 	const y = gammaSample(1 / beta);
-	const sign = Math.random() < 0.5 ? -1 : 1;
+	const sign = rand() < 0.5 ? -1 : 1;
 	return alpha * sign * Math.pow(y, 1 / beta);
-}
-
-// Continuous-N Bates: sum of N Uniform(-1, +1) draws, normalised to unit
-// variance (variance of the raw sum is N/3).  Fractional N is achieved by
-// adding one extra uniform with probability N - floor(N), so callers can
-// dial tightness smoothly.  Bounded (zero density beyond ±√(3N)/√(N/3) =
-// ±√3·√N), bell-shaped, and very fast — N+1 calls to Math.random() plus a
-// sqrt and a divide.
-//   N = 1 → Uniform(-√3, +√3)              (flattest)
-//   N = 2 → triangular
-//   N = 3 → ≈ Gaussian-on-bounded-support
-//   N → ∞ → Gaussian
-function batesSample(N) {
-	const Nf = Math.floor(N);
-	const useExtra = Math.random() < N - Nf;
-	const n = Nf + (useExtra ? 1 : 0);
-	if (n === 0) return 0;
-	let s = 0;
-	for (let i = 0; i < n; i++) s += Math.random() * 2 - 1;
-	return s / Math.sqrt(n / 3);
-}
-
-// Tukey lambda: symmetric distribution defined by its quantile function
-//   Q(u) = (u^λ − (1 − u)^λ) / λ        (λ ≠ 0)
-//   Q(u) = log(u / (1 − u))              (λ = 0, logistic)
-// Sampled directly from a single Uniform(0, 1) — two Math.pow's and a
-// subtract per draw, no rejection.  λ controls the shape:
-//   λ = 0     → logistic (heavier tails than Gaussian)
-//   λ ≈ 0.14  → ≈ standard normal
-//   λ = 0.5   → bounded, sub-Gaussian
-//   λ = 1     → Uniform(−1, +1)
-//   λ → ∞     → degenerate at 0
-// Variance is *not* normalised; the caller should scale via an outer
-// multiplier and tune to taste.
-function tukeyLambdaSample(lambda) {
-	const u = Math.random();
-	if (lambda === 0) return Math.log(u / (1 - u));
-	return (Math.pow(u, lambda) - Math.pow(1 - u, lambda)) / lambda;
 }
 
 function sigmoid(x) {
@@ -289,7 +289,7 @@ function _buildMixtureSampler(components) {
 		cumW[i] = acc;
 	}
 	function pick() {
-		const r = Math.random() * totalW;
+		const r = rand() * totalW;
 		for (let i = 0; i < cumW.length; i++) if (r < cumW[i]) return comps[i];
 		return comps[comps.length - 1];
 	}
@@ -586,7 +586,7 @@ function simulateOne(
 	// Intentional moderation: three sliders per party (safe / swing / opp),
 	// each with three effects (mean / var / tail).  Per-party effective amps
 	// are pre-anchored in readParams and arrive as scalars.
-	const safe = p.safe; // { meanD, meanR, varD, varR, tailD, tailR }
+	const safe = p.safe; // { meanD, meanR, stdD, stdR, tailD, tailR }
 	const swing = p.swing; // { ...same shape, plus swingOffset and per-party breadth }
 	const opp = p.opp; // { ...same shape, plus saturation }
 	// Median lean shifts the SWING bell centre and the OPP stretch origin so
@@ -604,17 +604,16 @@ function simulateOne(
 	const oppSaturation = opp.saturation || 1;
 	const invOppSat = 1 / oppSaturation;
 	// Per-district election-noise modulation: σ is amplified in safe
-	// seats by a saturating linear ramp on |d_i − medianLean|.  Pre-
-	// compute the inverse saturation so the inner loop multiplies; cache
-	// the amp locally so the hot path doesn't deref through `p` per
-	// district.  Disabled (cheap no-op) when safeAmp = 0.
-	const eNoise = p.electionNoise || {};
-	const safeNoiseAmp = eNoise.safeAmp ?? 0;
-	const invSafeNoiseSat = 1 / (eNoise.safeSaturation || 1);
-	const safeNoiseActive = safeNoiseAmp > 0;
-	const noiseType = p.noiseType;
-	const batesN = p.batesN;
-	const tukeyLambda = p.tukeyLambda;
+	// (Per-district safe-seat noise amplification was retired — CRPS
+	// captures the per-district margin distribution directly, so
+	// explicit modulation became redundant.  Election noise is now a
+	// pure Gaussian: σ = sigmaN, sampled with randn().)
+	// Tail-shape exponent applied to every Laplace draw (intentional-mod
+	// var/tail blocks AND incumbency tail).  1 = pure Laplace; >1 makes
+	// extreme draws non-linearly more extreme; <1 squishes them.  See
+	// tailSample() above for the math.  Hoisted once so the inner loop
+	// just passes it as a scalar arg.
+	const tailHeaviness = p.tailHeaviness ?? 1;
 	// Intentional moderation anchors on d_i + waveWeight·v (blend).
 	const waveWeight = p.waveWeight ?? 0;
 	const vShift = waveWeight * v;
@@ -651,14 +650,23 @@ function simulateOne(
 	const pdActuals = perDistrictTracker ? perDistrictTracker.actuals : null;
 	// Optional incumbency block (historical page only).  Per-district
 	// signs ∈ {−1, 0, +1} parallel to the pool, plus three scalars
-	// (mean, var, tail) that describe the per-sim per-district shift
-	// applied right before the cutoff:
-	//   shift_i = signs[i] · (mean + var · randn() + tail · laplace())
+	// (mean, var, tail).  Incumbency now flows through CANDIDATE
+	// IDEOLOGY rather than as a post-hoc score shift:
+	//   (a) the INCUMBENT's candidate ideology gets pulled toward 0 by
+	//       an extra mean-shift `incMean` (+ symmetric tail scaled by
+	//       `incTail`).  Effect on z is wMod · (incMean + …), so
+	//       `qualImp` modulates how much incumbency matters.
+	//   (b) the NON-incumbent's candidate ideology gets extra variance
+	//       `incVar` added on top of stdBumpD/R — captures the "the
+	//       challenger is less well-known, ideology less predictable"
+	//       intuition.
 	// Mean carries the slider value; var + tail come from
 	// `CONFIG.incumbencyMod` and let the boost vary cycle-to-cycle
-	// instead of being a fixed per-district scalar.  Affects per-
-	// district outcomes, the empirical PIT, and every downstream
-	// tracker uniformly.
+	// instead of being a fixed per-district scalar.  Units have
+	// changed semantics with this redesign: incMean / incVar / incTail
+	// are now in IDEOLOGY units (which `wMod` then converts to z), so
+	// the same numeric values produce a smaller pp effect than the
+	// previous post-hoc-z-shift design.
 	const inc = perDistrictTracker ? perDistrictTracker.incumbency : null;
 	const incSigns = inc ? inc.signs : null;
 	const incMean  = inc ? (inc.mean ?? 0) : 0;
@@ -667,6 +675,14 @@ function simulateOne(
 	const incVarActive  = !!inc && incVar  !== 0;
 	const incTailActive = !!inc && incTail !== 0;
 	const pdBelowActual = perDistrictTracker ? perDistrictTracker.belowActual : null;
+	// Optional per-sim per-district margin storage for CRPS.  Layout is
+	// per-district contiguous: index = i * nSimsCRPS + simIndex, so the
+	// post-loop CRPS path can take a per-district slice and sort it in
+	// place without strided gathers.  simIndex is read & incremented by
+	// runSimulations across calls.
+	const pdMargins = perDistrictTracker ? perDistrictTracker.marginsByDistrict : null;
+	const pdSimIdx  = perDistrictTracker ? perDistrictTracker.simIndex : 0;
+	const pdNSims   = perDistrictTracker ? perDistrictTracker.nSimsCRPS : 0;
 	let mismatches = 0; // R in D-lean district, or D in R-lean district (di ≠ 0)
 	if (vIsZero) {
 		// Fast path — no v-shift on the swing bell when v = 0.
@@ -692,52 +708,78 @@ function simulateOne(
 				safe.meanD + swing.meanD * swingD + opp.meanD * oppD;
 			const meanPullR =
 				safe.meanR + swing.meanR * swingR + opp.meanR * oppR;
-			const varBumpD = safe.varD + swing.varD * swingD + opp.varD * oppD;
-			const varBumpR = safe.varR + swing.varR * swingR + opp.varR * oppR;
+			// Per-block stds combine in QUADRATURE (independent Gaussian
+			// noise sources): total σ = √(σ_safe² + (σ_swing·shape)² +
+			// (σ_opp·shape)² + σ_inc²).  Linear summation (the old
+			// behaviour) implicitly assumed a single shared noise draw,
+			// which doesn't match the "independent contribution per
+			// block" semantics the std fields are meant to express.
+			const swSigD = swing.stdD * swingD;
+			const swSigR = swing.stdR * swingR;
+			const opSigD = opp.stdD * oppD;
+			const opSigR = opp.stdR * oppR;
 			const tailBumpD =
 				safe.tailD + swing.tailD * swingD + opp.tailD * oppD;
 			const tailBumpR =
 				safe.tailR + swing.tailR * swingR + opp.tailR * oppR;
-			const cD =
-				muD +
-				meanPullD +
-				varBumpD * randn() +
-				tailBumpD * laplaceSample();
-			const cR =
-				muR -
-				meanPullR +
-				varBumpR * randn() +
-				tailBumpR * laplaceSample();
-			// sigmaN is the σ of the additive election-noise term: a unit-variance
-			// shape (Bates or Tukey) scaled by sigmaN and added to the score.
-			// Per-district amplification in safe seats: same saturating-ramp
-			// shape as opp but symmetric, anchored at medianLean.
-			const noise =
-				sigmaN > 0
-					? noiseType === "tukey"
-						? tukeyLambdaSample(tukeyLambda)
-						: batesSample(batesN)
-					: 0;
-			let sigmaN_i = sigmaN;
-			if (safeNoiseActive) {
-				const safeStretch = di > medianLean ? di - medianLean : medianLean - di;
-				const safeShape = safeStretch * invSafeNoiseSat;
-				sigmaN_i *= 1 + safeNoiseAmp * (safeShape > 1 ? 1 : safeShape);
-			}
-			let z = di - wMod * (cD + cR) + sigmaN_i * noise;
+			// Incumbency, applied THROUGH ideology:
+			//   incumbent  → cD or cR pulled toward 0 by `incMean` plus
+			//                a symmetric `incTail · tailSample` draw.
+			//   challenger → its ideology gets an extra independent σ
+			//                contribution `incVar`, folded into the
+			//                quadrature sum below.
+			let cD_meanShift = 0, cR_meanShift = 0;
+			let cD_sigExtra  = 0, cR_sigExtra  = 0;
 			if (incSigns) {
 				const s = incSigns[i];
 				if (s !== 0) {
 					let shift = incMean;
-					if (incVarActive)  shift += incVar  * randn();
-					if (incTailActive) shift += incTail * laplaceSample();
-					z += s * shift;
+					if (incTailActive) shift += incTail * tailSample(tailHeaviness);
+					if (s > 0) {
+						cR_meanShift = -shift;
+						if (incVarActive) cD_sigExtra = incVar;
+					} else {
+						cD_meanShift =  shift;
+						if (incVarActive) cR_sigExtra = incVar;
+					}
 				}
 			}
+			const stdD = Math.sqrt(
+				safe.stdD * safe.stdD + swSigD * swSigD + opSigD * opSigD +
+				cD_sigExtra * cD_sigExtra
+			);
+			const stdR = Math.sqrt(
+				safe.stdR * safe.stdR + swSigR * swSigR + opSigR * opSigR +
+				cR_sigExtra * cR_sigExtra
+			);
+			// Candidate ideology: anchored at muD (−100) / muR (+100),
+			// pulled toward 0 by the mean-moderation term (+ incumbency
+			// shift, where applicable), jittered by a SYMMETRIC Gaussian
+			// with σ derived from the per-block std fields combined in
+			// quadrature, and additionally pushed toward 0 by a ONE-
+			// SIDED Laplace-tail draw on a per-block basis.  cD adds
+			// the tail (toward 0 from −100), cR subtracts it (toward 0
+			// from +100).
+			const cD =
+				muD +
+				meanPullD +
+				cD_meanShift +
+				stdD * randn() +
+				tailBumpD * Math.abs(tailSample(tailHeaviness));
+			const cR =
+				muR -
+				meanPullR +
+				cR_meanShift +
+				stdR * randn() -
+				tailBumpR * Math.abs(tailSample(tailHeaviness));
+			// sigmaN is the σ of the additive election-noise term: a unit-variance
+			// scaled by sigmaN and added to the score.
+			const noise = sigmaN > 0 ? randn() : 0;
+			let z = di - wMod * (cD + cR) + sigmaN * noise;
 			// Hard cutoff at z = 0; randomise on exact ties so a perfectly
 			// symmetric setup (e.g. rGerry === dGerry, v = 0) has no
 			// deterministic bias in who wins the marginal seat.
-			const isR = z > 0 || (z === 0 && Math.random() < 0.5) ? 1 : 0;
+			const isR = z > 0 || (z === 0 && rand() < 0.5) ? 1 : 0;
 			const ri = isR ? cR : cD;
 			rVals[i] = ri;
 			partyVals[i] = isR;
@@ -771,6 +813,7 @@ function simulateOne(
 					const a = pdActuals[i];
 					if (a === a && z < a) pdBelowActual[i]++;
 				}
+				if (pdMargins) pdMargins[i * pdNSims + pdSimIdx] = z;
 			}
 			if (di !== 0 && ((isR && di < 0) || (!isR && di > 0))) {
 				mismatches++;
@@ -807,46 +850,59 @@ function simulateOne(
 				safe.meanD + swing.meanD * swingD + opp.meanD * oppD;
 			const meanPullR =
 				safe.meanR + swing.meanR * swingR + opp.meanR * oppR;
-			const varBumpD = safe.varD + swing.varD * swingD + opp.varD * oppD;
-			const varBumpR = safe.varR + swing.varR * swingR + opp.varR * oppR;
+			// See fast-path block above for the quadrature-sum rationale.
+			const swSigD = swing.stdD * swingD;
+			const swSigR = swing.stdR * swingR;
+			const opSigD = opp.stdD * oppD;
+			const opSigR = opp.stdR * oppR;
 			const tailBumpD =
 				safe.tailD + swing.tailD * swingD + opp.tailD * oppD;
 			const tailBumpR =
 				safe.tailR + swing.tailR * swingR + opp.tailR * oppR;
-			const cD =
-				muD +
-				meanPullD +
-				varBumpD * randn() +
-				tailBumpD * laplaceSample();
-			const cR =
-				muR -
-				meanPullR +
-				varBumpR * randn() +
-				tailBumpR * laplaceSample();
-			// 'sigmaN' is the σ of the additive election-noise term (see fast-path
-			// comment above).  Same per-district safe-seat amplification.
-			const noise =
-				sigmaN > 0
-					? noiseType === "tukey"
-						? tukeyLambdaSample(tukeyLambda)
-						: batesSample(batesN)
-					: 0;
-			let sigmaN_i = sigmaN;
-			if (safeNoiseActive) {
-				const safeStretch = di > medianLean ? di - medianLean : medianLean - di;
-				const safeShape = safeStretch * invSafeNoiseSat;
-				sigmaN_i *= 1 + safeNoiseAmp * (safeShape > 1 ? 1 : safeShape);
-			}
-			let z = v + di - wMod * (cD + cR) + sigmaN_i * noise;
+			// Incumbency through ideology (see fast-path block above).
+			let cD_meanShift = 0, cR_meanShift = 0;
+			let cD_sigExtra  = 0, cR_sigExtra  = 0;
 			if (incSigns) {
 				const s = incSigns[i];
 				if (s !== 0) {
 					let shift = incMean;
-					if (incVarActive)  shift += incVar  * randn();
-					if (incTailActive) shift += incTail * laplaceSample();
-					z += s * shift;
+					if (incTailActive) shift += incTail * tailSample(tailHeaviness);
+					if (s > 0) {
+						cR_meanShift = -shift;
+						if (incVarActive) cD_sigExtra = incVar;
+					} else {
+						cD_meanShift =  shift;
+						if (incVarActive) cR_sigExtra = incVar;
+					}
 				}
 			}
+			const stdD = Math.sqrt(
+				safe.stdD * safe.stdD + swSigD * swSigD + opSigD * opSigD +
+				cD_sigExtra * cD_sigExtra
+			);
+			const stdR = Math.sqrt(
+				safe.stdR * safe.stdR + swSigR * swSigR + opSigR * opSigR +
+				cR_sigExtra * cR_sigExtra
+			);
+			// One-sided tail (see fast-path block above for rationale):
+			// the heavy tail only moves candidates toward 0, never
+			// further from it.  cD adds |tail|, cR subtracts |tail|.
+			const cD =
+				muD +
+				meanPullD +
+				cD_meanShift +
+				stdD * randn() +
+				tailBumpD * Math.abs(tailSample(tailHeaviness));
+			const cR =
+				muR -
+				meanPullR +
+				cR_meanShift +
+				stdR * randn() -
+				tailBumpR * Math.abs(tailSample(tailHeaviness));
+			// 'sigmaN' is the σ of the additive Gaussian election-noise term
+			// (see fast-path comment above).
+			const noise = sigmaN > 0 ? randn() : 0;
+			let z = v + di - wMod * (cD + cR) + sigmaN * noise;
 			const isR = z > 0 ? 1 : 0;
 			const ri = isR ? cR : cD;
 			rVals[i] = ri;
@@ -881,6 +937,7 @@ function simulateOne(
 					const a = pdActuals[i];
 					if (a === a && z < a) pdBelowActual[i]++;
 				}
+				if (pdMargins) pdMargins[i * pdNSims + pdSimIdx] = z;
 			}
 			if (di !== 0 && ((isR && di < 0) || (!isR && di > 0))) {
 				mismatches++;
@@ -1177,6 +1234,13 @@ function runSimulations(
 				&& trackPerDistrict.incumbency
 				? trackPerDistrict.incumbency
 				: null;
+		// Optional per-sim per-district margin storage for CRPS.  When
+		// trackPerDistrict.crps === true, store every per-sim per-district
+		// z so the post-loop CRPS path can sort each district's margins
+		// and compute the closed-form CRPS for the empirical predictive
+		// distribution.  Memory: N * n * 8 bytes (~10 MB at 435 × 3000).
+		const wantCRPS =
+			typeof trackPerDistrict === "object" && trackPerDistrict.crps === true;
 		perDistrictTracker = {
 			zSum: new Float64Array(N),
 			zSumSq: new Float64Array(N),
@@ -1184,6 +1248,9 @@ function runSimulations(
 			actuals,
 			belowActual: actuals ? new Int32Array(N) : null,
 			incumbency,
+			marginsByDistrict: wantCRPS ? new Float64Array(N * n) : null,
+			simIndex: 0,
+			nSimsCRPS: wantCRPS ? n : 0,
 		};
 	}
 
@@ -1207,6 +1274,9 @@ function runSimulations(
 		parties[s] = out.medianParty === "R" ? 1 : 0;
 		seats[s] = out.rSeats;
 		mismatches[s] = out.mismatches;
+		if (perDistrictTracker && perDistrictTracker.marginsByDistrict) {
+			perDistrictTracker.simIndex++;
+		}
 	}
 
 	// After the loop, normalise per-bin counts to per-chamber averages.
@@ -1290,6 +1360,40 @@ function runSimulations(
 		}
 		perDistrict = { avgZ, stdZ, rWinProb };
 		if (empiricalPIT) perDistrict.empiricalPIT = empiricalPIT;
+
+		// CRPS for the empirical predictive distribution per district
+		// (only computed when the caller asked for it via trackPerDistrict.
+		// crps === true).  Closed form for an empirical CDF with sorted
+		// samples x_0 ≤ … ≤ x_{M-1} and observation y:
+		//   CRPS = (1/M) Σ |x_k − y| − (1/M²) Σ (2k+1−M)·x_k
+		// where the second term is independent of y (a measure of the
+		// distribution's spread).  Skips districts whose actual is NaN
+		// (uncontested / unmatched) and emits NaN there for symmetry
+		// with the empiricalPIT array.
+		if (perDistrictTracker.marginsByDistrict && actuals) {
+			const margins = perDistrictTracker.marginsByDistrict;
+			const M = n;
+			const crps = new Float64Array(N);
+			const buf = new Float64Array(M);
+			for (let i = 0; i < N; i++) {
+				const a = actuals[i];
+				if (!(a === a)) { crps[i] = NaN; continue; }
+				// Copy this district's M margins into a contiguous buffer
+				// and sort in place.  Float64Array.sort uses numeric
+				// comparison (no string coercion).
+				for (let k = 0; k < M; k++) buf[k] = margins[i * M + k];
+				buf.sort();
+				let term1 = 0, term2 = 0;
+				for (let k = 0; k < M; k++) {
+					const x = buf[k];
+					const d = x - a;
+					term1 += d < 0 ? -d : d;
+					term2 += (2 * k + 1 - M) * x;
+				}
+				crps[i] = term1 / M - term2 / (M * M);
+			}
+			perDistrict.crps = crps;
+		}
 	}
 
 	return {

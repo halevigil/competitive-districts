@@ -4,14 +4,14 @@
 		<meta charset="UTF-8" />
 		<title>Median Ideology Simulator</title>
 		<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
-		<script src="config.js?v=67"></script>
-		<script src="model.js?v=67"></script>
+		<script src="config.js?v=104"></script>
+		<script src="model.js?v=104"></script>
 		<!-- controls.js exposes restoreSliderState / saveSliderState so the
 		     simulator and the historical page can share slider positions
 		     via localStorage.  The simulator doesn't use CONTROLS.bind()
 		     itself (its inline run() does considerably more than the
 		     historical page's onRun); just the two persistence helpers. -->
-		<script src="controls.js?v=67"></script>
+		<script src="controls.js?v=104"></script>
 		<style>
 			:root {
 				--bg: #fafafa;
@@ -534,7 +534,7 @@
 				<h3>Voters</h3>
 				<div class="row">
 					<label>Candidate Quality Importance</label>
-					<input type="range" id="sqrtQualImp" />
+					<input type="range" id="qualImp" />
 					<span class="hint"
 						>Higher → voters punish ideologically extreme candidates
 						more heavily, relative to how partisan the district
@@ -651,7 +651,7 @@
 				"rIntModSwing",
 				"dIntModOpp",
 				"rIntModOpp",
-				"sqrtQualImp",
+				"qualImp",
 				"sqrtSigmaN",
 			];
 
@@ -699,21 +699,27 @@
 				const safeDef = cfg.sliders.dIntModSafe.value;
 				const swingDef = cfg.sliders.dIntModSwing.value;
 				const oppDef = cfg.sliders.dIntModOpp.value;
+				const safeQuad = !!cfg.sliders.dIntModSafe.quadratic;
+				const swingQuad = !!cfg.sliders.dIntModSwing.quadratic;
+				const oppQuad = !!cfg.sliders.dIntModOpp.quadratic;
 				// Each slider-block has { mean, var, tail } — three quantities
 				// added directly to the candidate-ideology mean / σ /
 				// Laplace-tail scale.  Effective per-party value scales
 				// linearly with slider position: configValue · (slider/def).
 				// Slider min = 0 → effective = 0; slider = default → effective
 				// = configured value.
-				const resolveBlock = (block, bD, bR, def) => {
+				const resolveBlock = (block, bD, bR, def, quadratic) => {
 					const bk = block || {};
-					const sD = bD / def;
-					const sR = bR / def;
+					// def === 0 (e.g. dIntModOpp.value=0) would otherwise
+					// give bD/0 = NaN/Infinity → poisons cD/cR.
+					let sD = def !== 0 ? bD / def : bD;
+					let sR = def !== 0 ? bR / def : bR;
+					if (quadratic) { sD = sD * sD; sR = sR * sR; }
 					return {
 						meanD: sD * (bk.mean ?? 0),
 						meanR: sR * (bk.mean ?? 0),
-						varD: sD * (bk.var ?? 0),
-						varR: sR * (bk.var ?? 0),
+						stdD: sD * (bk.std ?? 0),
+						stdR: sR * (bk.std ?? 0),
 						tailD: sD * (bk.tail ?? 0),
 						tailR: sR * (bk.tail ?? 0),
 					};
@@ -729,12 +735,9 @@
 					sqrtSigmaN: document.getElementById("sqrtSigmaN")
 						? num("sqrtSigmaN")
 						: CONST.sqrtSigmaN,
-					noiseType: CONST.noiseType ?? "bates",
-					// sqrtSigmaN above is the noise scale; bates/tukey below set
-					// the SHAPE of the unit-variance draw that gets multiplied
-					// by sigmaN inside the inner loop.
-					batesN: CONST.bates?.N ?? 3,
-					tukeyLambda: CONST.tukey?.lambda ?? 0.14,
+					// Tail-shape exponent for the intMod var/tail blocks +
+					// incumbency tail.  1 = Laplace (default); >1 = heavier.
+					tailHeaviness: cfg.tailHeaviness ?? 1,
 					// District distribution weights (absolute mass each component
 					// contributes to the chamber pool).  See model.js →
 					// analyticDistrictPool for the full definition.
@@ -744,14 +747,13 @@
 					gerry: cfg.districtGerry,
 					muD: -magnitude,
 					muR: +magnitude,
-					// wMod = sqrtQualImp²; the slider stores √wMod so its
-					// perceptual scale is linear (same convention as
-					// sqrtSigmaN → sigmaN).
-					wMod: num("sqrtQualImp") ** 2,
+					// wMod = candidate-quality penalty strength, read
+					// directly from the slider in [0, 1].
+					wMod: num("qualImp"),
 					// Three slider blocks, each producing per-party
 					// mean / var / tail values linearly in the slider
 					// position (0 at slider=0, config value at slider=default).
-					safe: resolveBlock(im.safe, bDSafe, bRSafe, safeDef),
+					safe: resolveBlock(im.safe, bDSafe, bRSafe, safeDef, safeQuad),
 					swing: (() => {
 						// Per-party effective bell breadth: anchored at
 						// swingBreadth when the slider sits at its default,
@@ -763,7 +765,7 @@
 						const breadth = (b) =>
 							Math.max(0.5, bAnchor + bSlope * (b / swingDef - 1));
 						return Object.assign(
-							resolveBlock(im.swing, bDSwing, bRSwing, swingDef),
+							resolveBlock(im.swing, bDSwing, bRSwing, swingDef, swingQuad),
 							{
 								offset: im.swingOffset ?? 0,
 								breadthD: breadth(bDSwing),
@@ -772,20 +774,10 @@
 						);
 					})(),
 					opp: Object.assign(
-						resolveBlock(im.opp, bDOpp, bROpp, oppDef),
+						resolveBlock(im.opp, bDOpp, bROpp, oppDef, oppQuad),
 						{ saturation: im.oppSaturation ?? 20 }
 					),
 					waveWeight: im.waveWeight ?? 0,
-					// Per-district election-noise modulation — see
-					// `electionNoise` in config.js for the saturating-
-					// ramp formula.  Same shape as opp but symmetric.
-					electionNoise: {
-						safeAmp: cfg.electionNoise?.safeAmp ?? 0,
-						safeSaturation: Math.max(
-							0.5,
-							cfg.electionNoise?.safeSaturation ?? 20,
-						),
-					},
 				};
 			}
 

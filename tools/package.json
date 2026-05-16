@@ -1,0 +1,8 @@
+{
+  "name": "competitive-districts-tools",
+  "private": true,
+  "type": "commonjs",
+  "dependencies": {
+    "puppeteer-core": "^23.0.0"
+  }
+}

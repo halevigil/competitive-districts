@@ -44,25 +44,31 @@ window.CONFIG = {
 		//   intModOpp:   opposite-party-safe moderation (saturating ramp
 		//                into the other party's territory).  For D this
 		//                is "in red districts", for R "in blue".
-		intModSafe: { max: 3, step: 0.05, value: 1 },
-		intModSwing: { max: 3, step: 0.05, value: 1 },
-		intModOpp: { max: 3, step: 0.05, value: 1 },
+		// `quadratic: true` makes the slider's effective multiplier the
+		// SQUARE of its normalised position — effective = (slider/def)²
+		// (or slider² when def = 0).  Perceptual scale at the slider
+		// stays linear; the underlying intMod multiplier grows
+		// quadratically.  Same convention as sqrtSigmaN / sqrtQualImp.
+		// Useful when small slider changes near zero need much-finer
+		// resolution than linear scaling allows.  Default false on all
+		// three.  CMA-ES auto-fit also respects the flag automatically
+		// (it samples in slider-space, the squaring happens inside
+		// readParams every probe).
+		intModSafe: { max: 3, step: 0.05, value: 1, quadratic: false },
+		intModSwing: { max: 3, step: 0.05, value: 1, quadratic: true },
+		intModOpp: { max: 3, step: 0.05, value: 1, quadratic: true },
 
 		// How heavily voters punish ideologically extreme candidates
-		// relative to district partisan lean.  Stored as sqrt(wMod) so
-		// the slider's perceptual scale is linear while the underlying
-		// coefficient grows quadratically — same convention as
-		// sqrtSigmaN / sigmaN.  readParams squares it to feed `wMod`
-		// to the model.  Default sqrtQualImp = √0.2 ≈ 0.447 reproduces
-		// the old wMod = 0.2 default; max √1.0 = 1 covers the old
-		// wMod range up to 1.0 (so existing ranges still reach).
-		sqrtQualImp: { min: 0, max: 1, step: 0.01, value: 0.45 },
+		// relative to district partisan lean.  Slider value goes
+		// directly to `wMod`; range [0, 1] covers fully indifferent to
+		// dominant.
+		qualImp: { min: 0, max: 1, step: 0.01, value: 0.5 },
 
 		// Election noise sqrt(σ) — squaren scales an additive unit-variance noise term that
 		// gets added to the score (di − wMod·(cD+cR)) before the hard cutoff
 		// at z = 0.  Larger values smear the cutoff out; 0 makes the election
 		// fully deterministic given the candidate draws.
-		sqrtSigmaN: { min: 0, max: 1.5, step: 0.1, value: 0.5 },
+		sqrtSigmaN: { min: 0, max: 1, step: 0.1, value: 0.5 },
 
 		// Incumbency advantage (historical.html only — the simulator
 		// page has no notion of "previous winner" so the slider isn't
@@ -75,7 +81,16 @@ window.CONFIG = {
 		// (matched on state+district string; redistricting boundary
 		// changes are approximated, not modelled).
 		// See `incumbencyMod` below for per-district variance + tail.
-		incumbency: { min: 0, max: 10, step: 0.25, value: 3 },
+		incumbency: { min: 0, max: 9, step: 0.25, value: 3 },
+
+		// Live PVI-weight sliders (historical.html only, gated behind
+		// CONFIG.pviWeightSliders.enabled).  Each is the PREV-pres
+		// share of the PVI denominator: prev / (cur + prev).  Defaults
+		// match the static CONFIG.pviWeights ratios above (4:1 → 0.2,
+		// 2:1 → 0.333) so toggling the flag on doesn't change anything
+		// until the slider is moved.
+		presPrevWeight: { min: 0, max: 0.5, step: 0.01, value: 0.2 },
+		midtermPrevWeight: { min: 0, max: 0.5, step: 0.01, value: 0.333 },
 	},
 
 	// ---------------- INCUMBENCY (mean / var / tail, historical.html only) ----
@@ -98,10 +113,18 @@ window.CONFIG = {
 	// and tail to ~1 to capture realistic cycle-to-cycle variation in
 	// incumbency advantage (scandals, retirement quality drops, etc.).
 	incumbencyMod: {
-		mean: 3,
-		var: 1,
+		mean: 0,
+		var: 0,
 		tail: 0,
 	},
+
+	// ---------------- INCUMBENCY SLIDER VISIBILITY (historical.html only) -----
+	// When false (default), the Incumbency Advantage slider is hidden
+	// from "Practical Details", forced to 0 on init (so the simulator
+	// runs with incumbency disabled), and excluded from the auto-fit
+	// candidate list — CMA-ES won't waste evals on a knob the user
+	// can't see.  Set to true to restore the previous behaviour.
+	showIncumbencySlider: false,
 
 	// ---------------- PVI WEIGHTING (historical.html only) ---------------------
 	// Cook-style PVI is a weighted average of recent presidential margins
@@ -126,44 +149,212 @@ window.CONFIG = {
 		midterm: { recent: 2, prev: 1 },
 	},
 
-	// ---------------- PER-YEAR SQRT-QUAL-IMP STARTING POINTS (auto-fit only) --
-	// Auto-fit uses the sqrtQualImp slider's CURRENT value as its
-	// starting point for golden-section.  When this map has an entry
-	// for the selected year, auto-fit overrides the slider to the
-	// listed value before optimisation kicks off — useful for years
-	// where the optimiser otherwise gets stuck in a local minimum
-	// (e.g. wave years where the effective wMod wants to be high vs
-	// muted-cycle years where it wants to be low).  Slider value isn't
-	// touched outside of auto-fit; manual drags still respect whatever
-	// the user picked.  Years not listed: golden-section starts from
-	// whatever the slider currently shows.
-	// Values are sqrtQualImp (slider units), NOT wMod — multiply
-	// the desired wMod's square root.  Slider runs 0–1, default 0.45
-	// (= sqrt of the old wMod default 0.2).
-	historicalSqrtQualImpByYear: {
-		// Per-cycle baseline: starting from wMod = 0.20 in 2024 and
-		// increasing by 0.05 each cycle going back (so 1992 caps at
-		// wMod = 1.0).  Values stored as sqrtQualImp = √wMod since
-		// that's what the slider holds.  Manually picked, not data-
-		// driven — adjust freely as the historical fit gets refined.
-		2024: 0.45, // wMod = 0.20
-		2022: 0.5, // wMod = 0.25
-		2020: 0.55, // wMod = 0.30
-		2018: 0.59, // wMod = 0.35
-		2016: 0.63, // wMod = 0.40
-		2014: 0.67, // wMod = 0.45
-		2012: 0.71, // wMod = 0.50
-		2010: 0.74, // wMod = 0.55
-		2008: 0.77, // wMod = 0.60
-		2006: 0.81, // wMod = 0.65
-		2004: 0.84, // wMod = 0.70
-		2002: 0.87, // wMod = 0.75
-		2000: 0.89, // wMod = 0.80
-		1998: 0.92, // wMod = 0.85
-		1996: 0.95, // wMod = 0.90
-		1994: 0.97, // wMod = 0.95
-		1992: 1.0, // wMod = 1.00 (slider max)
+	// ---------------- LIVE PVI-WEIGHT SLIDERS (historical.html only) -----------
+	// Optional: when `enabled: true`, two extra sliders appear under
+	// "Practical Details" — `presPrevWeight` (default 0.2 = 1/5, the
+	// previous-pres share in the PVI for presidential years) and
+	// `midtermPrevWeight` (default 0.333 = 1/3, the older-pres share in
+	// the PVI for midterm years).  Sliders override CONFIG.pviWeights
+	// live: changing them rebuilds the per-district lean pool for the
+	// selected year and re-runs the simulator.  Auto-fit also includes
+	// them in the candidate-stage CMA-ES sweep, so the optimiser can
+	// tune the historical lean axis itself.  When `enabled: false`
+	// (default), the sliders aren't rendered, the page reads weights
+	// straight from `pviWeights` above, and there's zero overhead — the
+	// pool stays baked at page-init like before.
+	pviWeightSliders: {
+		enabled: false,
 	},
+
+	// ---------------- AUTO-FIT WINNER-PREDICTION LOSS (historical.html only) --
+	// Auto-fit's W² loss measures the empirical PIT calibration on
+	// CONTESTED districts only — it cares about whether the simulator's
+	// predicted distribution covers the actual margin in the right
+	// percentile, but not whether the simulator picks the winning party.
+	// This optional Brier-style term penalises winner mispredictions
+	// across ALL districts (uncontested included; the actual winner is
+	// known there even when the margin sentinel is ±100):
+	//   loss_winner_i = (P(R wins | sim) − I[actual winner = R])²
+	// summed over all districts whose actual winner is known.  Weighted
+	// by `weight` and added to evalW2's return value, so the Brier mass
+	// becomes part of the same objective coordinate descent minimises.
+	// Set weight to 0 to disable entirely (current default → behaviour
+	// unchanged).  At nsim=3000 the per-district Brier-noise floor is
+	// ~3e-4, summed over ~435 districts ~0.13; pick `weight` so the
+	// resulting contribution is on the same order as W² (~0.05–0.5)
+	// when you want the term to actually steer the fit.
+	autoFitWinnerLoss: {
+		weight: 1,
+	},
+
+	// ---------------- AUTO-FIT REGULARIZATION (historical.html only) ----------
+	// Per-slider quadratic pull toward a "prior" value, added to evalW2
+	// to keep the optimiser from over-relying on a single slider to
+	// absorb structural mismatches.  Per-slider contribution:
+	//   penalty_i = weight_i · (slider_value_i − prior_i)²
+	// Each entry takes:
+	//   weight       — absolute pull (units of W²-objective).  0 disables.
+	//   prior        — scalar target the slider gets pulled toward.
+	//   priorByYear  — alternative to `prior`: a {year → value} map for
+	//                  cycle-specific priors (used for qualImp where
+	//                  the right wMod genuinely varies year-to-year).
+	//                  Falls through to `prior` then to the slider's
+	//                  CONFIG default if the year isn't listed.
+	// Pick weights to be comparable to W² + winner-Brier sums (~0.1–1).
+	// Incumbency has the widest range (0-6) so a smaller weight gives
+	// equivalent pull.  Setting weights too high pins the slider at the
+	// prior; too low and the model overuses that knob.
+	//
+	// Note: the regularization prior is INDEPENDENT of where the slider
+	// starts each fit.  The auto-fit batch resets every slider to its
+	// CONFIG default before each year — `prior` / `priorByYear` only
+	// influences the W² objective, not the starting value.
+	//
+	// `radius` (optional) — when set, the random-search candidate stage
+	// in autoFitToYear samples this slider only within
+	//   [prior − radius, prior + radius]
+	// (clamped to [slider.min, slider.max]) instead of the full slider
+	// range.  Use to keep the optimiser from wandering far from the
+	// regularised prior in the global random search; the regularisation
+	// term still penalises deviations the same way regardless.  Omit to
+	// sample full-range.  `radius: 0` is a hard pin: the slider is
+	// fixed at its prior for the whole fit and skipped from sampling
+	// entirely (the regularisation weight then has no effect on this
+	// slider since it can never deviate).
+	autoFitRegularization: {
+		// House popular-vote margin slider (R+x).  Per-year priors:
+		//   - Presidential years: the cycle's national TWO-PARTY
+		//     PRESIDENTIAL margin (R−D, pp).  Mirrors the
+		//     NATIONAL_PRES_MARGIN map in historical.html.  Anchors the
+		//     wave to the same signal that drives the per-district lean
+		//     axis on those years.
+		//   - Midterm years: SHAVE-adjusted (Split Ticket, 2010+) /
+		//     Brookings Vital Stats (pre-2010) HOUSE popular vote
+		//     margin, same as the old static pin used.
+		// The optimiser is free to move v within the slider range; the
+		// weight pulls it back toward the cycle's prior so wave error
+		// doesn't get absorbed into rGerry / candidate noise.
+		v: {
+			weight: 1,
+			radius: 10,
+			priorByYear: {
+				// Presidential years — national pres margin (R−D, two-party).
+				1992: -5.56,
+				1996: -8.51,
+				2000: -0.51,
+				2004: 2.46,
+				2008: -7.27,
+				2012: -3.86,
+				2016: -2.1,
+				2020: -4.45,
+				2024: 1.48,
+				// Midterm years — SHAVE/Brookings House popular vote.
+				1994: 7.0,
+				1998: 0.9,
+				2002: 4.6,
+				2006: -6.4,
+				2010: 7,
+				2014: 5.06,
+				2018: -8,
+				2022: 1.59,
+			},
+		},
+		qualImp: {
+			weight: 3,
+			radius: 0,
+			// Year-agnostic fallback prior, used for any year not
+			// listed in priorByYear below.  Resolution chain in
+			// historical.html is priorByYear[year] → prior → slider's
+			// CONFIG default value, so `prior` here is the second-
+			// preference target.
+			prior: 0.5,
+			// Per-cycle qualImp priors (= wMod, since this slider is
+			// linear).  Linearly interpolated from 0.25 in 2024 up to
+			// 0.75 in 1992 (Δ = 0.5 / 16 cycles ≈ 0.03125 per cycle,
+			// rounded to 2dp) — captures the prior belief that
+			// candidate quality / personal vote mattered MORE in the
+			// pre-nationalised pre-2010s House.
+			// priorByYear: {
+			// 	2024: 0.25,
+			// 	2022: 0.28,
+			// 	2020: 0.31,
+			// 	2018: 0.34,
+			// 	2016: 0.38,
+			// 	2014: 0.41,
+			// 	2012: 0.44,
+			// 	2010: 0.47,
+			// 	2008: 0.5,
+			// 	2006: 0.53,
+			// 	2004: 0.56,
+			// 	2002: 0.59,
+			// 	2000: 0.63,
+			// 	1998: 0.66,
+			// 	1996: 0.69,
+			// 	1994: 0.72,
+			// 	1992: 0.75,
+			// },
+			// priorByYear: {
+			// 	2024: 0.7, // wMod = 0.49
+			// 	2022: 0.5, // wMod = 0.25
+			// 	2020: 0.55, // wMod = 0.30
+			// 	2018: 0.59, // wMod = 0.35
+			// 	2016: 0.63, // wMod = 0.40
+			// 	2014: 0.67, // wMod = 0.45
+			// 	2012: 0.71, // wMod = 0.50
+			// 	2010: 0.74, // wMod = 0.55
+			// 	2008: 0.77, // wMod = 0.60
+			// 	2006: 0.81, // wMod = 0.65
+			// 	2004: 0.84, // wMod = 0.70
+			// 	2002: 0.87, // wMod = 0.75
+			// 	2000: 0.89, // wMod = 0.80
+			// 	1998: 0.92, // wMod = 0.85
+			// 	1996: 0.95, // wMod = 0.90
+			// 	1994: 0.97, // wMod = 0.95
+			// 	1992: 1.0, // wMod = 1.00 (slider max)
+			// },
+		},
+		sqrtSigmaN: {
+			weight: 0.05,
+			prior: 0.5, // matches the slider's CONFIG default
+			radius: 0,
+		},
+		incumbency: {
+			weight: 0.01,
+			prior: 3, // matches the slider's CONFIG default
+			radius: 10,
+		},
+	},
+
+	// ---------------- AUTO-FIT RANDOM SEARCH (historical.html only) ----------
+	// Sample counts for the two random-search loops in autoFitToYear.
+	//   districtMapSamples — uniform draws across (rGerry, dGerry).  Each
+	//                        eval is a sorted-pool comparison (microseconds),
+	//                        so feel free to crank.
+	//   candidateSamples   — uniform draws across the 9 candidate sliders
+	//                        (intMod safe/swing/opp × D/R, incumbency,
+	//                        qualImp, sqrtSigmaN).  Each eval is a full
+	//                        nsim simulator run, so cost scales linearly:
+	//                        candidateSamples × nsim × per-sim time.
+	autoFitRandomSearch: {
+		districtMapSamples: 300,
+		candidateSamples: 1000,
+	},
+
+	// ---------------- TAIL HEAVINESS (intMod tail + incumbency tail) ----------
+	// Shape exponent applied to every Laplace tail draw before scaling
+	// by the per-block `tail` config.  Controls how extreme the rare
+	// outlier candidates / incumbents are; the per-block `tail`
+	// continues to control AMPLITUDE.  See model.js → tailSample().
+	//   1.0 → Laplace, the historical default.
+	//   1.5 → noticeably heavier than Laplace.
+	//   2.0 → very heavy (stretched-exponential tail, much more
+	//         extreme than Laplace; a single draw can blow up z by
+	//         dozens of pp on the rare end).
+	//   <1  → lighter (toward Gaussian-like as it approaches 0).
+	// Affects ALL tail draws across both the simulator page and the
+	// historical page.  Crank gradually — small bumps from 1.0 already
+	// produce visibly heavier outlier behaviour in the chamber.
+	tailHeaviness: 1,
 
 	// ---------------- CALIBRATION DIAGNOSTICS (historical.html only) ----------
 	// Three diagnostic charts can appear under the simulator-on-year row:
@@ -175,7 +366,7 @@ window.CONFIG = {
 	// to true here to expose them locally; the runtime code ALSO hard-
 	// hides them on any fly.dev / fly.io host so a stray `true` left in
 	// config.js doesn't accidentally leak to the deployed site.
-	showCalibrationPlots: false,
+	showCalibrationPlots: true,
 
 	// ---------------- SIMULATION CONSTANTS -------------------------------------
 	constants: {
@@ -183,7 +374,7 @@ window.CONFIG = {
 		// Simulations per render on the simulator page (index.html).  Larger
 		// = smoother per-bin averages, slower per-drag re-render.  At
 		// ~0.15 ms/sim, 500 sims ≈ 75 ms of pure compute per drag.
-		nsim: 1000,
+		nsim: 3000,
 		// Same idea, but for the historical page (historical.html), which
 		// runs the simulator twice per drag (once on the analytic pool for
 		// the bottom row, once on the selected year's real district pool
@@ -205,31 +396,12 @@ window.CONFIG = {
 		sliderDebounceMs: 80,
 		historicalSliderDebounceMs: 80,
 		sigmaN: 2, // fallback election noise σ if the slider is missing
-		// Election-noise SHAPE.  The actual noise σ comes from the sigmaN
-		// slider; this just picks the unit-variance distribution that gets
-		// scaled by it.
-		noiseType: "bates",
-		// Bates: continuous-N average of Uniform(−1, +1) draws, normalised to
-		// unit variance.  Bounded, bell-shaped, fast.
-		//   N = 1  → Uniform(−√3, +√3)               (flattest)
-		//   N = 2  → triangular
-		//   N = 3  → ≈ Gaussian-on-bounded-support
-		//   N → ∞  → Gaussian
-		bates: { N: 3 },
-		// Tukey lambda: single shape parameter controls the whole family.
-		//   λ = 0     → logistic (heavier than Gaussian)
-		//   λ ≈ 0.14  → ≈ Gaussian
-		//   λ = 0.5   → bounded, sub-Gaussian
-		//   λ = 1     → Uniform(−1, +1)
-		// NOT normalised — the raw draw is multiplied by sigmaN as-is, so
-		// switching to tukey changes the effective noise σ.
-		tukey: { lambda: 0.14 },
 	},
 
 	// ---------------- CANDIDATE BASE MAGNITUDE ---------------------------------
 	// Before any moderation, candidate ideology is a point mass at ±magnitude
 	// (D at −magnitude, R at +magnitude).  All spread comes from
-	// intentionalMod.{safe,swing,opp}.var; all Laplace-tail from .tail.
+	// intentionalMod.{safe,swing,opp}.std; all Laplace-tail from .tail.
 	// At intMod sliders = 0 the chamber is fully deterministic at ±100.
 	candidateMagnitude: 100,
 
@@ -259,7 +431,7 @@ window.CONFIG = {
 		// [-100, 100] regardless of this flag — gerry can be skewed by
 		// `gerryAdv`, which is the whole point.
 		enforceSymmetry: true,
-		components: [{ mean: 0, sigma: 25, weight: 1 }],
+		components: [{ mean: 0, sigma: 30, weight: 1 }],
 	},
 	// `gerry` packs two separate component lists — one per party — and the
 	// `gerryAdv` slider blends between them.  Both lists obey the shared
@@ -290,7 +462,7 @@ window.CONFIG = {
 	// value at slider=default, with no upper clamp):
 	//   - mean: added to the candidate-ideology mean (pulls cD up toward
 	//     0, cR down toward 0).
-	//   - var:  added to the Gaussian-core σ of cD / cR.
+	//   - std:  added to the Gaussian-core σ of cD / cR.
 	//   - tail: added to the Laplace-tail scale of cD / cR.
 	// Each one is multiplied by the slider's SHAPE function in d_i:
 	//   - safe:  shape ≡ 1 (uniform across all districts).
@@ -324,10 +496,13 @@ window.CONFIG = {
 		// make the swing slider do more work per click — auto-fit will
 		// settle at a lower slider position because each unit reaches
 		// further out into not-quite-swing districts.
-		swingBreadthSlope: 4,
+		swingBreadthSlope: 0,
 		// Opp ramp saturation: stretch distance (% points) at which the
 		// linear "deeper-into-opp-territory" effect plateaus.
 		oppSaturation: 20,
+		// (The standalone oppSliderQuadratic flag was retired — see
+		// CONFIG.sliders.intModOpp.quadratic, which sits alongside the
+		// matching intModSafe/intModSwing per-slider flags.)
 		// Per-block added quantities AT slider = default (slider value 1).
 		// Effective value scales linearly with slider position from the
 		// slider's [0, max] range:
@@ -340,35 +515,9 @@ window.CONFIG = {
 		//   var  — added directly to the Gaussian-core σ of cD / cR.
 		//   tail — added directly to the Laplace-tail scale of cD / cR.
 		// The block's shape function in d_i then multiplies each of these.
-		safe: { mean: 8, var: 4, tail: 4 },
-		swing: { mean: 16, var: 8, tail: 2 },
-		opp: { mean: 2, var: 0, tail: 6 },
-	},
-
-	// ---------------- ELECTION-NOISE PER-DISTRICT MODULATION -------------------
-	// The additive election-noise σ (= the sqrtSigmaN slider squared,
-	// scaling a unit-variance bates / tukey draw added to z) gets dialled
-	// UP in safe seats by a saturating linear ramp on |d_i − medianLean|:
-	//
-	//   sigmaN_i = sigmaN · (1 + safeAmp · min(|d_i − medianLean| / safeSaturation, 1))
-	//
-	// Same saturating-ramp shape as `intentionalMod.opp`'s "stretch from
-	// the median", but symmetric around the median so it applies to safe
-	// seats of EITHER party.  Captures the real-world fact that the
-	// margin of victory in a 70-30 seat fluctuates harder year-to-year
-	// than a 51-49 seat — there's no two-way pressure pulling toward the
-	// observed median, so candidate quirks / turnout swings / generic-
-	// ballot drift hit the actual vote share without being washed out by
-	// the close-race tug-of-war.
-	//
-	// Tunables:
-	//   safeAmp        — multiplier of extra noise at full saturation
-	//                    (0 → off; 0.5 → up to 1.5× σ in fully-safe seats).
-	//   safeSaturation — |d_i − medianLean| (% points) where the ramp
-	//                    plateaus.  Anything past this gets the full bump.
-	electionNoise: {
-		safeAmp: 0,
-		safeSaturation: 20,
+		safe: { mean: 8, std: 8, tail: 0 },
+		swing: { mean: 8, std: 0, tail: 0 },
+		opp: { mean: -8, std: 0, tail: 8 },
 	},
 
 	// ---------------- HISTOGRAMS -----------------------------------------------
@@ -415,266 +564,253 @@ window.CONFIG = {
 	//
 	// Generated by `window.batchAutoFitYears({ nsim: 3000 })` (see the
 	// "Regen historical presets recipe" memory note).  Each preset's
-	// final fit metrics are noted in the trailing comment — all are
-	// well under the 0.46 W² calibration ceiling.  Re-run the recipe
-	// after changing CONFIG.historicalSqrtQualImpByYear (or any
-	// structural model knob) to refresh.
+	// final fit metrics are noted in the trailing comment.  Re-run the
+	// recipe after changing CONFIG.autoFitRegularization (priors or
+	// weights), tailHeaviness, autoFitWinnerLoss, or any other
+	// structural knob to refresh.  The batch helper resets every
+	// slider to its CONFIG default before each year so each cycle
+	// starts from a clean
+	// baseline (qualImp gets re-seeded from the per-year map by
+	// autoFitToYear immediately after the reset).
 	historicalPresets: {
 		1992: {
 			v: -5.2,
-			rGerry: 0.21,
-			dGerry: 0.166,
-			urbanGerry: 0.005,
-			dIntModSafe: 1.5,
-			rIntModSafe: 1.35,
-			dIntModSwing: 1.4,
-			rIntModSwing: 1.4,
-			dIntModOpp: 0.8,
-			rIntModOpp: 1.3,
-			sqrtQualImp: 0.99,
-			sqrtSigmaN: 0.7,
+			rGerry: 0.198,
+			dGerry: 0.16,
+			dIntModSafe: 1.15,
+			rIntModSafe: 1.2,
+			dIntModSwing: 1.5,
+			rIntModSwing: 1.6,
+			dIntModOpp: 2.9,
+			rIntModOpp: 0.9,
+			qualImp: 0.9801,
+			sqrtSigmaN: 1.4,
 			incumbency: 4,
-		}, // medianΔ=0.00 Δ=7.08 W²=0.05
+		}, // medianΔ=0.10 pp · Δ=7.07 pp · W²=1.78
 		1994: {
 			v: 7,
-			rGerry: 0.21,
-			dGerry: 0.166,
-			urbanGerry: 0.005,
-			dIntModSafe: 1.5,
-			rIntModSafe: 1.4,
-			dIntModSwing: 1.6,
-			rIntModSwing: 1.35,
-			dIntModOpp: 0.35,
-			rIntModOpp: 0.55,
-			sqrtQualImp: 0.95,
-			sqrtSigmaN: 0.3,
-			incumbency: 3.25,
-		}, // medianΔ=0.00 Δ=7.08 W²=0.05
+			rGerry: 0.198,
+			dGerry: 0.16,
+			dIntModSafe: 1.15,
+			rIntModSafe: 1.25,
+			dIntModSwing: 1.75,
+			rIntModSwing: 1.5,
+			dIntModOpp: 2.85,
+			rIntModOpp: 0.15,
+			qualImp: 0.9801,
+			sqrtSigmaN: 1.4,
+			incumbency: 5.75,
+		}, // medianΔ=0.10 pp · Δ=7.07 pp · W²=0.58
 		1996: {
 			v: 0.4,
-			rGerry: 0.214,
-			dGerry: 0.166,
-			urbanGerry: 0.005,
-			dIntModSafe: 1.6,
+			rGerry: 0.204,
+			dGerry: 0.16,
+			dIntModSafe: 1.2,
 			rIntModSafe: 1.4,
-			dIntModSwing: 1.4,
+			dIntModSwing: 1.55,
 			rIntModSwing: 1.5,
-			dIntModOpp: 0.15,
-			rIntModOpp: 1.1,
-			sqrtQualImp: 0.96,
-			sqrtSigmaN: 0.6,
-			incumbency: 1.25,
-		}, // medianΔ=0.01 Δ=6.15 W²=0.07
+			dIntModOpp: 2.1,
+			rIntModOpp: 0.25,
+			qualImp: 0.9801,
+			sqrtSigmaN: 1.1,
+			incumbency: 5.75,
+		}, // medianΔ=0.02 pp · Δ=6.16 pp · W²=0.33
 		1998: {
 			v: 0.9,
-			rGerry: 0.214,
-			dGerry: 0.164,
-			urbanGerry: 0.005,
-			dIntModSafe: 1.6,
-			rIntModSafe: 1.4,
-			dIntModSwing: 1.7,
-			rIntModSwing: 1.5,
-			dIntModOpp: 0.2,
-			rIntModOpp: 1.6,
-			sqrtQualImp: 0.92,
-			sqrtSigmaN: 0.4,
-			incumbency: 4.5,
-		}, // medianΔ=0.00 Δ=6.39 W²=0.05
+			rGerry: 0.204,
+			dGerry: 0.16,
+			dIntModSafe: 1.5,
+			rIntModSafe: 1.65,
+			dIntModSwing: 2.1,
+			rIntModSwing: 1.9,
+			dIntModOpp: 2.4,
+			rIntModOpp: 0.25,
+			qualImp: 0.9801,
+			sqrtSigmaN: 0.8,
+			incumbency: 5.75,
+		}, // medianΔ=0.10 pp · Δ=6.41 pp · W²=0.28
 		2000: {
 			v: 0.3,
-			rGerry: 0.214,
-			dGerry: 0.164,
-			urbanGerry: 0.005,
-			dIntModSafe: 1.6,
-			rIntModSafe: 1.4,
-			dIntModSwing: 1.5,
-			rIntModSwing: 1.5,
-			dIntModOpp: 0.75,
-			rIntModOpp: 2.3,
-			sqrtQualImp: 0.89,
+			rGerry: 0.208,
+			dGerry: 0.16,
+			dIntModSafe: 1.4,
+			rIntModSafe: 1.65,
+			dIntModSwing: 2.25,
+			rIntModSwing: 2.55,
+			dIntModOpp: 2.75,
+			rIntModOpp: 0.15,
+			qualImp: 0.9801,
 			sqrtSigmaN: 0.4,
-			incumbency: 4.75,
-		}, // medianΔ=0.05 Δ=5.00 W²=0.07
+			incumbency: 6,
+		}, // medianΔ=0.05 pp · Δ=5.08 pp · W²=0.37
 		2002: {
 			v: 4.6,
-			rGerry: 0.255,
-			dGerry: 0.164,
-			urbanGerry: 0.005,
-			dIntModSafe: 1.6,
-			rIntModSafe: 1.4,
-			dIntModSwing: 1.8,
-			rIntModSwing: 1.5,
-			dIntModOpp: 1.4,
-			rIntModOpp: 2.65,
-			sqrtQualImp: 0.87,
-			sqrtSigmaN: 0.9,
-			incumbency: 6,
-		}, // medianΔ=0.02 Δ=4.14 W²=0.04
+			rGerry: 0.248,
+			dGerry: 0.16,
+			dIntModSafe: 1.7,
+			rIntModSafe: 1.7,
+			dIntModSwing: 2,
+			rIntModSwing: 2.75,
+			dIntModOpp: 2.75,
+			rIntModOpp: 0.05,
+			qualImp: 0.9801,
+			sqrtSigmaN: 0.4,
+			incumbency: 5.75,
+		}, // medianΔ=0.03 pp · Δ=4.22 pp · W²=0.21
 		2004: {
 			v: 2.6,
-			rGerry: 0.255,
-			dGerry: 0.164,
-			urbanGerry: 0.005,
-			dIntModSafe: 1.6,
-			rIntModSafe: 1.4,
-			dIntModSwing: 2,
-			rIntModSwing: 1.6,
-			dIntModOpp: 2.25,
-			rIntModOpp: 2.5,
-			sqrtQualImp: 0.84,
-			sqrtSigmaN: 0.9,
-			incumbency: 3.25,
-		}, // medianΔ=0.05 Δ=4.03 W²=0.19
+			rGerry: 0.248,
+			dGerry: 0.16,
+			dIntModSafe: 1.5,
+			rIntModSafe: 1.45,
+			dIntModSwing: 2.5,
+			rIntModSwing: 2.95,
+			dIntModOpp: 2.95,
+			rIntModOpp: 0.05,
+			qualImp: 0.9604,
+			sqrtSigmaN: 0.7,
+			incumbency: 5.75,
+		}, // medianΔ=0.05 pp · Δ=4.14 pp · W²=0.30
 		2006: {
 			v: -6.4,
-			rGerry: 0.265,
-			dGerry: 0.164,
-			urbanGerry: 0.005,
-			dIntModSafe: 1.6,
-			rIntModSafe: 1.4,
-			dIntModSwing: 1.5,
-			rIntModSwing: 1.6,
-			dIntModOpp: 1.4,
-			rIntModOpp: 2.85,
-			sqrtQualImp: 0.83,
-			sqrtSigmaN: 0.5,
-			incumbency: 1,
-		}, // medianΔ=0.09 Δ=4.09 W²=0.09
+			rGerry: 0.259,
+			dGerry: 0.16,
+			dIntModSafe: 1.3,
+			rIntModSafe: 1.5,
+			dIntModSwing: 1.7,
+			rIntModSwing: 2.25,
+			dIntModOpp: 2.85,
+			rIntModOpp: 0.3,
+			qualImp: 0.8649,
+			sqrtSigmaN: 0.8,
+			incumbency: 6,
+		}, // medianΔ=0.05 pp · Δ=4.20 pp · W²=0.56
 		2008: {
 			v: -9.5,
 			rGerry: 0.214,
-			dGerry: 0.153,
-			urbanGerry: 0.01,
-			dIntModSafe: 1.4,
-			rIntModSafe: 1.4,
-			dIntModSwing: 1,
-			rIntModSwing: 1.5,
-			dIntModOpp: 1.85,
-			rIntModOpp: 1.15,
-			sqrtQualImp: 0.78,
-			sqrtSigmaN: 1,
-			incumbency: 6.5,
-		}, // medianΔ=0.09 Δ=3.91 W²=0.14
+			dGerry: 0.16,
+			dIntModSafe: 1.3,
+			rIntModSafe: 1.5,
+			dIntModSwing: 2.25,
+			rIntModSwing: 2.9,
+			dIntModOpp: 2.8,
+			rIntModOpp: 1.2,
+			qualImp: 0.7921,
+			sqrtSigmaN: 0.9,
+			incumbency: 5.75,
+		}, // medianΔ=0.07 pp · Δ=4.23 pp · W²=0.24
 		2010: {
 			v: 5.1,
-			rGerry: 0.225,
-			dGerry: 0.153,
-			urbanGerry: 0.01,
-			dIntModSafe: 1.4,
-			rIntModSafe: 1.35,
+			rGerry: 0.221,
+			dGerry: 0.16,
+			dIntModSafe: 1.05,
+			rIntModSafe: 1.25,
 			dIntModSwing: 1.6,
-			rIntModSwing: 1.45,
-			dIntModOpp: 1.15,
-			rIntModOpp: 0.8,
-			sqrtQualImp: 0.72,
-			sqrtSigmaN: 1.1,
-			incumbency: 2.5,
-		}, // medianΔ=0.00 Δ=3.86 W²=0.03
+			rIntModSwing: 1.8,
+			dIntModOpp: 2.75,
+			rIntModOpp: 0.15,
+			qualImp: 0.6561,
+			sqrtSigmaN: 0.8,
+			incumbency: 5.5,
+		}, // medianΔ=0.07 pp · Δ=4.18 pp · W²=0.27
 		2012: {
 			v: -2.4,
 			rGerry: 0.265,
-			dGerry: 0.153,
-			urbanGerry: 0.01,
-			dIntModSafe: 1.4,
-			rIntModSafe: 1.3,
-			dIntModSwing: 1.75,
+			dGerry: 0.164,
+			dIntModSafe: 1.05,
+			rIntModSafe: 1.15,
+			dIntModSwing: 1.6,
 			rIntModSwing: 1.5,
-			dIntModOpp: 0.15,
-			rIntModOpp: 1.05,
-			sqrtQualImp: 0.71,
+			dIntModOpp: 2.25,
+			rIntModOpp: 0.6,
+			qualImp: 0.5776,
 			sqrtSigmaN: 1,
-			incumbency: 0.75,
-		}, // medianΔ=0.02 Δ=4.76 W²=0.03
+			incumbency: 5.75,
+		}, // medianΔ=0.04 pp · Δ=5.14 pp · W²=0.19
 		2014: {
 			v: 5.1,
 			rGerry: 0.259,
-			dGerry: 0.149,
-			urbanGerry: 0.01,
-			dIntModSafe: 1.4,
+			dGerry: 0.16,
+			dIntModSafe: 1.15,
 			rIntModSafe: 1.25,
-			dIntModSwing: 1.95,
-			rIntModSwing: 1.6,
-			dIntModOpp: 1.3,
-			rIntModOpp: 2.55,
-			sqrtQualImp: 0.67,
-			sqrtSigmaN: 0.8,
-			incumbency: 0.75,
-		}, // medianΔ=0.07 Δ=4.55 W²=0.05
+			dIntModSwing: 2,
+			rIntModSwing: 1.8,
+			dIntModOpp: 2.95,
+			rIntModOpp: 0.65,
+			qualImp: 0.5329,
+			sqrtSigmaN: 0.7,
+			incumbency: 5.75,
+		}, // medianΔ=0.05 pp · Δ=4.93 pp · W²=0.15
 		2016: {
 			v: 1.6,
-			rGerry: 0.242,
+			rGerry: 0.238,
 			dGerry: 0.16,
-			urbanGerry: 0.005,
-			dIntModSafe: 1.4,
-			rIntModSafe: 1.15,
-			dIntModSwing: 1.65,
-			rIntModSwing: 1.65,
-			dIntModOpp: 1.5,
-			rIntModOpp: 2.3,
-			sqrtQualImp: 0.63,
-			sqrtSigmaN: 1.1,
-			incumbency: 1.5,
-		}, // medianΔ=0.06 Δ=6.18 W²=0.03
+			dIntModSafe: 1.1,
+			rIntModSafe: 1.25,
+			dIntModSwing: 2.1,
+			rIntModSwing: 2.1,
+			dIntModOpp: 2.8,
+			rIntModOpp: 1,
+			qualImp: 0.4489,
+			sqrtSigmaN: 1,
+			incumbency: 6,
+		}, // medianΔ=0.05 pp · Δ=6.39 pp · W²=0.32
 		2018: {
 			v: -7.3,
-			rGerry: 0.252,
+			rGerry: 0.248,
 			dGerry: 0.16,
-			urbanGerry: 0.005,
-			dIntModSafe: 1.4,
+			dIntModSafe: 1.15,
 			rIntModSafe: 1.2,
-			dIntModSwing: 1.4,
-			rIntModSwing: 1.6,
-			dIntModOpp: 1.05,
-			rIntModOpp: 1.4,
-			sqrtQualImp: 0.58,
-			sqrtSigmaN: 1.4,
-			incumbency: 1.25,
-		}, // medianΔ=0.03 Δ=5.78 W²=0.03
+			dIntModSwing: 2.1,
+			rIntModSwing: 1.55,
+			dIntModOpp: 1.85,
+			rIntModOpp: 2.45,
+			qualImp: 0.4225,
+			sqrtSigmaN: 1.1,
+			incumbency: 3.75,
+		}, // medianΔ=0.03 pp · Δ=5.98 pp · W²=0.19
 		2020: {
 			v: -2.1,
-			rGerry: 0.214,
+			rGerry: 0.21,
 			dGerry: 0.16,
-			urbanGerry: 0.005,
-			dIntModSafe: 1.4,
-			rIntModSafe: 1.25,
-			dIntModSwing: 1.5,
-			rIntModSwing: 1.6,
-			dIntModOpp: 1.05,
-			rIntModOpp: 1.4,
-			sqrtQualImp: 0.55,
-			sqrtSigmaN: 1.1,
-			incumbency: 7,
-		}, // medianΔ=0.02 Δ=5.95 W²=0.15
+			dIntModSafe: 1,
+			rIntModSafe: 1,
+			dIntModSwing: 1.4,
+			rIntModSwing: 1.1,
+			dIntModOpp: 1.1,
+			rIntModOpp: 1,
+			qualImp: 0.3136,
+			sqrtSigmaN: 0.8,
+			incumbency: 3.75,
+		}, // medianΔ=0.04 pp · Δ=6.14 pp · W²=0.07
 		2022: {
 			v: 1.6,
-			rGerry: 0.214,
+			rGerry: 0.21,
 			dGerry: 0.16,
-			urbanGerry: 0.005,
-			dIntModSafe: 1.4,
+			dIntModSafe: 1.2,
 			rIntModSafe: 1.2,
-			dIntModSwing: 2,
-			rIntModSwing: 1.5,
-			dIntModOpp: 0.9,
-			rIntModOpp: 1.8,
-			sqrtQualImp: 0.49,
-			sqrtSigmaN: 1,
-			incumbency: 3.25,
-		}, // medianΔ=0.01 Δ=5.62 W²=0.04
+			dIntModSwing: 2.85,
+			rIntModSwing: 1.85,
+			dIntModOpp: 2.5,
+			rIntModOpp: 2,
+			qualImp: 0.2916,
+			sqrtSigmaN: 0.6,
+			incumbency: 5,
+		}, // medianΔ=0.03 pp · Δ=5.83 pp · W²=0.08
 		2024: {
 			v: 2.2,
-			rGerry: 0.194,
-			dGerry: 0.164,
-			urbanGerry: 0.005,
-			dIntModSafe: 1.35,
-			rIntModSafe: 1.15,
-			dIntModSwing: 1.5,
-			rIntModSwing: 1.4,
-			dIntModOpp: 0.45,
-			rIntModOpp: 1.4,
-			sqrtQualImp: 0.45,
-			sqrtSigmaN: 0.6,
-			incumbency: 1.75,
-		}, // medianΔ=0.02 Δ=4.61 W²=0.04
+			rGerry: 0.187,
+			dGerry: 0.16,
+			dIntModSafe: 1.1,
+			rIntModSafe: 1.1,
+			dIntModSwing: 2.05,
+			rIntModSwing: 1.3,
+			dIntModOpp: 1.55,
+			rIntModOpp: 1.9,
+			qualImp: 0.2025,
+			sqrtSigmaN: 0.9,
+			incumbency: 3.75,
+		}, // medianΔ=0.05 pp · Δ=4.78 pp · W²=0.18
 	},
 
 	// ---------------- PRESETS --------------------------------------------------
@@ -703,7 +839,7 @@ window.CONFIG = {
 			rIntModSwing: 0.5,
 			dIntModOpp: 1,
 			rIntModOpp: 1,
-			sqrtQualImp: 0.45,
+			qualImp: 0.2025,
 			sqrtSigmaN: 0.5,
 		},
 		// Demo of the gerry → less-extreme-median effect.
@@ -731,7 +867,7 @@ window.CONFIG = {
 			rIntModSwing: 0,
 			dIntModOpp: 0,
 			rIntModOpp: 0,
-			sqrtQualImp: 0, // wMod = 0 → no candidate-ideology pull on z
+			qualImp: 0.0, // wMod = 0 → no candidate-ideology pull on z
 			sigmaN: 5,
 		},
 	},

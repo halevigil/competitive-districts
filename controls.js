@@ -29,12 +29,17 @@
 		"rIntModSwing",
 		"dIntModOpp",
 		"rIntModOpp",
-		"sqrtQualImp",
+		"qualImp",
 		"sqrtSigmaN",
 		// Historical-only knob (per-district incumbency boost on the
 		// simulator-on-year row).  index.html doesn't render the
 		// slider element so wireSlider just no-ops there.
 		"incumbency",
+		// Historical-only PVI-weight sliders (gated behind
+		// CONFIG.pviWeightSliders.enabled — when off, the slider DOM
+		// elements are absent and wireSlider no-ops).
+		"presPrevWeight",
+		"midtermPrevWeight",
 	];
 
 	// Pairs of sliders that share a "move both together" pin checkbox.  When
@@ -94,15 +99,31 @@
 		const safeDef = cfg.sliders.dIntModSafe.value;
 		const swingDef = cfg.sliders.dIntModSwing.value;
 		const oppDef = cfg.sliders.dIntModOpp.value;
-		const resolveBlock = (block, bD, bR, def) => {
+		// Per-slider quadratic flags — applySliderAttributes expands
+		// the shared intModSafe/Swing/Opp config blocks into d/r pairs
+		// and copies every field across, so the flag is available on
+		// either side; read off the D side by convention.
+		const safeQuad = !!cfg.sliders.dIntModSafe.quadratic;
+		const swingQuad = !!cfg.sliders.dIntModSwing.quadratic;
+		const oppQuad = !!cfg.sliders.dIntModOpp.quadratic;
+		const resolveBlock = (block, bD, bR, def, quadratic) => {
 			const bk = block || {};
-			const sD = bD / def;
-			const sR = bR / def;
+			// When the slider's default is 0 (e.g. dIntModOpp.value=0
+			// to disable opp-moderation by default), treat the slider
+			// value itself as the per-party multiplier — bD/0 would
+			// otherwise be NaN/Infinity and poison every cD/cR draw.
+			let sD = def !== 0 ? bD / def : bD;
+			let sR = def !== 0 ? bR / def : bR;
+			// Optional quadratic scaling (CONFIG.sliders.intModX.
+			// quadratic): perceptual slider stays linear,
+			// multiplier grows as slider²/def² — finer resolution at
+			// the low end.
+			if (quadratic) { sD = sD * sD; sR = sR * sR; }
 			return {
 				meanD: sD * (bk.mean ?? 0),
 				meanR: sR * (bk.mean ?? 0),
-				varD: sD * (bk.var ?? 0),
-				varR: sR * (bk.var ?? 0),
+				stdD: sD * (bk.std ?? 0),
+				stdR: sR * (bk.std ?? 0),
 				tailD: sD * (bk.tail ?? 0),
 				tailR: sR * (bk.tail ?? 0),
 			};
@@ -115,20 +136,20 @@
 			sqrtSigmaN: document.getElementById("sqrtSigmaN")
 				? num("sqrtSigmaN")
 				: CONST.sqrtSigmaN,
-			noiseType: CONST.noiseType ?? "bates",
-			batesN: CONST.bates?.N ?? 3,
-			tukeyLambda: CONST.tukey?.lambda ?? 0.14,
+			// Tail-shape exponent for the intMod var/tail blocks +
+			// incumbency tail.  1 = Laplace (current); >1 = heavier.
+			// See model.js tailSample().
+			tailHeaviness: cfg.tailHeaviness ?? 1,
 			rGerry: num("rGerry"),
 			dGerry: num("dGerry"),
 			base: cfg.districtBase,
 			gerry: cfg.districtGerry,
 			muD: -magnitude,
 			muR: +magnitude,
-			// wMod = sqrtQualImp²; the slider stores √wMod so its
-			// perceptual scale is linear (same convention as
-			// sqrtSigmaN → sigmaN).
-			wMod: num("sqrtQualImp") ** 2,
-			safe: resolveBlock(im.safe, bDSafe, bRSafe, safeDef),
+			// wMod is the strength of the candidate-quality penalty
+			// (linear in this slider; same units as the old wMod knob).
+			wMod: num("qualImp"),
+			safe: resolveBlock(im.safe, bDSafe, bRSafe, safeDef, safeQuad),
 			swing: (() => {
 				// Per-party effective bell breadth: anchored at swingBreadth
 				// when the slider sits at its default, then nudged by
@@ -139,7 +160,7 @@
 				const bSlope = im.swingBreadthSlope ?? 0;
 				const breadth = (b) => Math.max(0.5, bAnchor + bSlope * (b / swingDef - 1));
 				return Object.assign(
-					resolveBlock(im.swing, bDSwing, bRSwing, swingDef),
+					resolveBlock(im.swing, bDSwing, bRSwing, swingDef, swingQuad),
 					{
 						offset: im.swingOffset ?? 0,
 						breadthD: breadth(bDSwing),
@@ -148,18 +169,10 @@
 				);
 			})(),
 			opp: Object.assign(
-				resolveBlock(im.opp, bDOpp, bROpp, oppDef),
+				resolveBlock(im.opp, bDOpp, bROpp, oppDef, oppQuad),
 				{ saturation: im.oppSaturation ?? 20 }
 			),
 			waveWeight: im.waveWeight ?? 0,
-			// Per-district election-noise modulation: amplify σ in safe
-			// seats via the same saturating-ramp shape as opp, anchored
-			// at medianLean and symmetric (either-party safe).  See
-			// `electionNoise` in config.js for the math.
-			electionNoise: {
-				safeAmp: cfg.electionNoise?.safeAmp ?? 0,
-				safeSaturation: Math.max(0.5, cfg.electionNoise?.safeSaturation ?? 20),
-			},
 		};
 	}
 
