@@ -189,10 +189,10 @@
 <!-- =============== LEFT: parameter controls =============== -->
 <!-- The panel mirrors index.html's controls verbatim (same slider IDs,
      same pin checkboxes, same preset container) so controls.js can wire
-     it up identically.  Stats line at the top is the simulator's
-     summary of the most recent run (driven by onRun below). -->
+     it up identically.  Unlike index.html there's no top-of-sidebar
+     stats card here — the historical page's chamber stats live under
+     the simulator-on-real-districts chart (see #simOnYearStats). -->
 <div class="sidebar">
-  <div class="panel stats" id="stats">Running…</div>
   <div class="panel controls" id="controls">
     <h3>Election Environment</h3>
     <div class="row">
@@ -1023,17 +1023,10 @@ function renderYearChart(divId, year, stats, yMax) {
     `D-won ${nD}, R-won ${nR}`,
     `median lean ${formatLean(medRel)}`,
   ];
-  // National House popular-vote margin for the year — SHAVE-adjusted for
-  // 2008+, Brookings Vital-Stats exclusion-adjusted for earlier cycles
-  // (Split Ticket's SHAVE series only goes back to 2008).  Shown in the
-  // title so the reader can compare a year's chamber composition against
-  // what voters actually did nationally.
-  const housePV = HOUSE_POPVOTE_MARGIN[year];
-  if (housePV != null) {
-    titleParts.push(
-      `House PV ${formatLean(housePV)} (${housePopVoteSource(year)})`
-    );
-  }
+  // (The "House PV X.X (SHAVE/Brookings)" line that used to live in
+  // this title was removed; the autoFit-regularisation prior for `v`
+  // already encodes the same per-year national-margin info.)
+
   // One coloured cell per district.  Lean is the X-bin, actual House
   // margin is the colour (dark blue = D blowout, dark red = R blowout,
   // near-white = toss-up).
@@ -1199,10 +1192,11 @@ function renderSimOnYear(year, yearStats, yMax) {
   // seat counts + median lean); line 2 is the goodness-of-fit metric —
   // mean CRPS over contested districts (units: pp), which is also what
   // the auto-fit optimiser is minimising.
+  // (Median lean is dropped here — the simulator runs on the same
+  // real-cycle pool whose median already shows in the top year row.)
   const headerLine = [
     `<b>Simulator on ${year} districts</b>`,
     `D-won ${totalD.toFixed(1)}, R-won ${totalR.toFixed(1)}`,
-    `median lean ${formatLean(med)}`,
   ].join(' &nbsp;·&nbsp; ');
   let titleText = headerLine;
   // Mean CRPS over contested districts (NaN-skipping).  This is the

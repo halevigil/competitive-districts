@@ -848,9 +848,9 @@ window.CONFIG = {
 			v: 1.5,
 			rGerry: 0.197,
 			dGerry: 0.172,
-			dIntModSafe: 0.6,
+			dIntModSafe: 0.5,
 			rIntModSafe: 0.9,
-			dIntModSwing: 1.25,
+			dIntModSwing: 1.43,
 			rIntModSwing: 0.75,
 			dIntModOpp: 0.95,
 			rIntModOpp: 1.3,
@@ -873,24 +873,12 @@ window.CONFIG = {
 	// `default + slider.max`.  Asymmetric values automatically uncheck
 	// the relevant pin checkbox.
 	presets: {
-		"Approximate 2024 Election": {
-			// Hand-tuned for the simulator page's synthetic-chamber
-			// view (different from CONFIG.historicalPresets[2024],
-			// which is auto-fit to the REAL 2024 districts and uses
-			// incumbency — neither concept exists here).  v pinned to
-			// the year's SHAVE-adjusted House popular-vote margin.
-			v: 1.5,
-			rGerry: 0.195,
-			dGerry: 0.165,
-			dIntModSafe: 1,
-			rIntModSafe: 1,
-			dIntModSwing: 1.4,
-			rIntModSwing: 0.5,
-			dIntModOpp: 1,
-			rIntModOpp: 1,
-			qualImp: 0.25,
-			sqrtSigmaN: 0.5,
-		},
+		// "Approximate 2024 Election" is injected after the CONFIG
+		// literal closes (see bottom of this file).  It mirrors
+		// `historicalPresets[2024]` minus the historical-only fields
+		// (incumbency, presPrevWeight, midtermPrevWeight), so any
+		// auto-fit re-tune of the historical 2024 preset automatically
+		// flows through to the simulator's quick-start button.
 		// Demo of the gerry → less-extreme-median effect.
 		// With ambMod maxed out (very wide candidate spreads), a small
 		// popular-vote tilt (v = +3% R) and gerry = 0, R sweeps the swing
@@ -921,3 +909,19 @@ window.CONFIG = {
 		},
 	},
 };
+
+// Derive the simulator-page "Approximate 2024 Election" preset from the
+// historical-page 2024 auto-fit so retuning the latter automatically
+// updates the simulator's quick-start button.  Strips the historical-
+// only fields (incumbency, presPrevWeight, midtermPrevWeight) that
+// don't exist as simulator-page sliders — index.html's preset wiring
+// would skip them anyway, but cleaner not to pass them through.
+(function syncSim2024PresetFromHistorical() {
+	const h =
+		window.CONFIG.historicalPresets &&
+		window.CONFIG.historicalPresets[2024];
+	if (!h) return;
+	const { incumbency, presPrevWeight, midtermPrevWeight, ...simFields } = h;
+	window.CONFIG.presets = window.CONFIG.presets || {};
+	window.CONFIG.presets["Approximate 2024 Election"] = simFields;
+})();
